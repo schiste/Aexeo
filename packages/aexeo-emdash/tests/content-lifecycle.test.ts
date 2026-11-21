@@ -1096,3 +1096,52 @@ describe("sitewide refresh coverage", () => {
     expect((store.get(findingsKey("*")) as { assessment?: unknown }).assessment).toBeUndefined();
   });
 });
+
+describe("fragment assessment lifecycle", () => {
+  it("keeps fragment sources aligned when a refresh removes colliding routes", async () => {
+    const first = item("first", OLD);
+    const duplicate = item("duplicate", OLD);
+    const survivor = item("survivor", OLD);
+    const { ctx } = host([first, duplicate, survivor]);
+    ctx.content.getPublicUrl = async (_collection, id) => `https://example.com/${id === "survivor" ? id : "collision"}`;
+    const seen: string[] = [];
+    const evaluator: EvaluatorFn = async (documents, context) => {
+      expect(documents.map((document) => document.route)).toEqual(["/survivor"]);
+      seen.push(...(context?.sourceItems ?? []).map((source) => source?.id ?? "missing"));
+      return { ok: true, findings: [] };
+    };
+    evaluator.captureSourceItem = (source) => structuredClone(source);
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    expect(seen).toEqual(["survivor"]);
+  });
+
+  it("renders independent fragment status and clears it after an evaluation error", async () => {
+    const { ctx } = host();
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [], fragments: {
+      "/a": [{ field: "intro", preset: "fragment", status: "not_checked", reason: "fragment_field_unavailable" }],
+    } });
+    await save(ctx, item("a", OLD), evaluator);
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("Fragment intro: not checked (fragment_field_unavailable)");
+    await save(ctx, item("a", NEW), async () => ({ ok: false, reason: "unavailable", detail: "test" }));
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).not.toContain("Fragment intro");
+  });
+
+  it("captures the source before a slow host URL lookup", async () => {
+    const { ctx } = host();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    ctx.content.getPublicUrl = async () => { await gate; return "https://example.com/a"; };
+    const source = item("a", OLD, "first");
+    let seen: unknown;
+    const evaluator: EvaluatorFn = async (_documents, context) => {
+      seen = context?.sourceItems?.[0]?.data.title;
+      return { ok: true, findings: [] };
+    };
+    evaluator.captureSourceItem = (value) => structuredClone(value);
+    const pending = save(ctx, source, evaluator);
+    source.data.title = "changed";
+    release();
+    await pending;
+    expect(seen).toBe("first");
+  });
+});

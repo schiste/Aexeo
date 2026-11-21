@@ -67,7 +67,7 @@ export interface AexeoPluginOptions {
   /** Request historical revision access on a compatible EmDash host. */
   revisionAudits?: boolean;
   /** Add a portable content preset to configured-mode evaluation. */
-  contentPreset?: { name: string; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; fragmentFieldsByCollection?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[] };
+  contentPreset?: { name: string; autoAuditFragments?: boolean; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; fragmentFieldsByCollection?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[] };
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep

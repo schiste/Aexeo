@@ -249,7 +249,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
   // throws on empty rules ({} with neither routePattern nor ruleIds);
   // that error surfaces clearly in the host's startup logs.
   const suppressionFilter = compileSuppressions(options.suppressions);
-  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry, runtime.evidenceSources, runtime.onEvidenceSourceTelemetry, runtime.onPresetSelectionTelemetry);
+  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry, runtime.evidenceSources, runtime.onEvidenceSourceTelemetry, runtime.onPresetSelectionTelemetry, options.blockMappings);
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need

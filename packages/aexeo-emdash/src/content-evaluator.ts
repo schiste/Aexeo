@@ -1,5 +1,7 @@
 import { emptyPresetSelectionCounts, selectContentPreset, type PresetSelectionCounts } from "./preset-selection.js";
 import { emitTelemetry } from "./telemetry.js";
+import { evaluateFragments, type FragmentAssessment } from "./fragment-evaluation.js";
+import type { CustomBlockMappings } from "./adapter.js";
 import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult, LinkDestinationProjection, BoundLinkObservations } from "./content.js";
 import type { EvaluatorFn } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
@@ -11,7 +13,9 @@ export interface ContentPresetOptions {
   byCollection?: Record<string, string>;
   byLocale?: Record<string, string>;
   byCollectionLocale?: Record<string, Record<string, string>>;
-  /** Explicit field-to-preset mappings for revision fragment audits. */
+  /** Opt in to independent fragment evaluations during saves and refreshes. */
+  autoAuditFragments?: boolean;
+  /** Explicit field-to-preset mappings for fragment audits. */
   fragmentFieldsByCollection?: Record<string, Record<string, string>>;
   /** Restrict preset evaluation to these collections; site checks still run for all. */
   collections?: readonly string[];
@@ -85,6 +89,7 @@ export function withContentPreset(
   evidenceProvider?: EvidenceSourceProvider,
   onEvidenceSourceTelemetry?: (event: EvidenceSourceTelemetry) => void,
   onPresetSelectionTelemetry?: (event: PresetSelectionTelemetry) => void,
+  fragmentBlockMappings?: CustomBlockMappings,
 ): EvaluatorFn {
   if (!preset) return async (documents, context) => {
     const result = await base(documents, context);
@@ -95,11 +100,17 @@ export function withContentPreset(
     }
     return { ...result, assessments };
   };
-  return async (documents, context) => {
+  const wrapped: EvaluatorFn = async (documents, context) => {
+    // Capture field data before awaiting the base evaluator. A host may reuse
+    // mutable event objects while the evaluation is in flight.
+    const sourceSnapshots = preset.autoAuditFragments === true ? context?.sourceItems?.map((item) => {
+      try { return structuredClone(item); } catch { return undefined; }
+    }) : undefined;
     const result = await base(documents, context);
     if (!result.ok) return result;
     const findings = [...result.findings];
     const assessments = { ...result.assessments };
+    const fragments: Record<string, FragmentAssessment[]> = Object.create(null);
     const selectionCounts = onPresetSelectionTelemetry ? emptyPresetSelectionCounts() : undefined;
     let selectionStatus: PresetSelectionTelemetry["status"] = "error";
     try {
@@ -214,6 +225,9 @@ export function withContentPreset(
           gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason, measurements }) =>
             ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
         };
+        if (preset.autoAuditFragments === true && collection !== undefined) {
+          fragments[document.route] = await evaluateFragments(document, collection, sourceSnapshots?.[index], preset, evaluate, fragmentBlockMappings);
+        }
         const locations = new Map((report.source_locations ?? []).map((location) => [
           `${location.gate_id}:${location.finding_index}`, location,
         ]));
@@ -224,11 +238,15 @@ export function withContentPreset(
         }));
       }
       selectionStatus = "success";
-      return { ok: true, findings, assessments };
+      return { ok: true, findings, assessments, ...(preset.autoAuditFragments === true ? { fragments } : {}) };
     } catch (error) {
       return { ok: false, reason: "content_preset_error", detail: error instanceof Error ? error.message : String(error) };
     } finally {
       if (selectionCounts && onPresetSelectionTelemetry) emitTelemetry(onPresetSelectionTelemetry, { counts: selectionCounts, status: selectionStatus });
     }
   };
+  if (preset.autoAuditFragments === true) wrapped.captureSourceItem = (item) => {
+    try { return structuredClone(item); } catch { return undefined; }
+  };
+  return wrapped;
 }

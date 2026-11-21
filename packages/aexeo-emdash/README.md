@@ -309,3 +309,34 @@ separate, non-transactional writes: a history submission may exist even if updat
 the current record failed, and concurrent ordering is not guaranteed. These
 annotations are advisory and cannot authorize publication or provide a tamper-proof
 audit trail.
+
+### Automatic field-level editorial audits
+
+A configured plugin can evaluate selected CMS fields as independent fragments
+on save and refresh. This is opt-in; the existing whole-document assessment
+and its findings remain separate. Use a fragment-specific preset rather than
+applying full-page requirements to an introduction or other short field:
+
+```ts
+createPlugin({
+  contentPreset: {
+    name: "article",
+    autoAuditFragments: true,
+    fragmentFieldsByCollection: {
+      blog_posts: { introduction: "fragment-readable", excerpt: "fragment-readable" },
+    },
+  },
+});
+```
+
+Preset names can refer to shipped presets or to `sources` configured by the
+host. Each fragment has its own gate statuses, findings and source locations in
+the document panel. A missing field, invalid mapping or evaluation error is
+shown as not checked; an empty observed field is evaluated as empty. The field
+snapshot is taken before asynchronous CMS lookups and results for an older
+save cannot overwrite a newer one. This feature evaluates local inputs only:
+external gate, evidence and link-observation providers are not called for
+fragments. Gates needing unavailable inputs are not checked. It adds one content
+evaluation per mapped field and does not establish factual accuracy, rendered
+page quality or publication readiness. Coverage telemetry contains aggregate
+counts, without field names or content.

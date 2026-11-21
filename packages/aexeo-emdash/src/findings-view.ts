@@ -494,7 +494,7 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_unmapped_components?: UnmappedComponents }>(findingsKey(route));
+  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_unmapped_components?: UnmappedComponents; fragments?: import("./fragment-evaluation.js").FragmentAssessment[] }>(findingsKey(route));
   const findings = (record?.findings ?? []).filter((finding) => isCmsObservableFinding(finding, record?.body_coverage === "complete") && (!incomplete || !isSiteGraphFinding(finding)));
   const assessment = record?.assessment;
   const bodyNotice = record && assessment?.status !== "error" ? cmsBodyCoverageNotice(record.body_coverage) : undefined;
@@ -526,6 +526,11 @@ export async function renderDocumentPanel(
       ...(assessment?.status === "not_configured" ? [{ type: "context", text: assessment.reason === "collection_excluded" ? "Content preset is not enabled for this collection." : "No content preset is configured; editorial checks are not enabled." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
       ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}${assessment.selection_source ? ` (selected by ${assessment.selection_source.replaceAll("_", " ")})` : ""}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks; they do not establish factual accuracy or whether the content is current.` }, { type: "context", text: describeSourceMapping(assessment.source_mapping) }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),
+      ...(record?.fragments ?? []).flatMap((fragment) => fragment.status === "not_checked"
+        ? [{ type: "context", text: `Fragment ${fragment.field}: not checked (${fragment.reason}).` }]
+        : [{ type: "divider" }, { type: "context", text: `Fragment ${fragment.field} — preset ${fragment.preset}. ${summarizeGates(fragment.report.gates)}. This is a field assessment, not a page or factuality check.` },
+          ...fragment.report.gates.map((gate) => ({ type: "context", text: describeGate(gate) })),
+          ...(fragment.findings.length ? [documentFindingsTable(fragment.findings)] : [])]),
       ...(findings.length === 0
         ? []
         : [{ type: "divider" }, documentFindingsTable(sorted)]),

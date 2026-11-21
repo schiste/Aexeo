@@ -1017,3 +1017,55 @@ fields=["unmapped"]
   assert.ok(!JSON.stringify(events).includes("Author"));
   console.log("WASM configured metadata distinguishes supplied, unavailable and absent");
 }
+
+// Automatic fragment audits remain separate from the whole page on save and refresh.
+{
+  const article = `version=1
+name="article"
+[[gates]]
+id="article_words"
+kind="word_count"
+min=1
+`;
+  const fragment = `version=1
+name="fragment"
+[[gates]]
+id="fragment_forbidden"
+kind="forbidden_terms"
+terms=["risk"]
+[[gates]]
+id="fragment_title"
+kind="metadata_length"
+field="title"
+max=1
+`;
+  const configured = createPlugin({ contentPreset: {
+    name: "article", sources: { article, fragment }, autoAuditFragments: true,
+    fragmentFieldsByCollection: { pages: { intro: "fragment", missing: "fragment" } },
+  } });
+  const page = item("fragment-save", { data: {
+    body: [block("body", "The complete article body.")],
+    intro: [block("intro", "A risk needs attention.")],
+  } });
+  const host = fakeHost([page]);
+  const runSave = () => configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  await runSave();
+  let stored = host.store.get("findings:/fragment-save");
+  assert.ok(stored.fragments, JSON.stringify({ stored, logged: host.logged }));
+  assert.equal(stored.fragments[0].status, "evaluated");
+  assert.equal(stored.fragments[0].report.gates[0].status, "failed");
+  assert.equal(stored.fragments[0].report.gates[1].status, "not_checked");
+  assert.deepEqual(stored.fragments[0].findings[0].aexeo_cms_location, { path: ["data", "intro", 0, "children", 0, "text"], utf16_offset: 2 });
+  assert.equal(stored.fragments[1].reason, "fragment_field_unavailable");
+  assert.ok(!stored.findings.some((f) => f.rule_id === "fragment_forbidden"));
+  page.data.intro = [block("intro", "A safer introduction.")];
+  await runSave();
+  stored = host.store.get("findings:/fragment-save");
+  assert.equal(stored.fragments[0].report.gates[0].status, "passed");
+  await configured.routes.refresh.handler(host.ctx);
+  stored = host.store.get("findings:/fragment-save");
+  assert.equal(stored.fragments[0].report.gates[0].status, "passed");
+  assert.equal(stored.fragments[1].status, "not_checked");
+  assert.deepEqual(host.logged, []);
+  console.log("WASM configured fragment audits persist separately on save and refresh");
+}
