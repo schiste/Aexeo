@@ -1,0 +1,38 @@
+version = 1
+name = "Arabic whitespace rhythm review"
+
+[[gates]]
+id = "editorial.sentence_openings"
+kind = "repeated_sentence_openings"
+opening_words = 2
+max_consecutive = 2
+delimiters = ".!?؟"
+blocking = false
+
+[[gates]]
+id = "editorial.sentence_rhythm"
+kind = "similar_sentence_lengths"
+run_length = 4
+tolerance_words = 2
+delimiters = ".!?؟"
+allow_arabic_word_boundaries = true
+blocking = false
+
+[[gates]]
+id = "editorial.sentence_variance"
+kind = "sentence_length_variance"
+window_size = 6
+min_stddev_words = 6
+delimiters = ".!?؟"
+allow_arabic_word_boundaries = true
+blocking = false
+
+[[gates]]
+id = "editorial.sentence_opening_window"
+kind = "sentence_opening_window"
+opening_words = 1
+window_size = 6
+max_occurrences = 2
+delimiters = ".!?؟"
+allow_arabic_word_boundaries = true
+blocking = false

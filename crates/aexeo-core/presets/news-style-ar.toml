@@ -1,0 +1,3 @@
+version = 1
+name = "News style review, Arabic"
+extends = ["transition-review-ar", "punctuation-review", "arabic-rhythm-review"]

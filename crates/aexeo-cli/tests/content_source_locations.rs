@@ -336,3 +336,53 @@ fn html_citation_elements_preserve_editorial_finding_positions() {
     assert_eq!(telemetry["source_mapping"]["mapped"], 1);
     assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
 }
+
+#[test]
+fn arabic_style_profiles_measure_markdown_and_map_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("arabic.md");
+    fs::write(&file, "هذا مثال واحد؟ هذا مثال ثان؟ هذا مثال ثالث؟ هذا مثال رابع؟ هذا مثال خامس؟ هذا مثال سادس؟ هذا مثال سابع؟ هذا مثال ثامن.\n").unwrap();
+    for preset in ["news-style-ar", "opinion-style-ar"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                file.to_str().unwrap(),
+                "--input-format",
+                "markdown",
+                "--preset",
+                preset,
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        for id in [
+            "editorial.sentence_rhythm",
+            "editorial.sentence_variance",
+            "editorial.sentence_opening_window",
+        ] {
+            let gate = report["gates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|gate| gate["gate_id"] == id)
+                .unwrap();
+            assert_eq!(gate["status"], "failed", "{preset}: {id}");
+            assert_eq!(gate["blocking"], false);
+            assert!(
+                report["source_locations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|location| location["gate_id"] == id && location["line"] == 1),
+                "{preset}: {id}"
+            );
+        }
+    }
+}

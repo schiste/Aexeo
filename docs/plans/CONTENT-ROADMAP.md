@@ -100,6 +100,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Add opt-in Arabic whitespace-token rhythm measurements and composable
+  news/opinion starters. Their Arabic question-mark boundaries are explicit;
+  unsupported characters remain not checked. These heuristics are not Arabic
+  morphology, language detection or independently calibrated editorial quality.
+
 - [x] Add opt-in German, Italian and Arabic transition-review starters and
   composable German and Italian news/opinion style starters. Rust and
   EmDash/WASM tests cover repeated transitions, missing paragraphs and source
