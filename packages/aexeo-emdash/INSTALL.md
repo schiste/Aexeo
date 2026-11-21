@@ -54,6 +54,7 @@ evaluation coverage, including measured prose-variance gates, list paragraphs
 excluded and windows checked. Events contain no document text, route or gate ID.
 One document can produce multiple events when an evaluation is repeated after
 obtaining host evidence. Unobserved prose coverage is omitted rather than zero.
+Fragment and historical revision audits do not emit this runtime callback.
 
 ## External gates in configured mode
 

@@ -115,6 +115,7 @@ min_stddev_words=2
   await evaluate();
   gate = host.store.get("findings:/prose-lists").assessment.gates.find((item) => item.gate_id === "variance");
   assert.equal(gate.status, "not_checked");
+  assert.equal(events[1].prose_variance, undefined);
   assert.deepEqual(host.logged, []);
   console.log("WASM configured prose variance honors list and body completeness");
 }
