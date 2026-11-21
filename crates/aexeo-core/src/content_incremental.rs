@@ -204,6 +204,15 @@ fn evaluate_item(
         .gates
         .iter()
         .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }));
+    let wants_literal = preset.gates.iter().any(|gate| {
+        matches!(
+            gate,
+            ContentGate::RepeatedTerms { .. }
+                | ContentGate::RequiredTerms { .. }
+                | ContentGate::ForbiddenTerms { .. }
+        )
+    });
+    let mut literal_projection = None;
     let mut destinations = None;
     let mut heading_levels = None;
     let mut paragraph_list_items = None;
@@ -226,6 +235,9 @@ fn evaluate_item(
                 &item.source,
             )
             .map_err(|_| unavailable("Markdown projection failed"))?;
+            if wants_literal {
+                literal_projection = adapted.source_map.literal_projection().map(str::to_owned);
+            }
             if classify_prose {
                 paragraph_list_items = adapted
                     .source_map
@@ -242,13 +254,18 @@ fn evaluate_item(
             destinations = adapted.destinations;
             (adapted.input, Some(adapted.context), count)
         }
-        (ProjectionMode::Adapted, "text/markdown") if classify_prose || wants_heading_levels => {
+        (ProjectionMode::Adapted, "text/markdown")
+            if classify_prose || wants_heading_levels || wants_literal =>
+        {
             let (input, context, count, map) =
                 crate::markdown_adapter::markdown_input_with_source_map(
                     &item.entity_id,
                     &item.source,
                 )
                 .map_err(|_| unavailable("Markdown projection failed"))?;
+            if wants_literal {
+                literal_projection = map.literal_projection().map(str::to_owned);
+            }
             if classify_prose {
                 paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);
             }
@@ -268,8 +285,8 @@ fn evaluate_item(
             (input, Some(context), count)
         }
         (ProjectionMode::Adapted, "text/html") => {
-            let (adapted, levels, lists) =
-                crate::html_content_adapter::html_content_with_paragraph_list_items(
+            let (adapted, levels, lists, literal_text) =
+                crate::html_content_adapter::html_content_with_literal_projection(
                     &item.entity_id,
                     &item.source,
                     crate::html_content_adapter::HtmlContentScope::Document,
@@ -288,6 +305,7 @@ fn evaluate_item(
                     )
                 });
             }
+            literal_projection = literal_text;
             paragraph_list_items = lists;
             heading_levels = Some(levels);
             let count = adapted.destinations.len();
@@ -327,7 +345,7 @@ fn evaluate_item(
         ..Default::default()
     };
     let report = preset
-        .evaluate_with_paragraph_list_items(
+        .evaluate_with_literal_projection(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -336,6 +354,7 @@ fn evaluate_item(
             None,
             structured_lists.as_deref(),
             paragraph_list_items.as_deref(),
+            literal_projection.as_deref(),
         )
         .map_err(|_| unavailable("content evaluation failed"))?;
     if report
@@ -832,6 +851,23 @@ mod tests {
         Base, BaseKind, ContentState, Entry, Operation, Origin, OriginKind,
     };
     use sha2::{Digest, Sha256};
+
+    #[test]
+    fn adapted_literal_terms_see_reference_labels() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['[17]']\n").unwrap();
+        for (media, source) in [
+            ("text/markdown", "Élan.[[17]](#reference-source) Next."),
+            (
+                "text/html",
+                "<p>Élan.<a href='#reference-source'>[17]</a> Next.</p>",
+            ),
+        ] {
+            let mut candidate = item("a", source, None);
+            candidate.media_type = media.into();
+            let report = evaluate_item(&preset, &candidate, ProjectionMode::Adapted, None).unwrap();
+            assert_eq!(report.gates[0].status, GateStatus::Passed, "{media}");
+        }
+    }
 
     fn item(id: &str, source: &str, links: Option<Vec<&str>>) -> CandidateItem {
         CandidateItem {

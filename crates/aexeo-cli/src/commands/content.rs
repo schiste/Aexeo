@@ -279,6 +279,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     });
     let mut link_count = None;
     let mut source_map = None;
+    let mut literal_projection = None;
     let mut heading_levels = None;
     let mut structured_lists = None;
     let mut paragraph_list_items = None;
@@ -322,6 +323,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?
             };
+            literal_projection = map.literal_projection().map(str::to_owned);
             heading_levels = map.heading_levels().map(<[u8]>::to_vec);
             paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);
             link_count = map.links_complete().then_some(links);
@@ -336,10 +338,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 aexeo_core::html_content_adapter::HtmlContentScope::Document
             };
-            match aexeo_core::html_content_adapter::html_content_with_paragraph_list_items(
+            match aexeo_core::html_content_adapter::html_content_with_literal_projection(
                 &id, &text, scope,
             ) {
-                Ok((adapted, levels, list_items)) => {
+                Ok((adapted, levels, list_items, literal_text)) => {
+                    literal_projection = literal_text;
                     if preset
                         .gates
                         .iter()
@@ -527,7 +530,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
-        preset.evaluate_with_paragraph_list_items(
+        preset.evaluate_with_literal_projection(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -536,9 +539,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             Some(&mut |event| gate_timer.observe(event)),
             structured_lists.as_deref(),
             paragraph_list_items.as_deref(),
+            literal_projection.as_deref(),
         )?
     } else {
-        preset.evaluate_with_paragraph_list_items(
+        preset.evaluate_with_literal_projection(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -547,6 +551,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             None,
             structured_lists.as_deref(),
             paragraph_list_items.as_deref(),
+            literal_projection.as_deref(),
         )?
     };
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;

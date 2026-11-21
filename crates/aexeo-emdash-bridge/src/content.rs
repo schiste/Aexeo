@@ -50,8 +50,11 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
     content_input_with_context(document).0
 }
 
-fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, ContentContext, usize) {
+fn content_input_with_context(
+    document: &EmdashDocument,
+) -> (ContentInput, ContentContext, usize, Option<String>) {
     let mut text = String::new();
+    let mut literal_projection = aexeo_core::content_gate::ReferenceLiteralProjection::default();
     let metadata = content_metadata(document);
     let mut headings = Vec::new();
     let mut line = 1;
@@ -96,10 +99,9 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
             link_count += current.difference(&previous).count();
             previous = current;
         }
-        let block_text = block
-            .children
-            .iter()
-            .map(|child| match child {
+        let block_start = text.len();
+        for child in &block.children {
+            match child {
                 PortableTextChild::Span(span) => {
                     let numeric_marker = span.text.bytes().any(|byte| byte.is_ascii_digit())
                         && span.text.bytes().all(|byte| {
@@ -111,14 +113,14 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
                             .iter()
                             .any(|mark| citation_keys.contains(mark.as_str()));
                     if numeric_marker {
-                        " ".repeat(span.text.len())
+                        literal_projection.push_masked(&mut text, &span.text);
                     } else {
-                        span.text.clone()
+                        text.push_str(&span.text);
                     }
                 }
-            })
-            .collect::<String>();
-        text.push_str(&block_text);
+            }
+        }
+        let block_text = text[block_start..].to_owned();
         if is_heading(&block.style) {
             headings.push(collapse_whitespace(&block_text));
         }
@@ -135,6 +137,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         block_ends.push(offset);
         offset += 1;
     }
+    let literal_text = literal_projection.finish(&text);
     (
         ContentInput {
             id: document.route.clone(),
@@ -161,6 +164,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
             ..Default::default()
         },
         link_count,
+        literal_text,
     )
 }
 
@@ -847,7 +851,7 @@ pub fn evaluate_content_with_list_completeness(
         .then(|| portable_text_paragraph_list_items(document, list_structure_complete))
         .flatten();
     let [text, headings, paragraphs, links] = capabilities;
-    let (mut input, mut context, link_count) = content_input_with_context(document);
+    let (mut input, mut context, link_count, literal_text) = content_input_with_context(document);
     if text
         && preset
             .gates
@@ -881,7 +885,7 @@ pub fn evaluate_content_with_list_completeness(
             .filter_map(|block| heading_level(&block.style))
             .collect()
     });
-    preset.evaluate_with_paragraph_list_items(
+    preset.evaluate_with_literal_projection(
         &input,
         &ContentEvaluationContext {
             adapter: Some(&context),
@@ -896,6 +900,7 @@ pub fn evaluate_content_with_list_completeness(
         None,
         lists.as_deref(),
         paragraph_list_items.as_deref(),
+        literal_text.as_deref(),
     )
 }
 
@@ -1853,6 +1858,22 @@ field = "slug"
     }
 
     #[test]
+    fn literal_gates_observe_numeric_references_while_rhythm_ignores_them() {
+        let document: EmdashDocument = serde_json::from_str(r##"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"r","_type":"link","href":"#reference-source"}],"children":[{"_type":"span","text":"Élan."},{"_type":"span","text":"[17]","marks":["r"]},{"_type":"span","text":" Next sentence."}]}]}"##).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['[17]']\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['[17]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=20\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].status, GateStatus::Failed);
+        assert_eq!(report.gates[2].measurements["sentence_count"], 2);
+        let location = source_locations(&document, &preset, &report);
+        assert!(
+            location
+                .iter()
+                .any(|item| item.span_index == 1 && item.utf16_offset == 0)
+        );
+    }
+
+    #[test]
     fn ordinary_numeric_links_remain_prose() {
         let document: EmdashDocument = serde_json::from_str(r##"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"a","_type":"link","href":"#section"}],"children":[{"_type":"span","text":"42","marks":["a"]}]}]}"##).unwrap();
         assert_eq!(content_input(&document).text.as_deref(), Some("42"));
@@ -1861,7 +1882,7 @@ field = "slug"
     #[test]
     fn projection_preserves_empty_blocks_multispan_text_and_newlines() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":" A "},{"_type":"span","text":" B"}]},{"children":[]},{"children":[{"_type":"span","text":"a\n"},{"_type":"span","text":"é"}]}]}"#).unwrap();
-        let (input, context, _) = content_input_with_context(&document);
+        let (input, context, _, _) = content_input_with_context(&document);
         assert_eq!(input.text.as_deref(), Some(" A  B\n\na\né"));
         assert_eq!(
             input.headings.as_deref(),
@@ -1879,7 +1900,7 @@ field = "slug"
     #[test]
     fn paragraphs_have_projected_positions_and_exclude_headings() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"First\nline"}]},{"children":[{"_type":"span","text":"Second"}]}]}"#).unwrap();
-        let (_, context, _) = content_input_with_context(&document);
+        let (_, context, _, _) = content_input_with_context(&document);
         let paragraphs = context.paragraphs.unwrap();
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].line, 2);

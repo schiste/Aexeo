@@ -34,9 +34,15 @@ pub struct MarkdownSourceMap {
     contains_html: bool,
     paragraph_list_items: Vec<bool>,
     paragraph_list_items_complete: bool,
+    literal_text: Option<String>,
 }
 
 impl MarkdownSourceMap {
+    /// Unmasked reference labels for literal checks, when present.
+    pub fn literal_projection(&self) -> Option<&str> {
+        self.literal_text.as_deref()
+    }
+
     /// Whether Markdown exposed all link-bearing markup to the adapter.
     pub fn links_complete(&self) -> bool {
         !self.contains_html
@@ -873,6 +879,7 @@ struct Projection {
     unrepresented_list_item: bool,
     block_ends: Vec<usize>,
     link_count: usize,
+    literal_projection: crate::content_gate::ReferenceLiteralProjection,
     definitions: std::collections::BTreeMap<String, String>,
 }
 
@@ -953,7 +960,7 @@ impl Projection {
             {
                 self.link_count += 1;
                 if let Some(label) = reference_label(&link.children) {
-                    self.text.push_str(&" ".repeat(label.len()));
+                    self.literal_projection.push_masked(&mut self.text, label);
                 }
             }
             Node::LinkReference(link)
@@ -967,7 +974,7 @@ impl Projection {
             {
                 self.link_count += 1;
                 if let Some(label) = reference_label(&link.children) {
-                    self.text.push_str(&" ".repeat(label.len()));
+                    self.literal_projection.push_masked(&mut self.text, label);
                 }
             }
             Node::Break(_) => self.text.push('\n'),
@@ -1052,6 +1059,7 @@ fn extract_markdown_from_root(
         unrepresented_list_item,
         block_ends,
         link_count,
+        literal_projection,
         definitions: _,
     } = projection;
     if map_source {
@@ -1077,7 +1085,9 @@ fn extract_markdown_from_root(
         });
         cursor = start;
     }
+    let literal_text = literal_projection.finish(&text);
     let complete = !source_map.contains_html;
+    source_map.literal_text = if complete { literal_text } else { None };
     source_map.paragraph_list_items_complete = complete && !unrepresented_list_item;
     Ok((
         ContentInput {

@@ -52,6 +52,44 @@ pub struct ContentContext {
     pub unavailable_metadata_fields: Vec<String>,
 }
 
+/// Builds an unmasked literal projection only when a numeric reference occurs.
+/// Reference labels are ASCII and retain their byte offsets in the masked text.
+#[derive(Default)]
+pub struct ReferenceLiteralProjection {
+    original: Option<String>,
+    copied: usize,
+}
+
+impl ReferenceLiteralProjection {
+    pub fn push_masked(&mut self, projected: &mut String, label: &str) {
+        let original = self.original.get_or_insert_with(String::new);
+        original.push_str(&projected[self.copied..]);
+        original.push_str(label);
+        projected.push_str(&" ".repeat(label.len()));
+        self.copied = projected.len();
+    }
+
+    pub fn finish(mut self, projected: &str) -> Option<String> {
+        if let Some(original) = &mut self.original {
+            original.push_str(&projected[self.copied..]);
+        }
+        self.original
+    }
+}
+
+fn literal_projection_matches(projected: &str, literal: &str) -> bool {
+    projected.len() == literal.len()
+        && projected
+            .bytes()
+            .zip(literal.bytes())
+            .all(|(masked, original)| {
+                masked == original
+                    || (masked == b' '
+                        && (original.is_ascii_digit()
+                            || matches!(original, b'[' | b']' | b',' | b'-')))
+            })
+}
+
 // Accept only a complete calendar date; timestamps and implicit time zones are
 // deliberately excluded so the caller chooses and binds the evaluation date.
 fn parse_iso_calendar_date(value: &str) -> Option<time::Date> {
@@ -2111,6 +2149,7 @@ impl ContentPreset {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -2129,6 +2168,7 @@ impl ContentPreset {
             destinations,
             true,
             Some(observer),
+            None,
             None,
             None,
             None,
@@ -2151,6 +2191,7 @@ impl ContentPreset {
             destinations,
             complete,
             observer,
+            None,
             None,
             None,
             None,
@@ -2178,6 +2219,7 @@ impl ContentPreset {
             heading_levels,
             None,
             None,
+            None,
         )
     }
 
@@ -2201,6 +2243,7 @@ impl ContentPreset {
             observer,
             heading_levels,
             lists,
+            None,
             None,
         )
     }
@@ -2228,6 +2271,35 @@ impl ContentPreset {
             heading_levels,
             lists,
             paragraph_list_items,
+            None,
+        )
+    }
+
+    /// Evaluate with an optional literal projection retaining numeric reference labels.
+    /// The projection is checked against the text observed by the adapter.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_literal_projection(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        heading_levels: Option<&[u8]>,
+        collection_complete: bool,
+        observer: Option<&mut dyn FnMut(GateObservation)>,
+        lists: Option<&[crate::markdown_adapter::StructuredList]>,
+        paragraph_list_items: Option<&[bool]>,
+        literal_projection: Option<&str>,
+    ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            collection_complete,
+            observer,
+            heading_levels,
+            lists,
+            paragraph_list_items,
+            literal_projection,
         )
     }
 
@@ -2242,6 +2314,7 @@ impl ContentPreset {
         heading_levels: Option<&[u8]>,
         lists: Option<&[crate::markdown_adapter::StructuredList]>,
         paragraph_list_items: Option<&[bool]>,
+        literal_projection: Option<&str>,
     ) -> Result<ContentReport> {
         let site = capabilities.site;
         let extensions = capabilities.extensions;
@@ -2253,6 +2326,26 @@ impl ContentPreset {
         let mut word_count = None;
         let mut character_counts = [None, None];
         let mut literal_cache = None;
+        // Only validate the alternate projection when a literal gate can use it.
+        let literal_input = match (input.text.as_deref(), literal_projection) {
+            (Some(projected), Some(literal))
+                if self.gates.iter().any(|gate| {
+                    matches!(
+                        gate,
+                        ContentGate::RepeatedTerms { .. }
+                            | ContentGate::RequiredTerms { .. }
+                            | ContentGate::ForbiddenTerms { .. }
+                    )
+                }) =>
+            {
+                if literal_projection_matches(projected, literal) {
+                    Ok(Some(literal))
+                } else {
+                    Err(())
+                }
+            }
+            (text, _) => Ok(text),
+        };
         let block_ends = context
             .and_then(|context| context.block_ends.as_deref())
             .unwrap_or_default();
@@ -3885,8 +3978,8 @@ impl ContentPreset {
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
                     measurements.insert("max_occurrences".into(), *max_occurrences);
-                    match &input.text {
-                        Some(text) => {
+                    match literal_input {
+                        Ok(Some(text)) => {
                             let mut total = 0;
                             let mut exceeded = 0;
                             let literal = cached_literal(
@@ -3925,7 +4018,12 @@ impl ContentPreset {
                             measurements.insert("matching_occurrences".into(), total);
                             measurements.insert("exceeded_terms".into(), exceeded);
                         }
-                        None => reason = Some("text is unavailable from this adapter".into()),
+                        Ok(None) => reason = Some("text is unavailable from this adapter".into()),
+                        Err(()) => {
+                            reason = Some(
+                                "literal text projection does not match the observed text".into(),
+                            )
+                        }
                     }
                 }
                 ContentGate::RequiredTerms {
@@ -3935,8 +4033,8 @@ impl ContentPreset {
                     ..
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
-                    match &input.text {
-                        Some(text) => {
+                    match literal_input {
+                        Ok(Some(text)) => {
                             let literal = cached_literal(
                                 &mut literal_cache,
                                 text,
@@ -3953,7 +4051,12 @@ impl ContentPreset {
                             measurements.insert("present_terms".into(), terms.len() - missing);
                             measurements.insert("missing_terms".into(), missing);
                         }
-                        None => reason = Some("text is unavailable from this adapter".into()),
+                        Ok(None) => reason = Some("text is unavailable from this adapter".into()),
+                        Err(()) => {
+                            reason = Some(
+                                "literal text projection does not match the observed text".into(),
+                            )
+                        }
                     }
                 }
                 ContentGate::ForbiddenTerms {
@@ -3963,8 +4066,8 @@ impl ContentPreset {
                     ..
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
-                    match &input.text {
-                        Some(text) => {
+                    match literal_input {
+                        Ok(Some(text)) => {
                             let mut matches = 0;
                             let literal = cached_literal(
                                 &mut literal_cache,
@@ -3994,7 +4097,12 @@ impl ContentPreset {
                             omitted += matches.saturating_sub(MAX_FINDINGS_PER_GATE);
                             measurements.insert("matches".into(), matches);
                         }
-                        None => reason = Some("text is unavailable from this adapter".into()),
+                        Ok(None) => reason = Some("text is unavailable from this adapter".into()),
+                        Err(()) => {
+                            reason = Some(
+                                "literal text projection does not match the observed text".into(),
+                            )
+                        }
                     }
                 }
                 ContentGate::RequiredHeadings { headings, .. } => {
@@ -5649,6 +5757,30 @@ max = 1
             .unwrap();
         assert!(
             missing
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+    }
+
+    #[test]
+    fn invalid_literal_projection_is_not_checked() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['xyz']\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['xyz']\n").unwrap();
+        let report = preset
+            .evaluate_with_literal_projection(
+                &literal_input("abc"),
+                &ContentEvaluationContext::default(),
+                None,
+                None,
+                true,
+                None,
+                None,
+                None,
+                Some("xyz"),
+            )
+            .unwrap();
+        assert!(
+            report
                 .gates
                 .iter()
                 .all(|gate| gate.status == GateStatus::NotChecked)

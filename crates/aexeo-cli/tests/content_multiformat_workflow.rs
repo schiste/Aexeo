@@ -393,6 +393,34 @@ fn numeric_citations_do_not_merge_sentences_across_markdown_and_html() {
 }
 
 #[test]
+fn literal_terms_can_see_reference_labels_without_affecting_rhythm() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, "version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['[17]']\nblocking=false\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['[17]']\nblocking=false\n[[gates]]\nid='repeated'\nkind='repeated_terms'\nterms=['[17]']\nmax_occurrences=1\nblocking=false\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=20\nblocking=false\n").unwrap();
+    for (format, source) in [
+        (
+            "html",
+            "<p>Élan.<a href='#reference-source'>[17]</a> Next sentence.<a href='#reference-source'>[17]</a></p>",
+        ),
+        (
+            "markdown",
+            "Élan.[[17]](#reference-source) Next sentence.[[17]](#reference-source)",
+        ),
+    ] {
+        fs::write(&draft, source).unwrap();
+        let (report, _) = evaluate(&draft, &preset, format);
+        assert_eq!(report["gates"][0]["status"], "passed", "{format}");
+        assert_eq!(report["gates"][1]["status"], "failed", "{format}");
+        assert_eq!(report["gates"][2]["status"], "failed", "{format}");
+        assert_eq!(
+            report["gates"][3]["measurements"]["sentence_count"], 2,
+            "{format}"
+        );
+    }
+}
+
+#[test]
 fn multi_period_abbreviations_work_across_markdown_and_html() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("example");

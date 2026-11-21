@@ -114,6 +114,16 @@ links and does not validate URLs.
 Compose it with another preset using `extends`, and enable it only where the
 host renders Portable Text as rich text rather than interpreting Markdown.
 
+Numeric reference labels linked to `#reference-…` are masked in sentence-rhythm
+projections to avoid merging sentences. Literal required, forbidden and repeated
+term checks in the content CLI, change verdict, incremental evaluation and EmDash
+instead see those labels in Markdown, HTML and Portable Text, while keeping the
+original projected offsets. Rust hosts using the adapters directly must pass the
+optional literal projection to `evaluate_with_literal_projection`. Other checks still use their documented
+projection; this does not verify citations or source support. If a supplied
+literal projection is inconsistent with the observed text, the literal checks
+are `not_checked`.
+
 The opt-in `fragment-readable` preset is intended for an individual introduction, example, prerequisite, or other fragment. It composes only the advisory shared sentence-length check; it does not require article length or page metadata. Select it explicitly for fragments, and configure other checks according to the field and language. A clean result does not establish completeness or factual accuracy.
 
 The built-in `article` preset requires at least one whitespace-separated word. `glossary` inherits it and sets a maximum of 500 words. These deliberately minimal examples are starting points, not comprehensive editorial standards. `article-editorial` and `glossary-editorial` extend them with advisory word-count ranges and title/description metadata checks. Their thresholds are examples to override for your audience, language and content type; missing metadata is explicitly `not_checked`.
