@@ -180,6 +180,13 @@ reads are individually bounded and checked for observable changes; they are not
 an atomic multi-file snapshot. A successful result explicitly reports
 `publication_authorized: false`. No Python output is a publication decision.
 
+With `--telemetry`, the CLI writes one aggregate JSON event to stderr after a
+comparison is attempted: status, elapsed milliseconds, number of required checks,
+and whether collection and external evidence were supplied. It does not emit
+check IDs, paths or input content. Argument parsing failures do not emit an event.
+Telemetry is informational and never changes the verdict or grants publication
+authority.
+
 ## Reconstructing offline artifact bytes for experimentation
 
 The resolved policy and host options are Aexeo-specific serialized values,

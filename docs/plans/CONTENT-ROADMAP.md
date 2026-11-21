@@ -100,6 +100,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Add opt-in aggregate telemetry to the experimental portable verdict
+  comparator, including comparison outcome, duration and optional-input
+  presence without check IDs, paths or content. The comparator remains
+  experimental and cannot authorize publication.
+
 - [x] Add opt-in Arabic whitespace-token rhythm measurements and composable
   news/opinion starters. Their Arabic question-mark boundaries are explicit;
   unsupported characters remain not checked. These heuristics are not Arabic
