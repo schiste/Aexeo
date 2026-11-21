@@ -1095,6 +1095,19 @@ mod tests {
     }
 
     #[test]
+    fn list_paragraph_classification_handles_loose_lists_and_safe_breaks() {
+        let source = "Before<br>here.\n\n- First paragraph.\n\n  Second paragraph.\n\n> Quoted prose.\n\nAfter.";
+        let (_, context, _, map) = markdown_input_with_source_map("x", source).unwrap();
+        assert_eq!(context.paragraphs.unwrap().len(), 5);
+        assert_eq!(
+            map.paragraph_list_items(),
+            Some(&[false, true, true, false, false][..])
+        );
+        let (_, _, _, empty) = markdown_input_with_source_map("x", "").unwrap();
+        assert_eq!(empty.paragraph_list_items(), Some(&[][..]));
+    }
+
+    #[test]
     fn safe_inline_html_breaks_preserve_text_links_lists_and_locations() {
         for tag in ["<br>", "<BR>", "<br/>", "<br />"] {
             let source = format!("Before{tag}after [link](https://example.org).\n\n- one\n- two\n");
