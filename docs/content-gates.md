@@ -1578,6 +1578,15 @@ a window. Insufficient observations, incomplete quotes, unsupported scripts,
 unavailable paragraphs and input limits are `not_checked`. Segmentation and
 word counts are heuristics; repeated lengths may be an intentional choice.
 
+Set `reset_at_paragraph = true` to keep each rolling window within one
+observed paragraph. The default is `false` for compatibility. In paragraph
+mode, `paragraphs_without_windows` counts paragraphs that produced no complete
+window. If any paragraph cannot form a window, the gate reports `not_checked`
+while retaining findings from other paragraphs. This option does not identify
+lists or distinguish their items from prose; that depends on the adapter's
+paragraph projection. Rust callers constructing `ContentGate::SentenceLengthVariance`
+directly must set `reset_at_paragraph` explicitly.
+
 Compose or override the fixed setting:
 
 ```toml

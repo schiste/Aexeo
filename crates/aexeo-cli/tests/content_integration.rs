@@ -1609,3 +1609,60 @@ fn seeded_variance_matches_cross_adapter_fixture() {
     );
     assert_eq!(report["gates"][0]["measurements"]["windows_checked"], 1);
 }
+
+#[test]
+fn paragraph_scoped_variance_reports_partial_coverage_in_markdown_and_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("variance.toml");
+    std::fs::write(&preset, "version=1\nname='variance'\n[[gates]]\nid='variance'\nkind='sentence_length_variance'\nwindow_size=4\nmin_stddev_words=2\nreset_at_paragraph=true\n").unwrap();
+    let source = format!("variance={}", preset.display());
+    for (format, content) in [
+        (
+            "markdown",
+            "One two three. Four five six. Seven eight nine. Ten eleven twelve.\n\nShort paragraph.",
+        ),
+        (
+            "html",
+            "<p>One two three. Four five six. Seven eight nine. Ten eleven twelve.</p><p>Short paragraph.</p>",
+        ),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                "-",
+                "--preset",
+                "variance",
+                "--preset-source",
+                &source,
+                "--input-format",
+                format,
+                "--format",
+                "json",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let gate = &report["gates"][0];
+        assert_eq!(gate["status"], "not_checked", "{format}");
+        assert_eq!(gate["measurements"]["windows_checked"], 1, "{format}");
+        assert_eq!(
+            gate["measurements"]["paragraphs_without_windows"], 1,
+            "{format}"
+        );
+        assert_eq!(gate["findings"].as_array().unwrap().len(), 1, "{format}");
+    }
+}

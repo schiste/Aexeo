@@ -461,6 +461,9 @@ pub enum ContentGate {
         #[serde(default)]
         blocking: bool,
         window_size: usize,
+        /// Restrict each rolling window to one observed paragraph.
+        #[serde(default, skip_serializing_if = "is_false")]
+        reset_at_paragraph: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         min_stddev_words: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2891,6 +2894,7 @@ impl ContentPreset {
                 }
                 ContentGate::SentenceLengthVariance {
                     window_size,
+                    reset_at_paragraph,
                     min_stddev_words,
                     random_min_stddev_words,
                     random_max_stddev_words,
@@ -2927,8 +2931,13 @@ impl ContentPreset {
                         let mut flagged = 0usize;
                         let mut windows = 0usize;
                         let mut uncertain = 0usize;
+                        let mut paragraphs_without_windows = 0usize;
                         let mut lengths = std::collections::VecDeque::new();
                         for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            if *reset_at_paragraph {
+                                lengths.clear();
+                            }
+                            let windows_before = windows;
                             bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
                             if bytes_seen > MAX_CONTENT_INPUT_BYTES {
                                 reason =
@@ -2996,6 +3005,9 @@ impl ContentPreset {
                                     }
                                 },
                             );
+                            if *reset_at_paragraph && windows == windows_before {
+                                paragraphs_without_windows += 1;
+                            }
                             if !quotes.finish() {
                                 reason = Some(
                                     "a quotation continues beyond the observed paragraph".into(),
@@ -3006,6 +3018,12 @@ impl ContentPreset {
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("windows_checked".into(), windows);
                         measurements.insert("low_variance_windows".into(), flagged);
+                        if *reset_at_paragraph {
+                            measurements.insert(
+                                "paragraphs_without_windows".into(),
+                                paragraphs_without_windows,
+                            );
+                        }
                         if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
                             reason = Some("too many paragraphs to assess completely".into());
                         }
@@ -3015,6 +3033,14 @@ impl ContentPreset {
                         if reason.is_none() && windows == 0 {
                             reason =
                                 Some("not enough eligible sentences to assess variance".into());
+                        } else if reason.is_none()
+                            && *reset_at_paragraph
+                            && paragraphs_without_windows > 0
+                        {
+                            reason = Some(
+                                "some paragraphs lack enough eligible sentences to assess variance"
+                                    .into(),
+                            );
                         }
                     } else {
                         reason = Some("paragraphs are unavailable from this adapter".into());
@@ -6783,6 +6809,11 @@ terms = ["bad"]
     #[test]
     fn sentence_variance_windows_are_reproducible_and_partial_inputs_are_unchecked() {
         let fixed = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size=4\nmin_stddev_words=2\n").unwrap();
+        assert!(
+            serde_json::to_value(&fixed).unwrap()["gates"][0]
+                .get("reset_at_paragraph")
+                .is_none()
+        );
         let input = ContentInput {
             text: Some(String::new()),
             ..Default::default()
@@ -6854,6 +6885,65 @@ terms = ["bad"]
         let roundtrip: ContentPreset = toml::from_str(&toml::to_string(&random).unwrap()).unwrap();
         assert_eq!(
             serde_json::to_value(random).unwrap(),
+            serde_json::to_value(roundtrip).unwrap()
+        );
+    }
+
+    #[test]
+    fn sentence_variance_can_keep_windows_within_paragraphs() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size=4\nmin_stddev_words=2\nreset_at_paragraph=true\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![
+                ContentParagraph {
+                    text: "One two three. Four five six.".into(),
+                    line: 1,
+                    column: 1,
+                },
+                ContentParagraph {
+                    text: "Seven eight nine. Ten eleven twelve.".into(),
+                    line: 3,
+                    column: 1,
+                },
+            ]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        let gate = &report.gates[0];
+        assert_eq!(gate.status, GateStatus::NotChecked);
+        assert_eq!(gate.measurements["windows_checked"], 0);
+        assert_eq!(gate.measurements["paragraphs_without_windows"], 2);
+        assert!(gate.findings.is_empty());
+
+        context.paragraphs.as_mut().unwrap()[0].text =
+            "One two three. Four five six. Seven eight nine. Ten eleven twelve.".into();
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        let gate = &report.gates[0];
+        assert_eq!(gate.status, GateStatus::NotChecked);
+        assert_eq!(gate.measurements["windows_checked"], 1);
+        assert_eq!(gate.measurements["paragraphs_without_windows"], 1);
+        assert_eq!(gate.findings.len(), 1);
+        assert_eq!(gate.findings[0].line, 1);
+
+        context.paragraphs.as_mut().unwrap().pop();
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(
+            report.gates[0].measurements["paragraphs_without_windows"],
+            0
+        );
+        let roundtrip: ContentPreset = toml::from_str(&toml::to_string(&preset).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(preset).unwrap(),
             serde_json::to_value(roundtrip).unwrap()
         );
     }
