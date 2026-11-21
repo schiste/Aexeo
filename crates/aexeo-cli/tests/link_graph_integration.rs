@@ -16,10 +16,14 @@ fn static_graph_rejects_ambiguous_inventory_context() {
         r#"{"inventory":{"identity":null,"complete":false,"complete":true,"pages":[]}}"#,
     )
     .unwrap();
+    let map = temp.path().join("urls.json");
+    fs::write(&map, r#"{"index.html":"https://example.org/"}"#).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args(["link-graph", "--static-site"])
         .arg(&site)
-        .args(["--site-origin", "https://example.org", "--context"])
+        .args(["--site-origin", "https://example.org", "--static-url-map"])
+        .arg(map)
+        .arg("--context")
         .arg(context)
         .output()
         .unwrap();
