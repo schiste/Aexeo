@@ -237,13 +237,18 @@ registry before considering the release delivered.
   explicit partial coverage when paragraphs cannot form a window. Existing
   cross-paragraph presets retain their behavior; adapter paragraphs do not
   necessarily distinguish list items from prose.
-- [ ] Add an opt-in prose-only rhythm scope with explicit, complete paragraph
+- [x] Add an opt-in prose-only rhythm scope with explicit, complete paragraph
   classification from Markdown, static HTML and EmDash. Keep existing preset
   behavior and public Rust callers compatible; unknown or partial classification
   must be `not_checked`, never interpreted as an empty list. Excluded items must
   break rolling windows, preserve original source positions and be counted in
   aggregate telemetry. Cover nested lists, adjacent prose, incomplete projections,
   text-only inputs and parity between CLI, content changes and EmDash/WASM.
+  Implemented across PRs #666–#668, #670–#673 and #675; EmDash aggregate
+  coverage telemetry is in #674. Host attestations for whole documents,
+  fragments and historical revisions are independent and opt-in. Unknown
+  custom components or incomplete body capabilities still yield `not_checked`.
+  These advisory measurements do not establish authorship or factual accuracy.
   A synthetic Markdown check at `f8a956d64bc6` with one introductory sentence,
   four four-word list items, `window_size = 3` and `min_stddev_words = 6` yielded
   three advisory low-variance windows crossing or contained in the list. The
