@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, validate_schema
+from verify_portable_verdict import compare, validate_link_evidence, validate_schema
 
 
 class PortableComparison(unittest.TestCase):
@@ -108,6 +108,103 @@ class PortableComparison(unittest.TestCase):
         self.fresh['verdict']['summary']['passed'] = 1
         self.previous['verdict']['findings_omitted'] = 1 << 64
         self.fresh['verdict']['findings_omitted'] = 1 << 64
+        with self.assertRaises(VerificationError):
+            self.check()
+
+    def test_observed_link_extension_is_closed_and_exclusive(self):
+        schema = Path(__file__).with_name('bound-verdict.schema.json')
+        envelope = copy.deepcopy(self.previous)
+        valid = {'inputs_sha256': 'a' * 64, 'observations_sha256': 'b' * 64}
+        envelope['verdict']['extensions'] = {'aexeo.observed-link-binding.v1': valid}
+        validate_schema(envelope, schema)
+        for bad in ({'inputs_sha256': 'a' * 64},
+                    dict(valid, extra=True),
+                    dict(valid, observations_sha256='B' * 64)):
+            envelope['verdict']['extensions'] = {'aexeo.observed-link-binding.v1': bad}
+            with self.subTest(bad=bad), self.assertRaises(VerificationError):
+                validate_schema(envelope, schema)
+        envelope['verdict']['extensions'] = {
+            'aexeo.observed-link-binding.v1': valid,
+            'aexeo.offline-input-binding.v1': 'c' * 64,
+        }
+        with self.assertRaises(VerificationError):
+            validate_schema(envelope, schema)
+
+    def test_link_evidence_is_strictly_bound_to_change_entries(self):
+        change = json.loads(self.artifacts['change'])
+        snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {'article': {
+            'version': 1, 'source_sha256': change['entries'][0]['after']['sha256'],
+            'destinations': ['https://example.org/'], 'observations': ['reachable']}}}
+        validate_link_evidence(snapshot, change)
+        mutations = [
+            lambda s: s.update(version=True),
+            lambda s: s.update(change_id='other'),
+            lambda s: s.update(extra=True),
+            lambda s: s['entries']['article'].update(version=1.0),
+            lambda s: s['entries']['article'].update(source_sha256='0' * 64),
+            lambda s: s['entries']['article'].update(observations=[]),
+            lambda s: s['entries']['article'].update(observations=['unknown']),
+            lambda s: s['entries']['article'].update(destinations=[1]),
+            lambda s: s['entries']['article'].update(destinations=['\ud800']),
+            lambda s: s['entries']['article'].update(extra=True),
+            lambda s: s['entries'].update(unknown=s['entries'].pop('article')),
+        ]
+        for mutate in mutations:
+            candidate = copy.deepcopy(snapshot)
+            mutate(candidate)
+            with self.subTest(mutation=mutate), self.assertRaises(VerificationError):
+                validate_link_evidence(candidate, change)
+
+    def test_rebound_link_evidence_still_requires_valid_shape_and_profile(self):
+        self.assertFalse(self.check()['publication_authorized'])
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {'article': {
+            'version': 1, 'source_sha256': change['entries'][0]['after']['sha256'],
+            'destinations': ['https://example.org/'], 'observations': ['reachable']}}}
+        extension = {'aexeo.observed-link-binding.v1': {
+            'inputs_sha256': 'a' * 64, 'observations_sha256': 'b' * 64}}
+
+        def rebind():
+            inputs = dict(self.artifacts, collection=self.artifacts.get('collection'),
+                          external_evidence=self.artifacts.get('external_evidence'),
+                          candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                          candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                          candidate_revision_sha256=revision_digest(candidate))
+            self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+
+        self.previous['verdict']['extensions'] = copy.deepcopy(extension)
+        self.fresh['verdict']['extensions'] = copy.deepcopy(extension)
+        self.artifacts['external_evidence'] = self.encoded(snapshot)
+        rebind()
+        self.assertFalse(self.check()['publication_authorized'])
+
+        mutations = [
+            lambda s: s.update(change_id='another-change'),
+            lambda s: s['entries']['article'].update(source_sha256='0' * 64),
+            lambda s: s['entries']['article'].update(observations=[]),
+            lambda s: s['entries']['article'].update(observations=['unknown']),
+            lambda s: s['entries']['article'].update(extra='secret-marker'),
+        ]
+        for mutation in mutations:
+            malformed = copy.deepcopy(snapshot)
+            mutation(malformed)
+            self.artifacts['external_evidence'] = self.encoded(malformed)
+            rebind()
+            with self.subTest(mutation=mutation), self.assertRaises(VerificationError):
+                self.check()
+
+        self.artifacts['external_evidence'] = self.encoded(snapshot)
+        offline = {'aexeo.offline-input-binding.v1': 'a' * 64}
+        self.previous['verdict']['extensions'] = copy.deepcopy(offline)
+        self.fresh['verdict']['extensions'] = copy.deepcopy(offline)
+        rebind()
+        with self.assertRaises(VerificationError):
+            self.check()
+        self.previous['verdict']['extensions'] = copy.deepcopy(extension)
+        self.fresh['verdict']['extensions'] = copy.deepcopy(extension)
+        del self.artifacts['external_evidence']
+        rebind()
         with self.assertRaises(VerificationError):
             self.check()
 

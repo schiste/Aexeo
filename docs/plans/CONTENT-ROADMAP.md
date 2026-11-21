@@ -108,6 +108,9 @@ is still required to inspect those pages. No CMS content was changed.
   ([#631](https://github.com/schiste/Aexeo/pull/631)). Real-host projection and
   independent editorial validation remain open.
 
+- [x] Bind host-supplied link observation snapshots to experimental portable v2
+  verdicts and compare their exact bytes independently. Snapshot provenance,
+  freshness, native Aethyme interoperability and publication safety remain open.
 - [x] Preserve the explicit `main` HTML scope in experimental portable v2
   verdicts ([#627](https://github.com/schiste/Aexeo/pull/627)). The real Aexeo
   CLI and independent Python comparator were tested. The synchronized Aexeo

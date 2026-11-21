@@ -27,10 +27,13 @@ schema or profile; it must not be accepted by silently falling back to v1.
 The current v1 verdict schema permits additional properties, so validating
 against it alone is insufficient for this stricter profile. The eventual v2
 schema must close every nested object and define which, if any, extensions are
-supported; an implementation must reject unrecognized extensions. The initial draft profile accepts only `aexeo.offline-input-binding.v1`, a
-64-character lowercase SHA-256 string. It is carried as informational legacy
-metadata; it does not replace the independently recomputed v2 binding or grant
-authority. The profile also permits `aexeo.html-content-scope.v1` with the exact
+supported; an implementation must reject unrecognized extensions. The draft accepts either `aexeo.offline-input-binding.v1`, a 64-character
+lowercase SHA-256 string, or `aexeo.observed-link-binding.v1`, an object with
+exactly `inputs_sha256` and `observations_sha256`, both lowercase SHA-256
+digests. These profiles are mutually exclusive. The observed-link profile
+requires external evidence; the offline profile requires its absence. The
+extensions are informational and do not replace the independently recomputed
+v2 binding or grant authority. The profile also permits `aexeo.html-content-scope.v1` with the exact
 value `main` when that HTML scope was selected; the host options bind the scope.
 Consumers that do not recognize this extension must reject the envelope.
 Producers must not silently discard other extensions.
@@ -101,9 +104,9 @@ The Rust API `evaluate_draft_portable_candidate_verdict` produces the draft
 envelope from an offline candidate using the existing overlay and evaluator.
 The CLI exposes it only with `--offline-receipt --experimental-bound-verdict
 --candidate-base BASE --candidate-after AFTER --evaluator-identity BUILD
---draft-portable-verdict`. This mode rejects `--link-observations` and
+--draft-portable-verdict`. This mode accepts host-supplied `--link-observations` and rejects
 `--verify-offline-receipt`; use the independent comparator below to compare a
-fresh result. It is not consumed by a publication runner. The
+fresh result. It does not fetch links or verify their origin or freshness. It is not consumed by a publication runner. The
 [draft wire schema](bound-verdict.schema.json) and [shared vector](portable-verdict-vector.json)
 are exercised by Rust and Python tests. Full verdict validation, interoperable
 artifact profiles and end-to-end host integration remain unfinished.
@@ -128,11 +131,17 @@ these reads do not authenticate provenance or guarantee atomic publication.
 obtained fresh envelope and current base, after-projections and exact artifact
 bytes. Supply `--previous`, `--fresh`, `--base`, `--after`, `--change`,
 `--resolved-policy`, `--host-options`, `--evaluator`, optional `--collection`,
-repeatable `--require-check`, and `--validator-name` and `--validator-version`.
+optional `--external-evidence`, repeatable `--require-check`, and
+`--validator-name` and `--validator-version`.
 The producer's artifact encodings are still Aexeo-specific; the host must
 obtain them independently rather than trust a bundle from the previous result.
-The comparator only supports offline evidence and rejects unknown change fields
-and extensions. It validates both verdicts and compares them except evaluation
+The comparator accepts no evidence for the offline profile, or exact snapshot
+bytes for the observed-link profile. It checks snapshot shape, change identity,
+source digests and observation counts and values. It does not independently
+extract destinations from content or authenticate observation origin or
+freshness: a trusted fresh evaluation must establish applicable source and link
+matching. It rejects unknown change fields and extensions. It validates both
+verdicts and compares them except evaluation
 time, but does not itself invoke or authenticate the fresh evaluator. It checks
 that the base declares completeness, not that the inventory is complete. Input
 reads are individually bounded and checked for observable changes; they are not
@@ -146,7 +155,10 @@ not the original preset TOML or a portable policy format. A host can run its
 independently selected, trusted Aexeo executable against protected current
 inputs with `--offline-receipt --offline-receipt-bundle` and the same preset,
 options and evaluator identity, then extract `artifacts.resolved_policy`,
-`artifacts.host_options` and the other exact UTF-8 artifact bytes. The
+`artifacts.host_options` and the other exact UTF-8 artifact bytes. When using
+link observations, export `artifacts.external_evidence` as exact UTF-8 bytes
+and provide it to the comparator with `--external-evidence`. The host must
+independently establish that these observations are current and trustworthy. The
 CLI/Python integration test exercises this separate invocation. The host must
 independently obtain and validate current change, collection and snapshot
 inputs; never use a bundle supplied with the previous verdict as evidence.

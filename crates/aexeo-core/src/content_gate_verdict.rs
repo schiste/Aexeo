@@ -1011,6 +1011,30 @@ pub fn evaluate_draft_portable_candidate_verdict<P: ConfinedContentFiles>(
     BoundVerdict::new(verdict, &inputs).map_err(anyhow::Error::msg)
 }
 
+/// Produce a draft portable verdict binding a source-bound link snapshot.
+/// The host must independently establish the observations' origin and freshness.
+pub fn evaluate_draft_portable_candidate_link_verdict<P: ConfinedContentFiles>(
+    context: &CandidateLinkDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
+    use aexeo_contracts::content_gate_portable_v2::{BoundVerdict, CurrentInputs};
+    let (base, candidate) = candidate_revisions(context.candidate)?;
+    let links = LinkSnapshotDecisionContext {
+        offline: context.candidate.decision,
+        snapshots: context.snapshots,
+    };
+    let artifacts = links.artifacts_with_html_scope(scope)?;
+    let inputs = CurrentInputs {
+        artifacts: artifacts.as_inputs(),
+        base_revision_sha256: &base,
+        candidate_revision_sha256: &candidate,
+    };
+    let verdict = evaluate_link_snapshot_context(&links, provider, evaluated_at, scope)?;
+    BoundVerdict::new(verdict, &inputs).map_err(anyhow::Error::msg)
+}
+
 /// Evaluate changed content and bind the independently built candidate snapshot.
 pub fn evaluate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     context: &CandidateDecisionContext<'_>,
