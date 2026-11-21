@@ -196,9 +196,13 @@ const hierarchyReport = await evaluateContent(hierarchyDocument, "test", { test:
 assert.equal(hierarchyReport.gates[0].status, "failed");
 assert.equal(hierarchyReport.gates[0].required_capability, "heading_levels");
 assert.equal(hierarchyReport.gates[0].measurements.skipped_levels, 1);
+assert.equal(hierarchyReport.gates[0].measurements.first_heading_level, 2);
+assert.equal(hierarchyReport.gates[0].measurements.deepest_heading_level, 4);
 assert.deepEqual(hierarchyReport.source_locations, [{ gate_id: "hierarchy", finding_index: 0, block_index: 1, span_index: 0, utf16_offset: 0 }]);
 const incompleteHierarchy = await evaluateContent({ ...hierarchyDocument, body_capabilities: ["text"] }, "test", { test: hierarchyPreset });
 assert.equal(incompleteHierarchy.gates[0].status, "not_checked");
+assert.equal(incompleteHierarchy.gates[0].measurements?.first_heading_level, undefined);
+assert.equal(incompleteHierarchy.gates[0].measurements?.deepest_heading_level, undefined);
 assert.deepEqual(incompleteHierarchy.gates[0].findings, []);
 console.log("WASM heading hierarchy smoke test passed");
 
