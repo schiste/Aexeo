@@ -32,6 +32,11 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- Withhold audit inventory eligibility for invalid snapshot dates, unobserved or
+  inverted crawl windows, and declared dates outside the observed UTC window.
+  Date agreement is only a consistency check; the host must still establish
+  provenance and that CMS and crawl describe the same point in time.
+
 - Links inside a closed `dialog` remain discoverable but are classified as
   conditional markup, including inside nested open dialogs. Older reports must
   be regenerated to account for this distinction.

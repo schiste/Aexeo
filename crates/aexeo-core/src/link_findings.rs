@@ -342,7 +342,7 @@ mod tests {
             "site":{"site_url":"https://example.org/", "root":"crawl", "deployment_model":"runtime_snapshot",
                 "crawl_meta":{"visited_pages":count, "max_pages":10, "discovered_internal_routes":count, "truncated":false},
                 "pages":pages},
-            "crawl_attestation":{"seeded_from":{"inventory_identity":identity(), "url_count":count}, "engine":"http"}}))
+            "crawl_attestation":{"seeded_from":{"inventory_identity":identity(), "url_count":count}, "engine":"http", "snapshot":{"started_at":"2026-11-07T00:00:00Z", "finished_at":"2026-11-07T23:59:59Z"}}}))
         .unwrap();
         artifact.findings = run_link_rules(&site_from_audit_artifact(&artifact).unwrap(), config);
         artifact
@@ -471,6 +471,31 @@ mod tests {
                 LegacyLinkConclusion::NotEligible
             );
         }
+    }
+
+    #[test]
+    fn unobserved_crawl_window_keeps_orphan_findings_unverified() {
+        let mut artifact = audit(
+            vec![
+                page("", "<main><a href='/a'>A</a></main>"),
+                page("a", "<main>A</main>"),
+                page("orphan", "<main>Orphan</main>"),
+            ],
+            &Config::default(),
+        );
+        artifact.crawl_attestation.as_mut().unwrap().snapshot = None;
+        let context = context(&published(&["", "a", "orphan"]));
+        let report = bound_report(&artifact, Some(&context)).unwrap();
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue == "audit_snapshot_window_unverified")
+        );
+        assert_eq!(
+            qualified(&report, "LNK002", "orphan").conclusion,
+            LegacyLinkConclusion::NotEligible
+        );
     }
 
     #[test]
