@@ -233,6 +233,22 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertEqual(native_result.returncode, 0, native_result.stderr + native_result.stdout)
                 self.assertEqual(json.loads(native_result.stdout)['status'], 'match')
                 self.assertFalse(json.loads(native_result.stdout)['publication_authorized'])
+                # A matching verdict file cannot override failed or unknown
+                # fresh process status supplied by the calling host.
+                for changes, omitted in (({'fresh_exit_code': 1}, ()),
+                                         ({'fresh_exit_code': 2}, ()),
+                                         ({'fresh_timed_out': True}, ()),
+                                         ({'fresh_exit_code': None}, ()),
+                                         ({}, ('fresh_exit_code',)),
+                                         ({}, ('fresh_timed_out',))):
+                    invalid_manifest = dict(native_manifest, **changes)
+                    for field in omitted:
+                        del invalid_manifest[field]
+                    (root / 'native-manifest').write_text(json.dumps(invalid_manifest), encoding='utf-8')
+                    rejected_process = subprocess.run(native_command, env=native_env, capture_output=True, text=True, check=False)
+                    self.assertEqual(rejected_process.returncode, 2, rejected_process.stderr + rejected_process.stdout)
+                    self.assertFalse(json.loads(rejected_process.stdout)['publication_authorized'])
+                (root / 'native-manifest').write_text(json.dumps(native_manifest), encoding='utf-8')
                 # Exercise the native boundary with independently changed site
                 # and candidate inputs, and an altered fresh verdict envelope.
                 for filename, mutate in (

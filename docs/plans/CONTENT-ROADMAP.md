@@ -455,6 +455,8 @@ registry before considering the release delivered.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  The optional cross-process test checks that the native Aethyme comparator
+  also rejects unsuccessful, timed-out and missing fresh process status.
   The independent draft Python comparator also requires an explicitly supplied
   successful fresh process exit and no timeout; these remain caller assertions,
   not authenticated execution or publication authorization.
