@@ -9,7 +9,7 @@ use aexeo_contracts::{
 };
 use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
-    content_gate_sources::{ConfinedContentFiles, SourceError},
+    content_gate_sources::{ConfinedContentFiles, ContentPhase, SourceError},
     content_gate_verdict::{
         ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions, ChangeLinkSnapshots,
         ScopedBindingKind, evaluate_change_with_collection_and_html_scope,
@@ -24,6 +24,7 @@ use aexeo_core::{
 use anyhow::Result;
 use clap::ArgMatches;
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -48,6 +49,8 @@ type PlatformProvider = aexeo_core::content_gate_sources::LinuxConfinedContentFi
 type PlatformProvider = aexeo_core::content_gate_sources::MacosConfinedContentFiles;
 
 struct HostFiles {
+    uri_root: Option<PathBuf>,
+    uri_paths: BTreeMap<(String, bool, String), PathBuf>,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     verdict_path: PathBuf,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -65,6 +68,8 @@ impl HostFiles {
             Ok(Self {
                 provider,
                 verdict_path: verdict_path.to_owned(),
+                uri_root: None,
+                uri_paths: BTreeMap::new(),
             })
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -73,7 +78,10 @@ impl HostFiles {
                 user_bail!("confined local content files are not supported on this platform");
             }
             let _ = verdict_path;
-            Ok(Self {})
+            Ok(Self {
+                uri_root: None,
+                uri_paths: BTreeMap::new(),
+            })
         }
     }
 }
@@ -100,6 +108,123 @@ impl ConfinedContentFiles for HostFiles {
             "local content files are not authorized",
         ))
     }
+
+    fn open_uri(&mut self, entity_id: &str, phase: ContentPhase, uri: &str) -> io::Result<File> {
+        let key = (
+            entity_id.to_owned(),
+            phase == ContentPhase::After,
+            uri.to_owned(),
+        );
+        let relative =
+            self.uri_paths.get(&key).cloned().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "URI content unavailable")
+            })?;
+        let root = self.uri_root.clone().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::PermissionDenied, "URI content unavailable")
+        })?;
+        self.open(&root, &relative)
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct HostContentMapEntry {
+    entry: usize,
+    state: HostContentMapPhase,
+    path: PathBuf,
+}
+
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum HostContentMapPhase {
+    Before,
+    After,
+}
+
+fn configure_host_content_map(
+    provider: &mut HostFiles,
+    map_path: &Path,
+    root: &Path,
+    change: &aexeo_contracts::content_gate_protocol::Change,
+    output: &Path,
+) -> Result<()> {
+    use std::path::Component;
+    protect_input(map_path, output, "host content map")?;
+    if !root.is_absolute() {
+        user_bail!("content root must be absolute");
+    }
+    let mut data = Vec::new();
+    File::open(map_path)
+        .user_context("opening host content map")?
+        .take(MAX_CHANGE_BYTES + 1)
+        .read_to_end(&mut data)
+        .user_context("reading host content map")?;
+    if data.len() as u64 > MAX_CHANGE_BYTES {
+        user_bail!("host content map exceeds the size limit");
+    }
+    let map: Vec<HostContentMapEntry> =
+        parse_lossless_json(&data).user_context("invalid host content map")?;
+    let expected = change
+        .entries
+        .iter()
+        .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
+        .flatten()
+        .filter(|state| state.inline.is_none())
+        .count();
+    if map.len() != expected {
+        user_bail!("host content map must cover every referenced state exactly once");
+    }
+    let mut seen = BTreeSet::new();
+    let mut uri_paths = BTreeMap::new();
+    for item in map {
+        let entry = change
+            .entries
+            .get(item.entry)
+            .user_context("invalid host content map entry")?;
+        let is_after = matches!(item.state, HostContentMapPhase::After);
+        if !seen.insert((item.entry, is_after)) {
+            user_bail!("duplicate host content map state");
+        }
+        let state = if is_after {
+            entry.after.as_ref()
+        } else {
+            entry.before.as_ref()
+        }
+        .user_context("host content map refers to an absent state")?;
+        if state.inline.is_some() {
+            user_bail!("host content map refers to inline content");
+        }
+        let relative = item
+            .path
+            .strip_prefix(root)
+            .user_context("host content map path is outside the content root")?;
+        if !item.path.is_absolute()
+            || relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|c| matches!(c, Component::Normal(_)))
+        {
+            user_bail!("invalid host content map path");
+        }
+        protect_input(&item.path, output, "host content")?;
+        if let Some(file) = &state.file {
+            if change.content_root.as_deref().map(Path::new) != Some(root)
+                || relative != Path::new(file)
+            {
+                user_bail!("host content map file does not match the declared file state");
+            }
+        } else if let Some(uri) = &state.uri {
+            uri_paths.insert(
+                (entry.entity_id.clone(), is_after, uri.clone()),
+                relative.to_owned(),
+            );
+        } else {
+            user_bail!("invalid referenced content state");
+        }
+    }
+    provider.uri_root = Some(root.to_owned());
+    provider.uri_paths = uri_paths;
+    Ok(())
 }
 
 // Atomic rename replaces the output path. Detect direct and common filesystem
@@ -269,6 +394,18 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         args.get_one::<String>("content-root").map(String::as_str),
         Path::new(&verdict_path),
     )?;
+    if let Some(path) = args.get_one::<String>("host-content-map") {
+        let root = args
+            .get_one::<String>("content-root")
+            .user_context("content root is required")?;
+        configure_host_content_map(
+            &mut provider,
+            Path::new(path),
+            Path::new(root),
+            &change,
+            Path::new(&verdict_path),
+        )?;
+    }
     let snapshots = args
         .get_one::<String>("link-observations")
         .map(|path| -> Result<ChangeLinkSnapshots> {
@@ -1039,7 +1176,10 @@ fn command_candidate_bound_verdict(
                 "link_snapshot_supplied":snapshots.is_some(), "revalidation":args.contains_id("verify-draft-portable-verdict"),
                 "file_state_count":decision.change.entries.iter().flat_map(|entry|
                     [entry.before.as_ref(), entry.after.as_ref()].into_iter().flatten())
-                    .filter(|state| state.file.is_some()).count()})
+                    .filter(|state| state.file.is_some()).count(),
+                "uri_state_count":decision.change.entries.iter().flat_map(|entry|
+                    [entry.before.as_ref(), entry.after.as_ref()].into_iter().flatten())
+                    .filter(|state| state.uri.is_some()).count()})
             );
         }
         return Ok(verdict_exit_code(verdict.verdict.status));
