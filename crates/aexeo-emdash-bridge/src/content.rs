@@ -834,7 +834,12 @@ pub fn evaluate_content_with_list_completeness(
     observations: Option<&[aexeo_core::content_gate::LinkReachabilityObservation]>,
     list_structure_complete: bool,
 ) -> anyhow::Result<ContentReport> {
-    let lists = portable_text_structured_lists(document, list_structure_complete);
+    let lists = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
+        .then(|| portable_text_structured_lists(document, list_structure_complete))
+        .flatten();
     let paragraph_list_items = preset
         .gates
         .iter()
