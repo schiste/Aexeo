@@ -990,9 +990,9 @@ fn candidate_revisions_inner(
     Ok((base, candidate))
 }
 
-// File-backed candidates are accepted only after confined, bounded reads
-// match both before and after snapshot bytes. URI retrieval remains unavailable.
-fn candidate_revisions_with_files<P: ConfinedContentFiles>(
+// Referenced candidates are accepted only after bounded, host-provided reads
+// match both before and after snapshot bytes. URI retrieval is host-controlled.
+fn candidate_revisions_with_references<P: ConfinedContentFiles>(
     context: &CandidateDecisionContext<'_>,
     provider: &mut P,
 ) -> Result<([u8; 32], [u8; 32])> {
@@ -1007,8 +1007,8 @@ fn candidate_revisions_with_files<P: ConfinedContentFiles>(
     }
     let revisions = candidate_revisions_inner(context, false)?;
     // candidate_revisions_inner already validated the overlay for these same
-    // immutable inputs; repeat only the bounded, confined file comparisons.
-    crate::content_gate_sources::verify_candidate_file_states_after_overlay(
+    // immutable inputs; repeat only the bounded referenced-state comparisons.
+    crate::content_gate_sources::verify_candidate_referenced_states_after_overlay(
         context.decision.change,
         context.base,
         context.after,
@@ -1028,7 +1028,7 @@ fn candidate_binding<P: ConfinedContentFiles>(
     use aexeo_contracts::content_gate_binding_v2::{
         CANDIDATE_REVISION_PROFILE, candidate_snapshot_binding,
     };
-    let (base_digest, candidate_digest) = candidate_revisions_with_files(context, provider)?;
+    let (base_digest, candidate_digest) = candidate_revisions_with_references(context, provider)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let binding = candidate_snapshot_binding(
         &[
@@ -1148,7 +1148,7 @@ pub fn evaluate_draft_portable_candidate_verdict<P: ConfinedContentFiles>(
     scope: HtmlContentScope,
 ) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
     use aexeo_contracts::content_gate_portable_v2::{BoundVerdict, CurrentInputs};
-    let (base, candidate) = candidate_revisions_with_files(context, provider)?;
+    let (base, candidate) = candidate_revisions_with_references(context, provider)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let inputs = CurrentInputs {
         artifacts: artifacts.as_inputs(),
@@ -1168,7 +1168,7 @@ pub fn evaluate_draft_portable_candidate_link_verdict<P: ConfinedContentFiles>(
     scope: HtmlContentScope,
 ) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
     use aexeo_contracts::content_gate_portable_v2::{BoundVerdict, CurrentInputs};
-    let (base, candidate) = candidate_revisions_with_files(context.candidate, provider)?;
+    let (base, candidate) = candidate_revisions_with_references(context.candidate, provider)?;
     let links = LinkSnapshotDecisionContext {
         offline: context.candidate.decision,
         snapshots: context.snapshots,
@@ -3317,6 +3317,88 @@ mod tests {
                 candidate_revision_sha256: &candidate_digest,
             };
             let portable = BoundVerdict::new(original.verdict.clone(), &current).unwrap();
+            if kind == "uri" {
+                struct HostUri(Vec<u8>);
+                impl ConfinedContentFiles for HostUri {
+                    type Reader = Cursor<Vec<u8>>;
+                    fn open(
+                        &mut self,
+                        _: &std::path::Path,
+                        _: &std::path::Path,
+                    ) -> io::Result<Self::Reader> {
+                        panic!("unexpected file access")
+                    }
+                    fn open_uri(
+                        &mut self,
+                        entity: &str,
+                        phase: ContentPhase,
+                        uri: &str,
+                    ) -> io::Result<Self::Reader> {
+                        assert_eq!(
+                            (entity, phase, uri),
+                            (
+                                "article",
+                                ContentPhase::After,
+                                "https://example.invalid/article"
+                            )
+                        );
+                        Ok(Cursor::new(self.0.clone()))
+                    }
+                }
+                assert!(
+                    evaluate_draft_portable_candidate_verdict(
+                        &ctx,
+                        &mut NoFiles,
+                        "2026-01-01T00:00:00Z",
+                        HtmlContentScope::Document
+                    )
+                    .is_err()
+                );
+                let mut host = HostUri(b"abc".to_vec());
+                let produced = evaluate_draft_portable_candidate_verdict(
+                    &ctx,
+                    &mut host,
+                    "2026-01-01T00:00:00Z",
+                    HtmlContentScope::Document,
+                )
+                .unwrap();
+                assert!(
+                    verify_draft_passing_candidate_with_content(
+                        &produced,
+                        &ctx,
+                        HtmlContentScope::Document,
+                        None,
+                        &requirements,
+                        &mut Bytes(b"abc".to_vec()),
+                        3,
+                        3
+                    )
+                    .is_ok()
+                );
+                assert!(
+                    revalidate_draft_portable_candidate(
+                        &produced,
+                        &ctx,
+                        None,
+                        &mut host,
+                        "2026-01-02T00:00:00Z",
+                        HtmlContentScope::Document
+                    )
+                    .is_ok()
+                );
+                host.0 = b"bad".to_vec();
+                assert!(
+                    revalidate_draft_portable_candidate(
+                        &produced,
+                        &ctx,
+                        None,
+                        &mut host,
+                        "2026-01-02T00:00:00Z",
+                        HtmlContentScope::Document
+                    )
+                    .is_err()
+                );
+            }
             for (content, limit, valid) in [
                 (b"abc".as_slice(), 3, true),
                 (b"wrong".as_slice(), 8, false),

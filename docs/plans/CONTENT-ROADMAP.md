@@ -881,6 +881,10 @@ missing fields retain observed prose but make body capabilities unavailable.
 - [x] Avoid a second inventory overlay when checking confined file states in the
   candidate verdict path; public file checks still validate the overlay and
   bounded byte comparisons remain unchanged.
+- [x] Permit Rust hosts to supply URI-referenced state streams explicitly for
+  draft candidate verdicts; the default remains unavailable, streams are phase-
+  and entity-scoped, bounded and verified against candidate bytes and digests.
+  Independent verification is still required; the CLI performs no URI retrieval.
 - [ ] Establish equivalent referenced-content interoperability in other hosts;
   URI fetching, snapshot provenance and publication authorization remain separate
   concerns.

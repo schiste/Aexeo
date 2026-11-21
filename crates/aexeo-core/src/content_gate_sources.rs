@@ -1,7 +1,8 @@
 //! Bounded, digest-checked access to proposed content-gate states.
 //!
 //! A host must provide confined file access. Lexical path validation alone
-//! does not prevent symlink traversal or races. URI retrieval is not performed.
+//! does not prevent symlink traversal or races. URI bytes may only be supplied
+//! by an explicitly implemented host provider; this module performs no retrieval.
 
 use aexeo_contracts::{
     content_gate_change_validation::validate_change_structure, content_gate_protocol::Change,
@@ -14,10 +15,27 @@ use std::{
 };
 
 /// The host must open only files within `root`, including in the presence of
-/// symlinks and concurrent filesystem changes. Errors must not expose content.
+/// symlinks and concurrent filesystem changes. The optional URI method is a
+/// separate host-controlled source; its default is unavailable. Errors must
+/// not expose content.
 pub trait ConfinedContentFiles {
     type Reader: Read;
     fn open(&mut self, root: &Path, relative: &Path) -> io::Result<Self::Reader>;
+
+    /// Return independently acquired bytes for this exact URI state. The default
+    /// is unavailable; the host controls acquisition, provenance and freshness.
+    /// The engine never retrieves URIs itself. Avoid including content in errors.
+    fn open_uri(
+        &mut self,
+        _entity_id: &str,
+        _phase: ContentPhase,
+        _uri: &str,
+    ) -> io::Result<Self::Reader> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "URI content unavailable",
+        ))
+    }
 }
 
 /// Linux directory-capability provider backed by the atomic `openat2` lookup.
@@ -264,10 +282,12 @@ pub fn verify_declared_content<P: IndependentContent>(
     Ok(())
 }
 
-/// Check declared file-backed states against the corresponding candidate bytes.
+/// Check declared referenced states against the corresponding candidate bytes.
+/// The function name is retained for compatibility with existing file hosts.
 ///
 /// The host selects a confined provider and must establish snapshot provenance,
-/// completeness, freshness and publication atomicity. URI sources are unavailable.
+/// completeness, freshness and publication atomicity. URI states require an
+/// explicitly implemented host provider; no URI is fetched by the engine.
 /// This helper does not authorize publication or evaluate the content.
 pub fn verify_candidate_file_states<P: ConfinedContentFiles>(
     change: &Change,
@@ -279,7 +299,7 @@ pub fn verify_candidate_file_states<P: ConfinedContentFiles>(
 ) -> Result<(), SourceError> {
     crate::content_candidate::overlay_candidate(base, change, after)
         .map_err(|_| SourceError::InvalidChange)?;
-    verify_candidate_file_states_after_overlay(
+    verify_candidate_referenced_states_after_overlay(
         change,
         base,
         after,
@@ -292,7 +312,7 @@ pub fn verify_candidate_file_states<P: ConfinedContentFiles>(
 // The caller must have successfully validated the overlay for these exact
 // immutable inputs. Keeping this private to the crate avoids rebuilding the
 // potentially large candidate inventory when the verdict path already did so.
-pub(crate) fn verify_candidate_file_states_after_overlay<P: ConfinedContentFiles>(
+pub(crate) fn verify_candidate_referenced_states_after_overlay<P: ConfinedContentFiles>(
     change: &Change,
     base: &crate::content_candidate::CandidateSnapshot,
     after: &[crate::content_candidate::CandidateItem],
@@ -323,9 +343,14 @@ pub(crate) fn verify_candidate_file_states_after_overlay<P: ConfinedContentFiles
         } else {
             &entry.entity_id
         };
-        for (state, item) in [
-            (entry.before.as_ref(), previous.get(old_id)),
+        for (phase, state, item) in [
             (
+                ContentPhase::Before,
+                entry.before.as_ref(),
+                previous.get(old_id),
+            ),
+            (
+                ContentPhase::After,
                 entry.after.as_ref(),
                 projected.get(entry.entity_id.as_str()),
             ),
@@ -339,14 +364,18 @@ pub(crate) fn verify_candidate_file_states_after_overlay<P: ConfinedContentFiles
             if state.inline.is_some() {
                 continue;
             }
-            let relative = state.file.as_deref().ok_or(SourceError::Unavailable)?;
-            let root = change
-                .content_root
-                .as_deref()
-                .ok_or(SourceError::InvalidChange)?;
-            let mut reader = provider
-                .open(Path::new(root), Path::new(relative))
-                .map_err(|_| SourceError::Unavailable)?;
+            let mut reader = if let Some(relative) = state.file.as_deref() {
+                let root = change
+                    .content_root
+                    .as_deref()
+                    .ok_or(SourceError::InvalidChange)?;
+                provider.open(Path::new(root), Path::new(relative))
+            } else if let Some(uri) = state.uri.as_deref() {
+                provider.open_uri(&entry.entity_id, phase, uri)
+            } else {
+                return Err(SourceError::Unavailable);
+            }
+            .map_err(|_| SourceError::Unavailable)?;
             let mut offset = 0usize;
             loop {
                 let count = reader
@@ -378,7 +407,8 @@ pub struct ResolvedEntry {
 
 /// Resolve every `after` state, verify its exact bytes, and enforce per-entry
 /// and aggregate limits. `before` states are not read by this function.
-/// Failures return no partial result. URI sources are explicitly unavailable.
+/// Failures return no partial result. URI bytes are unavailable unless an
+/// explicitly installed host provider supplies them; the engine performs no fetch.
 pub fn resolve_proposed_content<P: ConfinedContentFiles>(
     change: &Change,
     provider: &mut P,
@@ -396,14 +426,19 @@ pub fn resolve_proposed_content<P: ConfinedContentFiles>(
                     return Err(SourceError::TooLarge);
                 }
                 inline.as_bytes().to_vec()
-            } else if let Some(relative) = &state.file {
-                let root = change
-                    .content_root
-                    .as_deref()
-                    .ok_or(SourceError::InvalidChange)?;
-                let reader = provider
-                    .open(Path::new(root), Path::new(relative))
-                    .map_err(|_| SourceError::Unavailable)?;
+            } else {
+                let reader = if let Some(relative) = &state.file {
+                    let root = change
+                        .content_root
+                        .as_deref()
+                        .ok_or(SourceError::InvalidChange)?;
+                    provider.open(Path::new(root), Path::new(relative))
+                } else if let Some(uri) = &state.uri {
+                    provider.open_uri(&entry.entity_id, ContentPhase::After, uri)
+                } else {
+                    return Err(SourceError::Unavailable);
+                }
+                .map_err(|_| SourceError::Unavailable)?;
                 let mut bytes = Vec::new();
                 reader
                     .take((limit as u64).saturating_add(1))
@@ -413,8 +448,6 @@ pub fn resolve_proposed_content<P: ConfinedContentFiles>(
                     return Err(SourceError::TooLarge);
                 }
                 bytes
-            } else {
-                return Err(SourceError::Unavailable);
             };
             remaining -= bytes.len();
             let actual = format!("{:x}", Sha256::digest(&bytes));
@@ -590,6 +623,155 @@ mod tests {
             verify_candidate_file_states(&input, &altered, &after, &mut files, 8, 16),
             Err(SourceError::InvalidChange)
         );
+    }
+
+    #[test]
+    fn host_uri_streams_are_phase_bound_bounded_and_checked_against_candidate() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        struct Uris {
+            wrong_before: bool,
+            wrong_after: bool,
+            calls: Vec<ContentPhase>,
+        }
+        impl ConfinedContentFiles for Uris {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &Path, _: &Path) -> io::Result<Self::Reader> {
+                panic!("URI states must not open files")
+            }
+            fn open_uri(
+                &mut self,
+                entity: &str,
+                phase: ContentPhase,
+                uri: &str,
+            ) -> io::Result<Self::Reader> {
+                assert_eq!(entity, "file");
+                assert_eq!(
+                    uri,
+                    match phase {
+                        ContentPhase::Before => "https://example.invalid/before",
+                        ContentPhase::After => "https://example.invalid/after",
+                    }
+                );
+                self.calls.push(phase);
+                let bytes = match phase {
+                    ContentPhase::Before if !self.wrong_before => b"xyz",
+                    ContentPhase::After if !self.wrong_after => b"abc",
+                    _ => b"bad",
+                };
+                Ok(Cursor::new(bytes.to_vec()))
+            }
+        }
+        let mut input = change();
+        input.entries.retain(|entry| entry.entity_id == "file");
+        let after_state = input.entries[0].after.as_mut().unwrap();
+        after_state.file = None;
+        after_state.uri = Some("https://example.invalid/after".into());
+        let mut before = after_state.clone();
+        before.uri = Some("https://example.invalid/before".into());
+        before.sha256 = format!("{:x}", Sha256::digest(b"xyz"));
+        input.entries[0].before = Some(before.clone());
+        let item = CandidateItem {
+            entity_id: "file".into(),
+            public_path: "/file".into(),
+            media_type: "text/markdown".into(),
+            revision: None,
+            sha256: input.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        };
+        let mut old = item.clone();
+        old.sha256 = before.sha256;
+        old.source = "xyz".into();
+        let base = CandidateSnapshot {
+            scope: "published".into(),
+            site_id: "site".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![old],
+        };
+        let mut provider = Uris {
+            wrong_before: false,
+            wrong_after: false,
+            calls: vec![],
+        };
+        assert_eq!(
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                6
+            ),
+            Ok(())
+        );
+        assert_eq!(provider.calls, [ContentPhase::Before, ContentPhase::After]);
+        assert_eq!(
+            resolve_proposed_content(&input, &mut provider, 3, 3).unwrap()[0]
+                .text
+                .as_deref(),
+            Some("abc")
+        );
+        assert_eq!(provider.calls.last(), Some(&ContentPhase::After));
+        provider.wrong_before = true;
+        assert_eq!(
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                6
+            ),
+            Err(SourceError::DigestMismatch)
+        );
+        provider.wrong_before = false;
+        provider.wrong_after = true;
+        assert_eq!(
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                6
+            ),
+            Err(SourceError::DigestMismatch)
+        );
+        assert_eq!(
+            resolve_proposed_content(&input, &mut provider, 3, 3),
+            Err(SourceError::DigestMismatch)
+        );
+        provider.wrong_after = false;
+        assert_eq!(
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                5
+            ),
+            Err(SourceError::TooLarge)
+        );
+        assert_eq!(
+            resolve_proposed_content(&input, &mut provider, 2, 3),
+            Err(SourceError::TooLarge)
+        );
+        let mut unavailable = Fixture {
+            bytes: b"abc".to_vec(),
+            opens: 0,
+        };
+        assert_eq!(
+            resolve_proposed_content(&input, &mut unavailable, 3, 3),
+            Err(SourceError::Unavailable)
+        );
+        assert_eq!(
+            verify_candidate_file_states(&input, &base, &[item], &mut unavailable, 3, 6),
+            Err(SourceError::Unavailable)
+        );
+        assert_eq!(unavailable.opens, 0);
     }
 
     #[cfg(target_os = "linux")]
