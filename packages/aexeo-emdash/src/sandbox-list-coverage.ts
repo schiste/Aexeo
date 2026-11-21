@@ -24,10 +24,11 @@ export async function sandboxListCoverage(
       try { ctx.log?.warn?.("Aexeo list structure settings unavailable; list-dependent gates remain unverified"); } catch { /* advisory */ }
     }
   }
+  const attestedCollections = new Set(attested);
   let count = 0;
   const projected = documents.map((document, index) => {
     const collection = collections?.[index];
-    if (typeof collection !== "string" || !attested.includes(collection)) return document;
+    if (typeof collection !== "string" || !attestedCollections.has(collection)) return document;
     count++;
     return { ...document, list_structure_complete: true };
   });
