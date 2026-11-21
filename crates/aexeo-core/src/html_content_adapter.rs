@@ -151,6 +151,7 @@ pub fn html_content_with_paragraph_list_items(
     };
     let mut stack = vec![Event::Enter(root)];
     let mut text = String::new();
+    let mut literal_projection = crate::content_gate::ReferenceLiteralProjection::default();
     let mut headings = Vec::new();
     let mut heading_levels = Vec::new();
     let mut ranges = Vec::new();
@@ -215,7 +216,7 @@ pub fn html_content_with_paragraph_list_items(
                             && let Some(label) = reference_label(&node)
                             && crate::content_gate::numeric_reference_marker(&href.value, &label)
                         {
-                            text.push_str(&" ".repeat(label.len()));
+                            literal_projection.push_masked(&mut text, &label);
                             continue;
                         }
                         if tag == "img"
@@ -282,6 +283,7 @@ pub fn html_content_with_paragraph_list_items(
         });
         cursor = start;
     }
+    let literal_text = literal_projection.finish(&text);
     Ok((
         HtmlContent {
             input: ContentInput {
@@ -293,6 +295,7 @@ pub fn html_content_with_paragraph_list_items(
             },
             context: ContentContext {
                 paragraphs: Some(paragraphs),
+                literal_text,
                 block_ends: Some(block_ends),
                 ..Default::default()
             },

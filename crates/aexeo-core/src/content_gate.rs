@@ -40,6 +40,8 @@ pub struct ContentContext {
     pub paragraphs: Option<Vec<ContentParagraph>>,
     /// Explicit literal-Markdown link observations in the projected text, if available.
     pub literal_markdown_links: Option<Vec<(usize, usize)>>,
+    /// Text with reference labels restored for exact literal matching.
+    pub literal_text: Option<String>,
     /// Sorted byte offsets in the projected text where a block ends: a heading,
     /// paragraph, list item or table cell. A sentence ends there and a literal
     /// term does not match across it. Word counts treat it as a separator.
@@ -50,6 +52,44 @@ pub struct ContentContext {
     pub input_limit: Option<String>,
     /// Metadata keys whose values or absence were not observed by the adapter.
     pub unavailable_metadata_fields: Vec<String>,
+}
+
+/// Builds an unmasked literal projection only when a numeric reference occurs.
+/// Reference labels are ASCII and retain their byte offsets in the masked text.
+#[derive(Default)]
+pub struct ReferenceLiteralProjection {
+    original: Option<String>,
+    copied: usize,
+}
+
+impl ReferenceLiteralProjection {
+    pub fn push_masked(&mut self, projected: &mut String, label: &str) {
+        let original = self.original.get_or_insert_with(String::new);
+        original.push_str(&projected[self.copied..]);
+        original.push_str(label);
+        projected.push_str(&" ".repeat(label.len()));
+        self.copied = projected.len();
+    }
+
+    pub fn finish(mut self, projected: &str) -> Option<String> {
+        if let Some(original) = &mut self.original {
+            original.push_str(&projected[self.copied..]);
+        }
+        self.original
+    }
+}
+
+fn literal_projection_matches(projected: &str, literal: &str) -> bool {
+    projected.len() == literal.len()
+        && projected
+            .bytes()
+            .zip(literal.bytes())
+            .all(|(masked, original)| {
+                masked == original
+                    || (masked == b' '
+                        && (original.is_ascii_digit()
+                            || matches!(original, b'[' | b']' | b',' | b'-')))
+            })
 }
 
 // Accept only a complete calendar date; timestamps and implicit time zones are
@@ -2253,6 +2293,29 @@ impl ContentPreset {
         let mut word_count = None;
         let mut character_counts = [None, None];
         let mut literal_cache = None;
+        // Only validate the alternate projection when a literal gate can use it.
+        let literal_input = match (
+            input.text.as_deref(),
+            context.and_then(|ctx| ctx.literal_text.as_deref()),
+        ) {
+            (Some(projected), Some(literal))
+                if self.gates.iter().any(|gate| {
+                    matches!(
+                        gate,
+                        ContentGate::RepeatedTerms { .. }
+                            | ContentGate::RequiredTerms { .. }
+                            | ContentGate::ForbiddenTerms { .. }
+                    )
+                }) =>
+            {
+                if literal_projection_matches(projected, literal) {
+                    Ok(Some(literal))
+                } else {
+                    Err(())
+                }
+            }
+            (text, _) => Ok(text),
+        };
         let block_ends = context
             .and_then(|context| context.block_ends.as_deref())
             .unwrap_or_default();
@@ -3885,8 +3948,8 @@ impl ContentPreset {
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
                     measurements.insert("max_occurrences".into(), *max_occurrences);
-                    match &input.text {
-                        Some(text) => {
+                    match literal_input {
+                        Ok(Some(text)) => {
                             let mut total = 0;
                             let mut exceeded = 0;
                             let literal = cached_literal(
@@ -3925,7 +3988,12 @@ impl ContentPreset {
                             measurements.insert("matching_occurrences".into(), total);
                             measurements.insert("exceeded_terms".into(), exceeded);
                         }
-                        None => reason = Some("text is unavailable from this adapter".into()),
+                        Ok(None) => reason = Some("text is unavailable from this adapter".into()),
+                        Err(()) => {
+                            reason = Some(
+                                "literal text projection does not match the observed text".into(),
+                            )
+                        }
                     }
                 }
                 ContentGate::RequiredTerms {
@@ -3935,8 +4003,8 @@ impl ContentPreset {
                     ..
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
-                    match &input.text {
-                        Some(text) => {
+                    match literal_input {
+                        Ok(Some(text)) => {
                             let literal = cached_literal(
                                 &mut literal_cache,
                                 text,
@@ -3953,7 +4021,12 @@ impl ContentPreset {
                             measurements.insert("present_terms".into(), terms.len() - missing);
                             measurements.insert("missing_terms".into(), missing);
                         }
-                        None => reason = Some("text is unavailable from this adapter".into()),
+                        Ok(None) => reason = Some("text is unavailable from this adapter".into()),
+                        Err(()) => {
+                            reason = Some(
+                                "literal text projection does not match the observed text".into(),
+                            )
+                        }
                     }
                 }
                 ContentGate::ForbiddenTerms {
@@ -3963,8 +4036,8 @@ impl ContentPreset {
                     ..
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
-                    match &input.text {
-                        Some(text) => {
+                    match literal_input {
+                        Ok(Some(text)) => {
                             let mut matches = 0;
                             let literal = cached_literal(
                                 &mut literal_cache,
@@ -3994,7 +4067,12 @@ impl ContentPreset {
                             omitted += matches.saturating_sub(MAX_FINDINGS_PER_GATE);
                             measurements.insert("matches".into(), matches);
                         }
-                        None => reason = Some("text is unavailable from this adapter".into()),
+                        Ok(None) => reason = Some("text is unavailable from this adapter".into()),
+                        Err(()) => {
+                            reason = Some(
+                                "literal text projection does not match the observed text".into(),
+                            )
+                        }
                     }
                 }
                 ContentGate::RequiredHeadings { headings, .. } => {
@@ -5649,6 +5727,24 @@ max = 1
             .unwrap();
         assert!(
             missing
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+    }
+
+    #[test]
+    fn invalid_literal_projection_is_not_checked() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['xyz']\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['xyz']\n").unwrap();
+        let context = ContentContext {
+            literal_text: Some("xyz".into()),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&literal_input("abc"), None, None, Some(&context))
+            .unwrap();
+        assert!(
+            report
                 .gates
                 .iter()
                 .all(|gate| gate.status == GateStatus::NotChecked)

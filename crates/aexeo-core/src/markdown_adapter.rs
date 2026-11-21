@@ -873,6 +873,7 @@ struct Projection {
     unrepresented_list_item: bool,
     block_ends: Vec<usize>,
     link_count: usize,
+    literal_projection: crate::content_gate::ReferenceLiteralProjection,
     definitions: std::collections::BTreeMap<String, String>,
 }
 
@@ -953,7 +954,7 @@ impl Projection {
             {
                 self.link_count += 1;
                 if let Some(label) = reference_label(&link.children) {
-                    self.text.push_str(&" ".repeat(label.len()));
+                    self.literal_projection.push_masked(&mut self.text, label);
                 }
             }
             Node::LinkReference(link)
@@ -967,7 +968,7 @@ impl Projection {
             {
                 self.link_count += 1;
                 if let Some(label) = reference_label(&link.children) {
-                    self.text.push_str(&" ".repeat(label.len()));
+                    self.literal_projection.push_masked(&mut self.text, label);
                 }
             }
             Node::Break(_) => self.text.push('\n'),
@@ -1052,6 +1053,7 @@ fn extract_markdown_from_root(
         unrepresented_list_item,
         block_ends,
         link_count,
+        literal_projection,
         definitions: _,
     } = projection;
     if map_source {
@@ -1077,6 +1079,7 @@ fn extract_markdown_from_root(
         });
         cursor = start;
     }
+    let literal_text = literal_projection.finish(&text);
     let complete = !source_map.contains_html;
     source_map.paragraph_list_items_complete = complete && !unrepresented_list_item;
     Ok((
@@ -1090,6 +1093,7 @@ fn extract_markdown_from_root(
         },
         ContentContext {
             paragraphs: complete.then_some(paragraphs),
+            literal_text: if complete { literal_text } else { None },
             block_ends: complete.then_some(block_ends),
             input_limit: (!complete)
                 .then(|| "embedded HTML is not observed by the Markdown adapter".into()),

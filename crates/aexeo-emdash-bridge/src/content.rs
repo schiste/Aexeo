@@ -52,6 +52,7 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
 
 fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, ContentContext, usize) {
     let mut text = String::new();
+    let mut literal_projection = aexeo_core::content_gate::ReferenceLiteralProjection::default();
     let metadata = content_metadata(document);
     let mut headings = Vec::new();
     let mut line = 1;
@@ -96,10 +97,9 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
             link_count += current.difference(&previous).count();
             previous = current;
         }
-        let block_text = block
-            .children
-            .iter()
-            .map(|child| match child {
+        let block_start = text.len();
+        for child in &block.children {
+            match child {
                 PortableTextChild::Span(span) => {
                     let numeric_marker = span.text.bytes().any(|byte| byte.is_ascii_digit())
                         && span.text.bytes().all(|byte| {
@@ -111,14 +111,14 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
                             .iter()
                             .any(|mark| citation_keys.contains(mark.as_str()));
                     if numeric_marker {
-                        " ".repeat(span.text.len())
+                        literal_projection.push_masked(&mut text, &span.text);
                     } else {
-                        span.text.clone()
+                        text.push_str(&span.text);
                     }
                 }
-            })
-            .collect::<String>();
-        text.push_str(&block_text);
+            }
+        }
+        let block_text = text[block_start..].to_owned();
         if is_heading(&block.style) {
             headings.push(collapse_whitespace(&block_text));
         }
@@ -135,6 +135,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         block_ends.push(offset);
         offset += 1;
     }
+    let literal_text = literal_projection.finish(&text);
     (
         ContentInput {
             id: document.route.clone(),
@@ -146,6 +147,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         },
         ContentContext {
             paragraphs: Some(paragraphs),
+            literal_text,
             block_ends: Some(block_ends),
             unavailable_metadata_fields: {
                 let mut fields = document.unavailable_metadata_fields.clone();
@@ -1850,6 +1852,22 @@ field = "slug"
         assert_eq!(locations.len(), 31);
         assert_eq!((locations[1].span_index, locations[1].utf16_offset), (3, 0));
         assert_eq!(document.body[0].children.len(), 69);
+    }
+
+    #[test]
+    fn literal_gates_observe_numeric_references_while_rhythm_ignores_them() {
+        let document: EmdashDocument = serde_json::from_str(r##"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"r","_type":"link","href":"#reference-source"}],"children":[{"_type":"span","text":"Élan."},{"_type":"span","text":"[17]","marks":["r"]},{"_type":"span","text":" Next sentence."}]}]}"##).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['[17]']\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['[17]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=20\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].status, GateStatus::Failed);
+        assert_eq!(report.gates[2].measurements["sentence_count"], 2);
+        let location = source_locations(&document, &preset, &report);
+        assert!(
+            location
+                .iter()
+                .any(|item| item.span_index == 1 && item.utf16_offset == 0)
+        );
     }
 
     #[test]
