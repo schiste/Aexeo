@@ -186,6 +186,72 @@ describe("revision audits", () => {
     expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ locale_status: "unknown" });
   });
 
+  it("selects the preset using a trusted projection of the exact historical locale", async () => {
+    const { ctx } = host();
+    const locale = vi.fn(async () => "fr");
+    const telemetry = vi.fn();
+    const evaluate = vi.fn(async () => report);
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article", byLocale: { en: "news", fr: "opinion" } },
+      revisionLocale: locale, onRevisionLocaleTelemetry: telemetry, evaluate,
+    });
+    expect(locale).toHaveBeenCalledWith({ collection: "posts", id: "one", revision: "rev1" });
+    expect(evaluate).toHaveBeenCalledWith(expect.anything(), "opinion", undefined, undefined);
+    expect(result).toMatchObject({ status: "evaluated", preset: "opinion", locale_at_audit: "fr", locale_status: "changed",
+      assurance: { locale_source: "revision_provider", runtime_providers: "revision_locale_provider_invoked", publication_authorization: "not_granted" } });
+    expect(telemetry).toHaveBeenCalledWith({ status: "success", duration_ms: expect.any(Number) });
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain("rev1");
+    if (result.status !== "evaluated") throw new Error("expected report");
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ locale_at_audit: "fr", locale_status: "changed", assurance: { locale_source: "revision_provider" } });
+  });
+
+  it("passes the historical locale to a revision link observer", async () => {
+    const { ctx } = host();
+    const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    const observer = vi.fn(async () => ["reachable" as const]);
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article", byLocale: { fr: "opinion" } }, revisionLocale: async () => "fr",
+      revisionLinkObservations: observer, projectLinks: async () => ({ document: {} as never, destinations: ["https://example.org"] }),
+      evaluate: async () => initial,
+    });
+    expect(observer).toHaveBeenCalledWith(expect.objectContaining({ revision: "rev1", locale: "fr", preset: "opinion" }));
+    expect(result).toMatchObject({ status: "evaluated", assurance: { runtime_providers: "revision_locale_and_link_observer_invoked", locale_source: "revision_provider" } });
+  });
+
+  it.each([null, "", "private locale", "x".repeat(129), 42])("withholds an audit when the revision locale projection is unavailable: %s", async (value) => {
+    const { ctx } = host();
+    const evaluate = vi.fn(async () => report);
+    const telemetry = vi.fn();
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article" }, revisionLocale: async () => value as never, onRevisionLocaleTelemetry: telemetry, evaluate,
+    });
+    expect(result).toMatchObject({ status: "not_checked", reason: "revision_locale_unavailable" });
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(telemetry).toHaveBeenCalledWith({ status: "unavailable", duration_ms: expect.any(Number) });
+  });
+
+  it("withholds provider errors without exposing details or falling back to current locale", async () => {
+    const { ctx } = host();
+    const evaluate = vi.fn(async () => report);
+    const telemetry = vi.fn();
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article" }, revisionLocale: async () => { throw new Error("private error"); }, onRevisionLocaleTelemetry: telemetry, evaluate,
+    });
+    expect(result).toMatchObject({ status: "not_checked", reason: "revision_locale_read_failed" });
+    expect(JSON.stringify(result)).not.toContain("private error");
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(telemetry).toHaveBeenCalledWith({ status: "error", duration_ms: expect.any(Number) });
+  });
+
+  it("wires the historical locale provider through the configured audit route", async () => {
+    const { ctx } = host();
+    const locale = vi.fn(async () => "fr");
+    const plugin = createPlugin({ revisionAudits: true }, { revisionLocale: locale }) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    const result = await plugin.routes["audit-revision"]!.handler({ ...ctx, input: { collection: "posts", id: "one", revision: "rev1" } });
+    expect(locale).toHaveBeenCalledWith({ collection: "posts", id: "one", revision: "rev1" });
+    expect(result).toMatchObject({ status: "not_checked", reason: "preset_not_configured" });
+  });
+
   it("detects a locale change during evaluation", async () => {
     const { ctx, current } = host();
     const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
