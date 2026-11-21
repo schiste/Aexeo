@@ -281,6 +281,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut source_map = None;
     let mut heading_levels = None;
     let mut structured_lists = None;
+    let mut paragraph_list_items = None;
     let mut destinations = None;
     // The event exists only on request and never contains content, paths, or URLs.
     let mut html_projection = (measuring
@@ -322,6 +323,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?
             };
             heading_levels = map.heading_levels().map(<[u8]>::to_vec);
+            paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);
             link_count = map.links_complete().then_some(links);
             source_map = Some(map);
             context = Some(capabilities);
@@ -334,11 +336,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 aexeo_core::html_content_adapter::HtmlContentScope::Document
             };
-            match aexeo_core::html_content_adapter::html_content_with_scope_and_heading_levels(
+            match aexeo_core::html_content_adapter::html_content_with_paragraph_list_items(
                 &id, &text, scope,
             ) {
-                Ok((adapted, levels)) => {
+                Ok((adapted, levels, list_items)) => {
                     heading_levels = Some(levels);
+                    paragraph_list_items = list_items;
                     if html_projection.is_some() {
                         html_projection = Some(serde_json::json!({
                             "status": "complete",
@@ -513,7 +516,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
-        preset.evaluate_with_structured_lists(
+        preset.evaluate_with_paragraph_list_items(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -521,9 +524,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             !args.get_flag("collection-incomplete"),
             Some(&mut |event| gate_timer.observe(event)),
             structured_lists.as_deref(),
+            paragraph_list_items.as_deref(),
         )?
     } else {
-        preset.evaluate_with_structured_lists(
+        preset.evaluate_with_paragraph_list_items(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -531,6 +535,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             !args.get_flag("collection-incomplete"),
             None,
             structured_lists.as_deref(),
+            paragraph_list_items.as_deref(),
         )?
     };
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -1040,6 +1045,31 @@ fn print_telemetry(
         event["length_checks"] = serde_json::json!({
             "measured_gates": length_checks,
             "exceedances": length_exceedances,
+        });
+    }
+    let mut prose_gates = 0usize;
+    let mut prose_excluded = 0usize;
+    let mut prose_windows = 0usize;
+    for (result, gate) in report.gates.iter().zip(&preset.gates) {
+        if matches!(gate, ContentGate::ProseSentenceLengthVariance { .. })
+            && let Some(&excluded) = result.measurements.get("list_paragraphs_excluded")
+        {
+            prose_gates += 1;
+            prose_excluded = prose_excluded.saturating_add(excluded);
+            prose_windows = prose_windows.saturating_add(
+                result
+                    .measurements
+                    .get("windows_checked")
+                    .copied()
+                    .unwrap_or(0),
+            );
+        }
+    }
+    if prose_gates > 0 {
+        event["prose_variance"] = serde_json::json!({
+            "measured_gates": prose_gates,
+            "list_paragraphs_excluded": prose_excluded,
+            "windows_checked": prose_windows,
         });
     }
     if let Some((input_load_ms, adapter_ms, external_load_ms)) = stages {
