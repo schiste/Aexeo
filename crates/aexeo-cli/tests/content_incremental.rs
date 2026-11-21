@@ -303,3 +303,25 @@ fn metadata_modes_and_unknown_fields_are_not_silently_ignored() {
     input["unknown"] = json!(true);
     assert_ne!(run(&input, &[]).status.code(), Some(0));
 }
+
+#[test]
+fn metadata_only_update_reevaluates_the_unchanged_source() {
+    let source = "version=1\nname='custom'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n";
+    let mut input = metadata_batch(source);
+    let item = input["snapshot"]["items"][0].clone();
+    let state = json!({"sha256":item["sha256"],"inline":"abc"});
+    input["proposals"][0]["change"]["entries"] = json!([{"entity_id":"b","operation":"update","media_type":"text/plain","public_path":"/b","before":state,"after":state,"metadata":{}}]);
+    input["proposals"][0]["after"] = json!([item]);
+    input["proposals"].as_array_mut().unwrap().truncate(1);
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = &lines(&output)[0]["result"];
+    assert_eq!(result["evaluated"], 1);
+    assert_eq!(result["reused"], 0);
+    assert_eq!(result["reports"]["b"]["gates"][0]["status"], "failed");
+}
