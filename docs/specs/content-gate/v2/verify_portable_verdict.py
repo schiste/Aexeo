@@ -15,7 +15,7 @@ from compare_offline_receipts import (_typed_equal, require_passed_checks,
     require_validator_identity, validate_change_semantics, validate_verdict,
     verify_content_states)
 from verify_candidate_inputs import (LIMIT, VerificationError, binding, overlay,
-    parse, read_stable, revision_digest, validate_collection_projection)
+    parse, read_stable, revision_digest, text, validate_collection_projection)
 
 HERE = Path(__file__).resolve().parent
 REQUIRED = {'change', 'resolved_policy', 'host_options', 'evaluator'}
@@ -63,7 +63,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
             required_checks, expected_validator):
     """Check both outputs against current inputs; never authorize publication."""
     if (not isinstance(artifacts, dict) or not REQUIRED.issubset(artifacts)
-            or set(artifacts) - REQUIRED - {'collection'}
+            or set(artifacts) - REQUIRED - {'collection', 'external_evidence'}
             or any(not isinstance(value, bytes) for value in artifacts.values())
             or sum(map(len, artifacts.values())) > LIMIT or not artifacts['evaluator']):
         raise VerificationError('bounded independently acquired artifacts required')
@@ -82,8 +82,11 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     collection = artifacts.get('collection')
     if collection is not None:
         validate_collection_projection(parse(collection), candidate, change)
+    evidence = artifacts.get('external_evidence')
+    if evidence is not None:
+        validate_link_evidence(parse(evidence), change)
     current_binding = binding(dict(artifacts, collection=collection,
-        external_evidence=None, candidate_base_revision_sha256=revision_digest(base),
+        external_evidence=evidence, candidate_base_revision_sha256=revision_digest(base),
         candidate_revision_profile=b'content-gate.candidate-revision/v1',
         candidate_revision_sha256=revision_digest(candidate)))
     subject = {'change_id': change['change_id'], 'base': change['base'],
@@ -95,6 +98,9 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if not hmac.compare_digest(envelope['binding_sha256'], current_binding):
             raise VerificationError('candidate input binding differs')
         verdict = envelope['verdict']
+        observed = 'aexeo.observed-link-binding.v1' in verdict.get('extensions', {})
+        if observed != (evidence is not None):
+            raise VerificationError('link evidence does not match the verdict profile')
         validate_verdict(verdict)
         require_passed_checks(verdict, required_checks)
         require_validator_identity(verdict, expected_validator)
@@ -107,6 +113,30 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         raise VerificationError('verdicts differ')
     return {'input_binding': 'match', 'fresh_verdict_match': True,
             'required_check_count': len(required_checks), 'publication_authorized': False}
+
+
+def validate_link_evidence(snapshot, change):
+    """Check source-bound snapshot shape; the host must trust fresh evaluation."""
+    if (not isinstance(snapshot, dict) or set(snapshot) != {'version', 'change_id', 'entries'}
+            or type(snapshot['version']) is not int or snapshot['version'] != 1
+            or snapshot['change_id'] != change['change_id'] or not isinstance(snapshot['entries'], dict)):
+        raise VerificationError('invalid link observation snapshot')
+    entries = {entry['entity_id']: entry for entry in change['entries']}
+    for entity, item in snapshot['entries'].items():
+        entry = entries.get(entity)
+        if (not isinstance(item, dict)
+                or set(item) != {'version', 'source_sha256', 'destinations', 'observations'}
+                or type(item['version']) is not int or item['version'] != 1
+                or entry is None or entry.get('after') is None
+                or item['source_sha256'] != entry['after']['sha256']
+                or not isinstance(item['destinations'], list) or not isinstance(item['observations'], list)
+                or len(item['destinations']) != len(item['observations'])
+                or any(not isinstance(value, str) for value in item['destinations'])
+                or any(value not in ('reachable', 'not_found', 'not_checked', 'not_applicable')
+                       for value in item['observations'])):
+            raise VerificationError('invalid link observation snapshot entry')
+        for destination in item['destinations']:
+            text(destination)
 
 
 def _reject_unknown_change_fields(change):
@@ -136,6 +166,7 @@ def main():
                  'host-options', 'evaluator'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--collection')
+    parser.add_argument('--external-evidence', help='independently obtained link snapshot artifact')
     parser.add_argument('--require-check', action='append', required=True)
     parser.add_argument('--validator-name', required=True)
     parser.add_argument('--validator-version', required=True)
@@ -144,6 +175,8 @@ def main():
         artifacts = {name: read_stable(getattr(args, name)) for name in REQUIRED}
         if args.collection is not None:
             artifacts['collection'] = read_stable(args.collection)
+        if args.external_evidence is not None:
+            artifacts['external_evidence'] = read_stable(args.external_evidence)
         result = compare(read_stable(args.previous), read_stable(args.fresh),
                          read_stable(args.base), read_stable(args.after), artifacts,
                          args.require_check, (args.validator_name, args.validator_version))

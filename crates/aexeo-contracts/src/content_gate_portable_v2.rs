@@ -14,7 +14,8 @@ pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
 pub const PROFILE: &str = "content-gate.candidate-binding/v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
-/// This draft profile permits the informational Aexeo offline-binding and
+/// This draft profile permits the informational Aexeo offline-binding or
+/// observed-link-binding and
 /// explicit HTML main-scope extensions; other extensions are rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,6 +85,7 @@ impl BoundVerdict {
             verdict,
         };
         result.validate_verdict()?;
+        result.validate_evidence_profile(inputs)?;
         Ok(result)
     }
 
@@ -109,12 +111,30 @@ impl BoundVerdict {
             return Err("unsupported embedded verdict schema");
         }
         if let Some(extensions) = &self.verdict.extensions {
-            let digest = extensions
-                .get("aexeo.offline-input-binding.v1")
-                .and_then(serde_json::Value::as_str);
-            if !digest.is_some_and(is_sha256)
+            let offline = extensions.get("aexeo.offline-input-binding.v1");
+            let observed = extensions.get("aexeo.observed-link-binding.v1");
+            let valid_offline = offline
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(is_sha256);
+            let valid_observed =
+                observed
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|value| {
+                        value.len() == 2
+                            && ["inputs_sha256", "observations_sha256"].iter().all(|key| {
+                                value
+                                    .get(*key)
+                                    .and_then(serde_json::Value::as_str)
+                                    .is_some_and(is_sha256)
+                            })
+                    });
+            if (valid_offline as u8 + valid_observed as u8) != 1
+                || (offline.is_some() && !valid_offline)
+                || (observed.is_some() && !valid_observed)
                 || extensions.keys().any(|key| {
-                    key != "aexeo.offline-input-binding.v1" && key != "aexeo.html-content-scope.v1"
+                    key != "aexeo.offline-input-binding.v1"
+                        && key != "aexeo.observed-link-binding.v1"
+                        && key != "aexeo.html-content-scope.v1"
                 })
                 || extensions
                     .get("aexeo.html-content-scope.v1")
@@ -284,10 +304,22 @@ impl BoundVerdict {
         Ok(())
     }
 
+    fn validate_evidence_profile(&self, inputs: &CurrentInputs<'_>) -> Result<(), &'static str> {
+        let observed =
+            self.verdict.extensions.as_ref().is_some_and(|extensions| {
+                extensions.contains_key("aexeo.observed-link-binding.v1")
+            });
+        if observed != inputs.artifacts.external_evidence.is_some() {
+            return Err("link evidence does not match the verdict profile");
+        }
+        Ok(())
+    }
+
     /// Compare a binding recomputed solely from current caller-supplied inputs.
     /// A match does not establish a passing verdict or authorize publication.
     pub fn verify_inputs(&self, inputs: &CurrentInputs<'_>) -> Result<(), &'static str> {
         self.validate_verdict()?;
+        self.validate_evidence_profile(inputs)?;
         if self.binding_sha256 != binding(inputs)? {
             return Err("decision inputs differ");
         }
@@ -315,7 +347,7 @@ mod tests {
                 host_options: b"options",
                 evaluator: b"build",
                 collection: None,
-                external_evidence: Some(b""),
+                external_evidence: None,
             },
             base_revision_sha256: &[1; 32],
             candidate_revision_sha256: &[2; 32],
@@ -338,7 +370,7 @@ mod tests {
                 0 => changed.artifacts.resolved_policy = b"different",
                 1 => changed.artifacts.host_options = b"different",
                 2 => changed.artifacts.evaluator = b"different",
-                _ => changed.artifacts.external_evidence = None,
+                _ => changed.artifacts.external_evidence = Some(b""),
             }
             assert!(parsed.verify_inputs(&changed).is_err());
         }
@@ -377,6 +409,45 @@ mod tests {
                 "{replacement}"
             );
         }
+    }
+
+    #[test]
+    fn link_evidence_requires_a_matching_supported_profile() {
+        let mut linked = verdict();
+        linked.extensions = Some(BTreeMap::from([(
+            "aexeo.observed-link-binding.v1".into(),
+            serde_json::json!({"inputs_sha256": "a".repeat(64), "observations_sha256": "b".repeat(64)}),
+        )]));
+        let mut current = inputs();
+        current.artifacts.external_evidence = Some(b"snapshot");
+        let envelope = BoundVerdict::new(linked.clone(), &current).unwrap();
+        assert!(BoundVerdict::parse(&serde_json::to_vec(&envelope).unwrap()).is_ok());
+        assert!(envelope.verify_inputs(&current).is_ok());
+        let absent = inputs();
+        assert!(envelope.verify_inputs(&absent).is_err());
+        assert!(BoundVerdict::new(linked.clone(), &absent).is_err());
+        assert!(BoundVerdict::new(verdict(), &current).is_err());
+        let mut changed = inputs();
+        changed.artifacts.external_evidence = Some(b"changed");
+        assert!(envelope.verify_inputs(&changed).is_err());
+        for invalid in [
+            serde_json::json!({"inputs_sha256": "a".repeat(64)}),
+            serde_json::json!({"inputs_sha256": "a".repeat(64), "observations_sha256": "B".repeat(64)}),
+            serde_json::json!({"inputs_sha256": "a".repeat(64), "observations_sha256": "b".repeat(64), "extra": true}),
+        ] {
+            let mut bad = linked.clone();
+            bad.extensions
+                .as_mut()
+                .unwrap()
+                .insert("aexeo.observed-link-binding.v1".into(), invalid);
+            assert!(BoundVerdict::new(bad, &current).is_err());
+        }
+        let mut both = linked;
+        both.extensions.as_mut().unwrap().insert(
+            "aexeo.offline-input-binding.v1".into(),
+            serde_json::json!("a".repeat(64)),
+        );
+        assert!(BoundVerdict::new(both, &current).is_err());
     }
 
     #[test]

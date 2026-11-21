@@ -993,12 +993,25 @@ fn command_candidate_bound_verdict(
         after: &after,
     };
     if args.get_flag("draft-portable-verdict") {
-        let verdict = aexeo_core::content_gate_verdict::evaluate_draft_portable_candidate_verdict(
-            &context,
-            provider,
-            &iso_now(),
-            scope,
-        )
+        let verdict = if let Some(snapshots) = snapshots {
+            let links = CandidateLinkDecisionContext {
+                candidate: &context,
+                snapshots,
+            };
+            aexeo_core::content_gate_verdict::evaluate_draft_portable_candidate_link_verdict(
+                &links,
+                provider,
+                &iso_now(),
+                scope,
+            )
+        } else {
+            aexeo_core::content_gate_verdict::evaluate_draft_portable_candidate_verdict(
+                &context,
+                provider,
+                &iso_now(),
+                scope,
+            )
+        }
         .user_context("draft portable verdict evaluation failed")?;
         let bytes = serde_json::to_vec_pretty(&verdict)?;
         aexeo_contracts::content_gate_portable_v2::BoundVerdict::parse(&bytes)
@@ -1011,7 +1024,8 @@ fn command_candidate_bound_verdict(
             eprintln!(
                 "{}",
                 serde_json::json!({"event":"content_change_portable_draft", "version":1,
-                "status":verdict.verdict.status, "collection_supplied":decision.collection.is_some()})
+                "status":verdict.verdict.status, "collection_supplied":decision.collection.is_some(),
+                "link_snapshot_supplied":snapshots.is_some()})
             );
         }
         return Ok(verdict_exit_code(verdict.verdict.status));
