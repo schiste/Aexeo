@@ -123,6 +123,15 @@ is still required to inspect those pages. No CMS content was changed.
   Aethyme integration in [#1870](https://github.com/schiste/Aethyme/pull/1870)
   remains pending validation and merge. Offline comparison does not establish
   source provenance, completeness or freshness, or authorize publication.
+  On 2026-11-21 the Aexeo CLI at `acca16222721` and the resynchronized Aethyme
+  #1870 candidate at `33780a61c3d8` passed the standard and HTML-main native
+  interoperability scenarios, including rejection cases. The separately built
+  #1908 candidate at `7abfe345ed41` passed the source-bound link-observation
+  interoperability scenario. The Aethyme cross-process contract passed locally;
+  its local fast-guards gate failed because the macOS TCP listener listing was
+  unavailable in the agent environment. A separate macOS CI run was started;
+  these results do not establish that either PR has merged, authenticate inputs,
+  prove freshness or completeness, or make publication atomic.
 
 - [x] Preserve exact HTML finding positions around unambiguous `<hr>`
   separators when source reconstruction matches the projection
