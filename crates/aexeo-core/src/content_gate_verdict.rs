@@ -1051,6 +1051,13 @@ pub fn verify_draft_passing_candidate_with_content<
     max_total_bytes: usize,
 ) -> Result<()> {
     verify_html_scope_declaration(&envelope.verdict, scope)?;
+    if envelope.verdict.validator.profile.as_deref() != Some(context.decision.preset.name.as_str())
+    {
+        anyhow::bail!("verdict profile differs from the resolved policy");
+    }
+    if envelope.verdict.validator.version != env!("CARGO_PKG_VERSION") {
+        anyhow::bail!("verdict validator version differs from the host options");
+    }
     let (base_digest, candidate_digest) = candidate_revisions(context)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let mut inputs = artifacts.as_inputs();
@@ -2793,6 +2800,50 @@ mod tests {
                 HtmlContentScope::Document,
                 None,
                 &timed_out,
+                &mut bytes,
+                3,
+                3,
+            )
+            .is_err()
+        );
+        // Matching caller requirements cannot make misleading labels match the bound inputs.
+        for profile in [None, Some("unrelated-profile".to_owned())] {
+            let mut mislabeled = portable.clone();
+            mislabeled.verdict.validator.profile = profile;
+            assert!(mislabeled.verify_passing(&current, &requirements).is_ok());
+            assert!(
+                verify_draft_passing_candidate_with_content(
+                    &mislabeled,
+                    &ctx,
+                    HtmlContentScope::Document,
+                    None,
+                    &requirements,
+                    &mut bytes,
+                    3,
+                    3,
+                )
+                .is_err()
+            );
+        }
+        let mut mislabeled_version = portable.clone();
+        mislabeled_version.verdict.validator.version = "9.9.9".into();
+        let misleading_requirements =
+            aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+                validator_version: "9.9.9",
+                ..requirements
+            };
+        assert!(
+            mislabeled_version
+                .verify_passing(&current, &misleading_requirements)
+                .is_ok()
+        );
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &mislabeled_version,
+                &ctx,
+                HtmlContentScope::Document,
+                None,
+                &misleading_requirements,
                 &mut bytes,
                 3,
                 3,

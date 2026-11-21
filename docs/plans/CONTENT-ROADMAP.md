@@ -507,6 +507,8 @@ registry before considering the release delivered.
   compares that extension with its independently selected scope
   ([PR #703](https://github.com/schiste/Aexeo/pull/703)). These checks do not
   authenticate the options, evaluator, inputs or publication boundary.
+  The Rust candidate verifier also compares validator profile and version to
+  the reconstructed policy name and engine version; labels do not authenticate execution.
   The draft Python comparator also checks each verdict's validator version
   against the supplied host options and its profile against the supplied
   resolved policy name ([PR #709](https://github.com/schiste/Aexeo/pull/709)).

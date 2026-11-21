@@ -144,7 +144,10 @@ an independently supplied candidate context, then verifies the required passing
 checks and independently supplied content streams. An incomplete declared base,
 changed candidate, policy, scope, evidence or content fails the comparison. It
 also rejects a verdict whose declared HTML scope differs from the independently
-selected scope. It inherits the candidate implementation's inline-state restriction and Aexeo's
+selected scope, whose validator profile differs from the resolved policy name,
+or whose validator version differs from the engine version in host options. These
+comparisons detect inconsistent labels; they do not authenticate the evaluator.
+It inherits the candidate implementation's inline-state restriction and Aexeo's
 non-portable artifact encodings. The caller must acquire and trust the context,
 bytes and optional evidence independently, establish snapshot completeness and
 freshness, and protect the publication boundary. The helper does not establish
