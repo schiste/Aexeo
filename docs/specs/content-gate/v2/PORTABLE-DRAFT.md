@@ -30,7 +30,8 @@ schema must close every nested object and define which, if any, extensions are
 supported; an implementation must reject unrecognized extensions. The draft accepts either `aexeo.offline-input-binding.v1`, a 64-character
 lowercase SHA-256 string, or `aexeo.observed-link-binding.v1`, an object with
 exactly `inputs_sha256` and `observations_sha256`, both lowercase SHA-256
-digests. These profiles are mutually exclusive. The observed-link profile
+digests. Exactly one of these profiles is required in `verdict.extensions`;
+they are mutually exclusive. The observed-link profile
 requires external evidence; the offline profile requires its absence. The
 extensions are informational and do not replace the independently recomputed
 v2 binding or grant authority. The profile also permits `aexeo.html-content-scope.v1` with the exact
