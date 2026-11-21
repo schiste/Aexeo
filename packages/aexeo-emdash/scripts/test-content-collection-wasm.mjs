@@ -455,6 +455,21 @@ assert.equal(citedReport.source_locations.length, 31);
 assert.equal(JSON.stringify(citedDocument), originalCitations);
 console.log("WASM sentence analysis preserves reference markers and source locations");
 
+// A visible URL split across spans must not create artificial sentence breaks.
+const urlDocument = { route: "/url", title: "URL", body: [{ children: [
+  { _type: "span", text: "See https://example." },
+  { _type: "span", text: "org/a.b?x=1. " },
+  { _type: "span", text: "Next sentence." },
+] }] };
+const originalUrlDocument = JSON.stringify(urlDocument);
+const urlReport = await evaluateContent(urlDocument, "citation-test", { "citation-test": sentencePreset });
+assert.equal(urlReport.gates[0].measurements.sentence_count, 2);
+assert.equal(urlReport.source_locations.length, 2);
+assert.equal(urlReport.source_locations[1].span_index, 2);
+assert.equal(urlReport.source_locations[1].utf16_offset, 0);
+assert.equal(JSON.stringify(urlDocument), originalUrlDocument);
+console.log("WASM preserves URL punctuation and Portable Text source locations");
+
 // Segment boundaries and formatting must not change citation projection or erase
 // a year inside an ordinary linked label.
 const segmentedCitation = { route: "/segmented", title: "References", body: [{
