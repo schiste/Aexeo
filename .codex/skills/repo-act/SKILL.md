@@ -92,6 +92,12 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `packages/aexeo-emdash`, run `npm run build:wasm && npm run build:ts &&
   npm run build:bundle && npm run test:wasm`. TypeScript alone does not create
   `dist/content.js`, which the WASM tests import.
+  The build bundles private modules into public entry points instead of emitting
+  every internal JavaScript file. Exercise integration tests through a shipped
+  entry point such as `dist/configured.js`, not a private `dist/*.js` path.
+- For worker integration tests, close `createTestHarness` with `await harness.close()`
+  in `finally`; a nonexistent cleanup method can mask the original assertion and
+  leave the test process running.
 - For whole-word literal gates, test decomposed combining marks and lowercase
   expansions, both whole-word and substring modes, and confirm later match
   positions across CLI adapters and the rebuilt EmDash WASM bridge.
@@ -100,6 +106,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   on both consecutive and windowed paths. Assert unsupported boundaries yield
   `not_checked` rather than a pass or finding; exercise the shared CLI and
   EmDash projections where applicable.
+- For structural adapter classifications, test source blocks that yield no
+  projected paragraph (such as an empty list item), not just classifications of
+  visible paragraphs. An omitted block can hide a boundary; withhold completeness
+  unless the consumer can preserve that boundary, and distinguish unknown from
+  an observed empty structure.
 - For rules with overlapping triggers, isolate the trigger under test in the
   regression fixture and confirm the test fails before the fix; another
   matching trigger can otherwise hide the defect.
