@@ -40,8 +40,6 @@ pub struct ContentContext {
     pub paragraphs: Option<Vec<ContentParagraph>>,
     /// Explicit literal-Markdown link observations in the projected text, if available.
     pub literal_markdown_links: Option<Vec<(usize, usize)>>,
-    /// Text with reference labels restored for exact literal matching.
-    pub literal_text: Option<String>,
     /// Sorted byte offsets in the projected text where a block ends: a heading,
     /// paragraph, list item or table cell. A sentence ends there and a literal
     /// term does not match across it. Word counts treat it as a separator.
@@ -2151,6 +2149,7 @@ impl ContentPreset {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -2169,6 +2168,7 @@ impl ContentPreset {
             destinations,
             true,
             Some(observer),
+            None,
             None,
             None,
             None,
@@ -2191,6 +2191,7 @@ impl ContentPreset {
             destinations,
             complete,
             observer,
+            None,
             None,
             None,
             None,
@@ -2218,6 +2219,7 @@ impl ContentPreset {
             heading_levels,
             None,
             None,
+            None,
         )
     }
 
@@ -2241,6 +2243,7 @@ impl ContentPreset {
             observer,
             heading_levels,
             lists,
+            None,
             None,
         )
     }
@@ -2268,6 +2271,35 @@ impl ContentPreset {
             heading_levels,
             lists,
             paragraph_list_items,
+            None,
+        )
+    }
+
+    /// Evaluate with an optional literal projection retaining numeric reference labels.
+    /// The projection is checked against the text observed by the adapter.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_literal_projection(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        heading_levels: Option<&[u8]>,
+        collection_complete: bool,
+        observer: Option<&mut dyn FnMut(GateObservation)>,
+        lists: Option<&[crate::markdown_adapter::StructuredList]>,
+        paragraph_list_items: Option<&[bool]>,
+        literal_projection: Option<&str>,
+    ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            collection_complete,
+            observer,
+            heading_levels,
+            lists,
+            paragraph_list_items,
+            literal_projection,
         )
     }
 
@@ -2282,6 +2314,7 @@ impl ContentPreset {
         heading_levels: Option<&[u8]>,
         lists: Option<&[crate::markdown_adapter::StructuredList]>,
         paragraph_list_items: Option<&[bool]>,
+        literal_projection: Option<&str>,
     ) -> Result<ContentReport> {
         let site = capabilities.site;
         let extensions = capabilities.extensions;
@@ -2294,10 +2327,7 @@ impl ContentPreset {
         let mut character_counts = [None, None];
         let mut literal_cache = None;
         // Only validate the alternate projection when a literal gate can use it.
-        let literal_input = match (
-            input.text.as_deref(),
-            context.and_then(|ctx| ctx.literal_text.as_deref()),
-        ) {
+        let literal_input = match (input.text.as_deref(), literal_projection) {
             (Some(projected), Some(literal))
                 if self.gates.iter().any(|gate| {
                     matches!(
@@ -5736,12 +5766,18 @@ max = 1
     #[test]
     fn invalid_literal_projection_is_not_checked() {
         let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['xyz']\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['xyz']\n").unwrap();
-        let context = ContentContext {
-            literal_text: Some("xyz".into()),
-            ..Default::default()
-        };
         let report = preset
-            .evaluate_with_context(&literal_input("abc"), None, None, Some(&context))
+            .evaluate_with_literal_projection(
+                &literal_input("abc"),
+                &ContentEvaluationContext::default(),
+                None,
+                None,
+                true,
+                None,
+                None,
+                None,
+                Some("xyz"),
+            )
             .unwrap();
         assert!(
             report

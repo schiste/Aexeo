@@ -1919,6 +1919,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
         if item_preset.gates.is_empty() {
             continue;
         }
+        let mut literal_projection = None;
         let mut heading_levels = None;
         let mut paragraph_list_items = None;
         let mut structured_lists = if entry.media_type == "text/markdown"
@@ -1938,6 +1939,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             "text/markdown" => {
                 let adapted =
                     markdown_input_with_source_map_and_destinations(&entry.entity_id, &text)?;
+                literal_projection = adapted.source_map.literal_projection().map(str::to_owned);
                 heading_levels = adapted.source_map.heading_levels().map(<[u8]>::to_vec);
                 paragraph_list_items = adapted
                     .source_map
@@ -1956,12 +1958,13 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 )
             }
             "text/html" => {
-                match crate::html_content_adapter::html_content_with_paragraph_list_items(
+                match crate::html_content_adapter::html_content_with_literal_projection(
                     &entry.entity_id,
                     &text,
                     html_scope,
                 ) {
-                    Ok((adapted, levels, list_items)) => {
+                    Ok((adapted, levels, list_items, literal_text)) => {
+                        literal_projection = literal_text;
                         if item_preset.gates.iter().any(|gate| {
                             matches!(gate, crate::content_gate::ContentGate::ListItemCount { .. })
                         }) {
@@ -2090,7 +2093,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             link_reachability: observations.as_deref(),
             collection: collection.as_ref().map(|collection| collection.items),
         };
-        let report = item_preset.evaluate_with_paragraph_list_items(
+        let report = item_preset.evaluate_with_literal_projection(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -2101,6 +2104,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             None,
             structured_lists.as_deref(),
             paragraph_list_items.as_deref(),
+            literal_projection.as_deref(),
         )?;
         let identity_projection = input.text.as_deref().is_some()
             && input.text.as_deref() == input.source_text.as_deref();
@@ -5763,6 +5767,42 @@ mod tests {
                     .and_then(|finding| finding.location.clone()),
                 location,
                 "{media}: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn change_verdict_literal_terms_see_reference_labels() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['[17]']\n").unwrap();
+        for (media, source) in [
+            ("text/markdown", "Élan.[[17]](#reference-source) Next."),
+            (
+                "text/html",
+                "<p>Élan.<a href='#reference-source'>[17]</a> Next.</p>",
+            ),
+        ] {
+            let mut input = change();
+            input.entries[0].media_type = media.into();
+            let state = input.entries[0].after.as_mut().unwrap();
+            state.inline = Some(source.into());
+            state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            let report = evaluate_change(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+            )
+            .unwrap();
+            assert!(report.findings.is_empty(), "{media}");
+            assert!(
+                report
+                    .checks
+                    .iter()
+                    .all(|check| check.status == CheckStatus::Passed),
+                "{media}"
             );
         }
     }

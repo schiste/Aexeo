@@ -34,9 +34,15 @@ pub struct MarkdownSourceMap {
     contains_html: bool,
     paragraph_list_items: Vec<bool>,
     paragraph_list_items_complete: bool,
+    literal_text: Option<String>,
 }
 
 impl MarkdownSourceMap {
+    /// Unmasked reference labels for literal checks, when present.
+    pub fn literal_projection(&self) -> Option<&str> {
+        self.literal_text.as_deref()
+    }
+
     /// Whether Markdown exposed all link-bearing markup to the adapter.
     pub fn links_complete(&self) -> bool {
         !self.contains_html
@@ -1081,6 +1087,7 @@ fn extract_markdown_from_root(
     }
     let literal_text = literal_projection.finish(&text);
     let complete = !source_map.contains_html;
+    source_map.literal_text = if complete { literal_text } else { None };
     source_map.paragraph_list_items_complete = complete && !unrepresented_list_item;
     Ok((
         ContentInput {
@@ -1093,7 +1100,6 @@ fn extract_markdown_from_root(
         },
         ContentContext {
             paragraphs: complete.then_some(paragraphs),
-            literal_text: if complete { literal_text } else { None },
             block_ends: complete.then_some(block_ends),
             input_limit: (!complete)
                 .then(|| "embedded HTML is not observed by the Markdown adapter".into()),

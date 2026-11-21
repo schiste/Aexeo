@@ -112,6 +112,19 @@ pub fn html_content_with_paragraph_list_items(
     source: &str,
     scope: HtmlContentScope,
 ) -> Result<HtmlParagraphProjection, &'static str> {
+    html_content_with_literal_projection(id, source, scope)
+        .map(|(content, levels, items, _)| (content, levels, items))
+}
+
+/// A paragraph projection and its optional unmasked reference-label view.
+pub type HtmlLiteralProjection = (HtmlContent, Vec<u8>, Option<Vec<bool>>, Option<String>);
+
+/// Project HTML with an optional unmasked reference-label view for literal checks.
+pub fn html_content_with_literal_projection(
+    id: impl Into<String>,
+    source: &str,
+    scope: HtmlContentScope,
+) -> Result<HtmlLiteralProjection, &'static str> {
     if source.len() > MAX_CONTENT_INPUT_BYTES {
         return Err("HTML exceeds the content input byte limit");
     }
@@ -295,7 +308,6 @@ pub fn html_content_with_paragraph_list_items(
             },
             context: ContentContext {
                 paragraphs: Some(paragraphs),
-                literal_text,
                 block_ends: Some(block_ends),
                 ..Default::default()
             },
@@ -303,6 +315,7 @@ pub fn html_content_with_paragraph_list_items(
         },
         heading_levels,
         (!root_inside_list && !unrepresented_list_item).then_some(paragraph_list_items),
+        literal_text,
     ))
 }
 

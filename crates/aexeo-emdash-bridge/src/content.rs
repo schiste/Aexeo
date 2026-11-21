@@ -50,7 +50,9 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
     content_input_with_context(document).0
 }
 
-fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, ContentContext, usize) {
+fn content_input_with_context(
+    document: &EmdashDocument,
+) -> (ContentInput, ContentContext, usize, Option<String>) {
     let mut text = String::new();
     let mut literal_projection = aexeo_core::content_gate::ReferenceLiteralProjection::default();
     let metadata = content_metadata(document);
@@ -147,7 +149,6 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         },
         ContentContext {
             paragraphs: Some(paragraphs),
-            literal_text,
             block_ends: Some(block_ends),
             unavailable_metadata_fields: {
                 let mut fields = document.unavailable_metadata_fields.clone();
@@ -163,6 +164,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
             ..Default::default()
         },
         link_count,
+        literal_text,
     )
 }
 
@@ -849,7 +851,7 @@ pub fn evaluate_content_with_list_completeness(
         .then(|| portable_text_paragraph_list_items(document, list_structure_complete))
         .flatten();
     let [text, headings, paragraphs, links] = capabilities;
-    let (mut input, mut context, link_count) = content_input_with_context(document);
+    let (mut input, mut context, link_count, literal_text) = content_input_with_context(document);
     if text
         && preset
             .gates
@@ -883,7 +885,7 @@ pub fn evaluate_content_with_list_completeness(
             .filter_map(|block| heading_level(&block.style))
             .collect()
     });
-    preset.evaluate_with_paragraph_list_items(
+    preset.evaluate_with_literal_projection(
         &input,
         &ContentEvaluationContext {
             adapter: Some(&context),
@@ -898,6 +900,7 @@ pub fn evaluate_content_with_list_completeness(
         None,
         lists.as_deref(),
         paragraph_list_items.as_deref(),
+        literal_text.as_deref(),
     )
 }
 
@@ -1879,7 +1882,7 @@ field = "slug"
     #[test]
     fn projection_preserves_empty_blocks_multispan_text_and_newlines() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":" A "},{"_type":"span","text":" B"}]},{"children":[]},{"children":[{"_type":"span","text":"a\n"},{"_type":"span","text":"é"}]}]}"#).unwrap();
-        let (input, context, _) = content_input_with_context(&document);
+        let (input, context, _, _) = content_input_with_context(&document);
         assert_eq!(input.text.as_deref(), Some(" A  B\n\na\né"));
         assert_eq!(
             input.headings.as_deref(),
@@ -1897,7 +1900,7 @@ field = "slug"
     #[test]
     fn paragraphs_have_projected_positions_and_exclude_headings() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"First\nline"}]},{"children":[{"_type":"span","text":"Second"}]}]}"#).unwrap();
-        let (_, context, _) = content_input_with_context(&document);
+        let (_, context, _, _) = content_input_with_context(&document);
         let paragraphs = context.paragraphs.unwrap();
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].line, 2);

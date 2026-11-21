@@ -116,8 +116,10 @@ host renders Portable Text as rich text rather than interpreting Markdown.
 
 Numeric reference labels linked to `#reference-…` are masked in sentence-rhythm
 projections to avoid merging sentences. Literal required, forbidden and repeated
-term checks instead see those labels in Markdown, HTML and Portable Text, while
-keeping the original projected offsets. Other checks still use their documented
+term checks in the content CLI, change verdict, incremental evaluation and EmDash
+instead see those labels in Markdown, HTML and Portable Text, while keeping the
+original projected offsets. Rust hosts using the adapters directly must pass the
+optional literal projection to `evaluate_with_literal_projection`. Other checks still use their documented
 projection; this does not verify citations or source support. If a supplied
 literal projection is inconsistent with the observed text, the literal checks
 are `not_checked`.
