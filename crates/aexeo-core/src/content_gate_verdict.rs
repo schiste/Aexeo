@@ -120,6 +120,46 @@ impl ChangeLinkSnapshots {
     }
 }
 
+// Verify supplied observations against the same extraction used during
+// evaluation. Missing snapshots remain missing; they are not inferred as empty.
+fn verify_candidate_link_destinations(
+    snapshots: &ChangeLinkSnapshots,
+    change: &Change,
+    preset: &ContentPreset,
+    scope: HtmlContentScope,
+) -> Result<()> {
+    let mut observer = snapshots.observer(change, preset)?;
+    for entry in &change.entries {
+        if !snapshots.entries.contains_key(&entry.entity_id) {
+            continue;
+        }
+        let source = entry
+            .after
+            .as_ref()
+            .and_then(|state| state.inline.as_deref())
+            .ok_or_else(|| anyhow::anyhow!("link observation source is unavailable"))?;
+        let destinations = match entry.media_type.as_str() {
+            "text/markdown" => {
+                markdown_input_with_source_map_and_destinations(&entry.entity_id, source)?
+                    .destinations
+                    .ok_or_else(|| anyhow::anyhow!("link destinations are unavailable"))?
+            }
+            "text/html" => {
+                crate::html_content_adapter::html_content_with_scope(
+                    &entry.entity_id,
+                    source,
+                    scope,
+                )
+                .map_err(anyhow::Error::msg)?
+                .destinations
+            }
+            _ => bail!("link observation media type is unsupported"),
+        };
+        observer.observe(&entry.entity_id, &destinations)?;
+    }
+    Ok(())
+}
+
 impl ChangeLinkSnapshotObserver<'_> {
     /// Return observations only when extracted destinations match exactly.
     pub fn observe(
@@ -1029,7 +1069,12 @@ pub fn verify_draft_passing_candidate_with_content<
     if let Some(evidence) = external_evidence {
         let snapshots: ChangeLinkSnapshots =
             aexeo_contracts::content_gate_change_validation::parse_lossless_json(evidence)?;
-        snapshots.observer(context.decision.change, context.decision.preset)?;
+        verify_candidate_link_destinations(
+            &snapshots,
+            context.decision.change,
+            context.decision.preset,
+            scope,
+        )?;
     }
     Ok(())
 }
@@ -4761,6 +4806,125 @@ mod tests {
     }
 
     #[test]
+    fn candidate_link_destinations_obey_selected_html_scope() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        use sha2::{Digest, Sha256};
+        let mut change = change();
+        let source = "<nav><a href='/nav'>Nav</a></nav><main><a href='/inside'>Inside</a></main>";
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let source_digest = state.sha256.clone();
+        change.entries[0].media_type = "text/html".into();
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n",
+        ).unwrap();
+        let mut snapshots = ChangeLinkSnapshots {
+            version: 1,
+            change_id: change.change_id.clone(),
+            entries: [(
+                "article".into(),
+                LinkObservationSnapshot {
+                    version: 1,
+                    source_sha256: source_digest,
+                    destinations: vec!["/inside".into()],
+                    observations: vec![Observation::Reachable],
+                },
+            )]
+            .into(),
+        };
+        assert!(
+            verify_candidate_link_destinations(
+                &snapshots,
+                &change,
+                &policy,
+                HtmlContentScope::Main
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_candidate_link_destinations(
+                &snapshots,
+                &change,
+                &policy,
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let entry = snapshots.entries.get_mut("article").unwrap();
+        entry.destinations = vec!["/nav".into(), "/inside".into()];
+        entry.observations = vec![Observation::Reachable, Observation::Reachable];
+        assert!(
+            verify_candidate_link_destinations(
+                &snapshots,
+                &change,
+                &policy,
+                HtmlContentScope::Document
+            )
+            .is_ok()
+        );
+        snapshots
+            .entries
+            .get_mut("article")
+            .unwrap()
+            .destinations
+            .reverse();
+        assert!(
+            verify_candidate_link_destinations(
+                &snapshots,
+                &change,
+                &policy,
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn candidate_link_destinations_do_not_invent_unsupported_projections() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        let mut change = change();
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let mut snapshots = ChangeLinkSnapshots {
+            version: 1,
+            change_id: change.change_id.clone(),
+            entries: [(
+                "article".into(),
+                LinkObservationSnapshot {
+                    version: 1,
+                    source_sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+                    destinations: vec![],
+                    observations: Vec::<Observation>::new(),
+                },
+            )]
+            .into(),
+        };
+        change.entries[0].media_type = "text/plain".into();
+        assert!(
+            verify_candidate_link_destinations(
+                &snapshots,
+                &change,
+                &policy,
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        snapshots.entries.clear();
+        assert!(
+            verify_candidate_link_destinations(
+                &snapshots,
+                &change,
+                &policy,
+                HtmlContentScope::Document
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn candidate_link_verdict_binds_observations_and_rejects_downgrades() {
         use crate::content_candidate::{CandidateItem, CandidateSnapshot};
         use crate::content_gate::LinkReachabilityObservation as Observation;
@@ -4944,6 +5108,10 @@ mod tests {
         invalid["entries"]["article"]["source_sha256"] = "0".repeat(64).into();
         let wrong_source = serde_json::to_vec(&invalid).unwrap();
         invalid["entries"]["article"]["source_sha256"] = state_sha(&change).into();
+        invalid["entries"]["article"]["destinations"][0] = "https://example.org/other".into();
+        let wrong_destination = serde_json::to_vec(&invalid).unwrap();
+        invalid["entries"]["article"]["destinations"][0] = "https://example.org/private".into();
+        invalid["entries"]["article"]["source_sha256"] = state_sha(&change).into();
         invalid["entries"]["article"]["observations"] = serde_json::json!([]);
         let wrong_count = serde_json::to_vec(&invalid).unwrap();
         invalid["entries"]["article"]["observations"] =
@@ -4955,6 +5123,7 @@ mod tests {
         for invalid_evidence in [
             wrong_change,
             wrong_source,
+            wrong_destination,
             wrong_count,
             unknown_field,
             duplicate,
