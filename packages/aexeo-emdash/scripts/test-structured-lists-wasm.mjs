@@ -42,3 +42,8 @@ await evaluateContent({ ...mixed, list_structure_complete: true }, "prose", { pr
 assert.deepEqual(telemetry.prose_variance, { measured_gates: 1, list_paragraphs_excluded: 1, windows_checked: 2 });
 assert.ok(!JSON.stringify(telemetry).includes("/prose"));
 console.log("WASM prose variance list boundaries test passed");
+
+const starterReport = await evaluateContent({ ...mixed, list_structure_complete: true, body: [prose("One two. Three four. Five six. Seven eight. Nine ten. Eleven twelve."), block("List one. List two. List three.")] }, "prose-variance-review");
+assert.equal(starterReport.gates[0].status, "failed");
+assert.equal(starterReport.gates[0].measurements.list_paragraphs_excluded, 1);
+console.log("WASM built-in prose variance preset test passed");
