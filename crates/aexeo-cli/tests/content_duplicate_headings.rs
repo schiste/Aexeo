@@ -86,6 +86,17 @@ fn heading_hierarchy_uses_observed_levels_and_withholds_mixed_markdown() {
             report["gates"][0]["status"], expected,
             "{format}: {content}"
         );
+        let measurements = &report["gates"][0]["measurements"];
+        if expected == "not_checked" {
+            assert!(measurements.get("first_heading_level").is_none());
+            assert!(measurements.get("deepest_heading_level").is_none());
+        } else {
+            assert_eq!(measurements["first_heading_level"], 2);
+            assert_eq!(
+                measurements["deepest_heading_level"],
+                if expected == "failed" { 4 } else { 3 }
+            );
+        }
         if expected == "failed" {
             assert_eq!(report["gates"][0]["measurements"]["skipped_levels"], 1);
             let position = &report["source_locations"][0];
