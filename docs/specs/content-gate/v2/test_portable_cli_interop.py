@@ -65,6 +65,18 @@ class PortableCliInterop(unittest.TestCase):
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            runner = [sys.executable, str(HERE / 'run_portable_verdict.py')]
+            for name in ('previous', 'base', 'after', 'change', 'resolved_policy',
+                         'host_options', 'evaluator', 'external_evidence'):
+                runner += ['--' + name.replace('_', '-'), str(root / name)]
+            runner += ['--require-check', 'gate:7:article:links', '--validator-name', 'aexeo',
+                       '--validator-version', '0.0.24', '--timeout-seconds', '180', '--telemetry', '--']
+            observed = subprocess.run(runner + command, cwd=ROOT, env=env,
+                                      capture_output=True, text=True, check=False)
+            self.assertEqual(observed.returncode, 0, observed.stderr)
+            self.assertFalse(json.loads(observed.stdout)['publication_authorized'])
+            self.assertEqual(json.loads(observed.stderr)['status'], 'matched')
+            self.assertNotIn('example.org', observed.stdout + observed.stderr)
             native = os.environ.get('AETHYME_CLI_BIN')
             if native:
                 manifest = {name: str(root / name) for name in

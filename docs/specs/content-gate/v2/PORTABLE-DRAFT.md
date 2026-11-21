@@ -154,6 +154,40 @@ bytes and optional evidence independently, establish snapshot completeness and
 freshness, and protect the publication boundary. The helper does not establish
 those properties or grant publication authorization.
 
+## Experimental fresh-process runner
+
+`run_portable_verdict.py` invokes a host-selected evaluator directly, without a
+shell, and observes its exit status and timeout. It gives the child a private,
+new `CONTENT_GATE_VERDICT_FILE`, rejects missing, oversized, non-regular or
+symlinked output, and supplies the resulting bytes to the independent comparator.
+It reads all supplied artifacts before and after the process and rejects observed
+changes. The default environment is inherited except for the verdict path; the
+host must set the evaluator's change file and other options explicitly. The
+command and its executable must be trusted. Standard input, output and error for
+the child are discarded; the runner reports aggregate telemetry only when asked.
+
+For example, after independently obtaining the artifacts described below:
+
+```sh
+CONTENT_GATE_CHANGE_FILE=change.json python3 run_portable_verdict.py \
+  --previous previous.json --base base.json --after after.json \
+  --change change.json --resolved-policy policy.json --host-options options.json \
+  --evaluator evaluator.txt --require-check 'YOUR_REQUIRED_CHECK_ID' \
+  --validator-name aexeo --validator-version 0.0.24 --timeout-seconds 30 \
+  -- aexeo-cli content-change --preset article --offline-receipt \
+  --evaluator-identity build --experimental-bound-verdict \
+  --candidate-base base.json --candidate-after after.json --draft-portable-verdict
+```
+
+The host must ensure that the selected preset, identity and artifacts actually
+correspond. The runner observes only the direct child's completion; it is not a
+sandbox, does not authenticate execution or stop all descendant processes, and
+checks neither freshness nor provenance. Its before/after comparison cannot
+prevent ABA changes, prove an atomic multi-file snapshot, or protect the period
+between verification and publication. Matching still returns
+`publication_authorized: false`. The experimental profile remains unsuitable as
+a publication gate until the host enforces the full protocol and boundary.
+
 ## Independent experimental comparator
 
 `verify_portable_verdict.py` compares a previous envelope to an independently
