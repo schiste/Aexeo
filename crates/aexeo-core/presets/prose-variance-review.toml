@@ -1,0 +1,9 @@
+version = 1
+name = "Prose-only sentence variance review"
+
+[[gates]]
+id = "editorial.sentence_variance"
+kind = "prose_sentence_length_variance"
+window_size = 6
+min_stddev_words = 6
+blocking = false

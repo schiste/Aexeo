@@ -482,3 +482,114 @@ fn main_scope_maps_the_selected_occurrence_not_navigation_or_footer() {
         serde_json::json!([{"gate_id":"words", "finding_index":0, "line":3, "column":4}])
     );
 }
+
+#[test]
+fn prose_variance_uses_html_list_boundaries_and_withholds_incomplete_structure() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='variance'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+    for (source, status) in [
+        (
+            "<p>One two. Three four. Five six.</p><ul><li><p>List one. List two. List three.</p></li></ul><p>Seven eight. Nine ten. Eleven twelve.</p>",
+            "failed",
+        ),
+        (
+            "<p>One two. Three four. Five six.</p><ul><li>unrepresented</li></ul><p>Seven eight. Nine ten. Eleven twelve.</p>",
+            "not_checked",
+        ),
+    ] {
+        fs::write(&input, source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                input.to_str().unwrap(),
+                "--input-format",
+                "html",
+                "--preset",
+                "custom",
+                "--preset-source",
+                &format!("custom={}", preset.display()),
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            report["gates"][0]["status"],
+            status,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if status == "failed" {
+            assert_eq!(
+                report["gates"][0]["measurements"]["list_paragraphs_excluded"],
+                1
+            );
+            assert_eq!(report["gates"][0]["measurements"]["windows_checked"], 2);
+            assert_eq!(report["gates"][0]["findings"].as_array().unwrap().len(), 2);
+            assert_eq!(report["source_locations"][0]["column"], 4);
+            assert_eq!(report["source_locations"][1]["column"], 97);
+            let telemetry = String::from_utf8_lossy(&output.stderr);
+            let event: serde_json::Value = telemetry
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .find(|event| event["event"] == "content_evaluation")
+                .unwrap();
+            assert_eq!(
+                event["prose_variance"],
+                serde_json::json!({
+                    "measured_gates": 1, "list_paragraphs_excluded": 1, "windows_checked": 2
+                })
+            );
+            assert!(!telemetry.contains(source));
+        } else {
+            assert!(
+                report["gates"][0]["findings"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn prose_variance_withholds_main_scope_nested_in_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='variance'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+    fs::write(
+        &input,
+        "<ul><li><main><p>One two. Three four. Five six.</p></main></li></ul>",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            input.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert!(
+        report["gates"][0]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
