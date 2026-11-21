@@ -31,13 +31,13 @@ pub struct MarkdownSourceMap {
     heading_starts: Vec<Option<usize>>,
     heading_levels: Vec<u8>,
     heading_levels_complete: bool,
-    links_complete: bool,
+    contains_html: bool,
 }
 
 impl MarkdownSourceMap {
     /// Whether Markdown exposed all link-bearing markup to the adapter.
     pub fn links_complete(&self) -> bool {
-        self.links_complete
+        !self.contains_html
     }
 
     /// Heading levels in the same order as the projected headings.
@@ -515,7 +515,9 @@ pub fn markdown_structured_lists(source: &str) -> Result<Option<Vec<StructuredLi
     Ok(Some(lists))
 }
 
-/// Extract prose and headings from Markdown, excluding code, HTML, and front matter.
+/// Extract prose and headings from Markdown, excluding code and front matter.
+/// If HTML is embedded, prose and headings are unavailable rather than partial;
+/// the original source remains available for source-based checks.
 pub fn markdown_input(id: impl Into<String>, source: &str) -> Result<ContentInput> {
     Ok(markdown_input_with_context(id, source)?.0)
 }
@@ -908,7 +910,7 @@ impl Projection {
             Node::Break(_) => self.text.push('\n'),
             Node::Html(_) => {
                 source_map.heading_levels_complete = false;
-                source_map.links_complete = false;
+                source_map.contains_html = true;
             }
             Node::Heading(heading) => {
                 if source_map.enabled {
@@ -960,7 +962,6 @@ fn extract_markdown_from_root(
     let mut source_map = MarkdownSourceMap {
         enabled: map_source,
         heading_levels_complete: map_source,
-        links_complete: true,
         ..Default::default()
     };
     let mut projection = Projection {
@@ -998,18 +999,21 @@ fn extract_markdown_from_root(
         });
         cursor = start;
     }
+    let complete = !source_map.contains_html;
     Ok((
         ContentInput {
             id: id.into(),
-            text: Some(text),
+            text: complete.then_some(text),
             source_text: Some(source.into()),
-            headings: Some(headings),
+            headings: complete.then_some(headings),
             metadata: None,
             evidence_sources: None,
         },
         ContentContext {
-            paragraphs: Some(paragraphs),
-            block_ends: Some(block_ends),
+            paragraphs: complete.then_some(paragraphs),
+            block_ends: complete.then_some(block_ends),
+            input_limit: (!complete)
+                .then(|| "embedded HTML is not observed by the Markdown adapter".into()),
             ..Default::default()
         },
         link_count,
@@ -1020,6 +1024,28 @@ fn extract_markdown_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn embedded_html_withholds_editorial_inputs_but_keeps_source() {
+        let source = "before\n\n<div>hidden projection</div>\n";
+        let (input, context) = markdown_input_with_context("x", source).unwrap();
+        assert_eq!(input.source_text.as_deref(), Some(source));
+        assert!(input.text.is_none());
+        assert!(input.headings.is_none());
+        assert!(context.paragraphs.is_none());
+        assert!(context.block_ends.is_none());
+        assert!(
+            context
+                .input_limit
+                .as_deref()
+                .unwrap()
+                .contains("embedded HTML")
+        );
+        let (empty, empty_context) = markdown_input_with_context("x", "").unwrap();
+        assert_eq!(empty.text.as_deref(), Some(""));
+        assert_eq!(empty.headings, Some(vec![]));
+        assert!(empty_context.paragraphs.unwrap().is_empty());
+    }
+
     #[test]
     fn link_observation_withholds_embedded_html_and_preserves_markdown_links() {
         let markdown = "[one](https://example.org)";

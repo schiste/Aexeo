@@ -4872,6 +4872,33 @@ mod tests {
     }
 
     #[test]
+    fn markdown_embedded_html_prose_leaves_change_verdict_unchecked() {
+        use sha2::{Digest, Sha256};
+        let source = "<div>These words are present in HTML.</div>\n";
+        let mut input = change();
+        input.entries[0].media_type = "text/markdown".into();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=3\n",
+        )
+        .unwrap();
+        let verdict = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::NotChecked);
+        assert_eq!(verdict.checks[0].status, CheckStatus::NotChecked);
+        assert!(verdict.findings.is_empty());
+    }
+
+    #[test]
     fn markdown_embedded_html_links_leave_change_verdict_unchecked() {
         use sha2::{Digest, Sha256};
         let source = "Read <a href=\"https://example.org\">the source</a>.";
