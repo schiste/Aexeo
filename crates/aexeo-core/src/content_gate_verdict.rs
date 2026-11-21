@@ -1866,6 +1866,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             continue;
         }
         let mut heading_levels = None;
+        let mut paragraph_list_items = None;
         let (mut input, context, link_count, destinations, source_map) = match entry
             .media_type
             .as_str()
@@ -1887,13 +1888,14 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 )
             }
             "text/html" => {
-                match crate::html_content_adapter::html_content_with_scope_and_heading_levels(
+                match crate::html_content_adapter::html_content_with_paragraph_list_items(
                     &entry.entity_id,
                     &text,
                     html_scope,
                 ) {
-                    Ok((adapted, levels)) => {
+                    Ok((adapted, levels, list_items)) => {
                         heading_levels = Some(levels);
+                        paragraph_list_items = list_items;
                         let count = adapted.destinations.len();
                         (
                             adapted.input,
@@ -2010,7 +2012,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             link_reachability: observations.as_deref(),
             collection: collection.as_ref().map(|collection| collection.items),
         };
-        let report = item_preset.evaluate_with_heading_levels(
+        let report = item_preset.evaluate_with_paragraph_list_items(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -2019,6 +2021,8 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 .as_ref()
                 .is_some_and(|collection| collection.complete),
             None,
+            None,
+            paragraph_list_items.as_deref(),
         )?;
         let identity_projection = input.text.as_deref().is_some()
             && input.text.as_deref() == input.source_text.as_deref();

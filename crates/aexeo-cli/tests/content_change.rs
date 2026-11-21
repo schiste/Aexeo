@@ -3043,3 +3043,37 @@ fn baseline_does_not_claim_unobserved_findings_are_resolved() {
         "unobserved-rule"
     );
 }
+
+#[test]
+fn html_change_prose_variance_requires_complete_list_observation() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='variance'\nkind='prose_sentence_length_variance'\nblocking=true\nwindow_size=3\nmin_stddev_words=2\n";
+    for (source, digest, code, status, findings) in [
+        (
+            "<p>One two. Three four. Five six.</p><ul><li><p>List one. List two. List three.</p></li></ul><p>Seven eight. Nine ten. Eleven twelve.</p>",
+            "ac15e11898092f1fbe797e37015f59dd8595121c7736f961512a9105bf221bba",
+            1,
+            "fail",
+            2,
+        ),
+        (
+            "<p>One two. Three four. Five six.</p><ul><li>unrepresented</li></ul><p>Seven eight. Nine ten. Eleven twelve.</p>",
+            "685e418543b2b8f4633bb7243946fee575f3ecd94a3a2085c7c5dc077564614a",
+            2,
+            "not_checked",
+            0,
+        ),
+    ] {
+        let result = run(dir.path(), &html_change(source, digest), policy, &[]);
+        assert_eq!(
+            result.status.code(),
+            Some(code),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let verdict: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+        assert_eq!(verdict["status"], status);
+        assert_eq!(verdict["findings"].as_array().unwrap().len(), findings);
+    }
+}

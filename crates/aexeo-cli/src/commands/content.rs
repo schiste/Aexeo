@@ -281,6 +281,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut source_map = None;
     let mut heading_levels = None;
     let mut structured_lists = None;
+    let mut paragraph_list_items = None;
     let mut destinations = None;
     // The event exists only on request and never contains content, paths, or URLs.
     let mut html_projection = (measuring
@@ -334,11 +335,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 aexeo_core::html_content_adapter::HtmlContentScope::Document
             };
-            match aexeo_core::html_content_adapter::html_content_with_scope_and_heading_levels(
+            match aexeo_core::html_content_adapter::html_content_with_paragraph_list_items(
                 &id, &text, scope,
             ) {
-                Ok((adapted, levels)) => {
+                Ok((adapted, levels, list_items)) => {
                     heading_levels = Some(levels);
+                    paragraph_list_items = list_items;
                     if html_projection.is_some() {
                         html_projection = Some(serde_json::json!({
                             "status": "complete",
@@ -513,7 +515,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
-        preset.evaluate_with_structured_lists(
+        preset.evaluate_with_paragraph_list_items(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -521,9 +523,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             !args.get_flag("collection-incomplete"),
             Some(&mut |event| gate_timer.observe(event)),
             structured_lists.as_deref(),
+            paragraph_list_items.as_deref(),
         )?
     } else {
-        preset.evaluate_with_structured_lists(
+        preset.evaluate_with_paragraph_list_items(
             &input,
             &capabilities,
             destinations.as_deref(),
@@ -531,6 +534,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             !args.get_flag("collection-incomplete"),
             None,
             structured_lists.as_deref(),
+            paragraph_list_items.as_deref(),
         )?
     };
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
