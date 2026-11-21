@@ -99,3 +99,30 @@ fn prose_variance_observes_markdown_lists_and_withholds_unknown_structure() {
         }
     }
 }
+
+#[test]
+fn prose_variance_starter_is_available_to_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let article = dir.path().join("article.md");
+    fs::write(&article, "One two. Three four. Five six. Seven eight. Nine ten. Eleven twelve.\n\n- One. Two. Three.\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "prose-variance-review",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["gate_id"], "editorial.sentence_variance");
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(
+        report["gates"][0]["measurements"]["list_paragraphs_excluded"],
+        1
+    );
+}

@@ -1640,6 +1640,20 @@ or list items omitted from paragraph projection remain `not_checked`. Configured
 plugins can use `listStructureCompleteByCollection` only for collections whose
 complete projection the host can establish.
 
+The `prose-variance-review` starter is advisory, with a six-sentence window
+and a six-word threshold. Compose it after an existing style profile to replace
+that profile's variance gate while retaining its other checks, for example:
+
+```toml
+version = 1
+name = "News with prose-only variance"
+extends = ["news-style-en", "prose-variance-review"]
+```
+
+Override the gate in a project preset to select different fixed or seeded
+thresholds. These defaults are prompts for editorial review, not a measure of
+authorship or factual accuracy.
+
 The CLI and content-change entry points supply this observation for Markdown
 and HTML. Unsupported or incomplete structures, and plain-text inputs that do
 not establish list structure, remain `not_checked`. Opt-in CLI telemetry reports

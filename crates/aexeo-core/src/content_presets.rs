@@ -225,6 +225,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/sentence-variance-review.toml").into(),
         ),
         (
+            "prose-variance-review".into(),
+            include_str!("../presets/prose-variance-review.toml").into(),
+        ),
+        (
             "trailing-ing-review-en".into(),
             include_str!("../presets/trailing-ing-review-en.toml").into(),
         ),
@@ -503,6 +507,39 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn prose_variance_starter_replaces_legacy_rhythm_when_composed_last() {
+        let mut sources = builtin_content_presets();
+        sources.insert(
+            "news-prose".into(),
+            "version=1\nname='News prose'\nextends=['news-style-en', 'prose-variance-review']\n"
+                .into(),
+        );
+        let preset = resolve_content_preset("news-prose", &sources).unwrap();
+        let variance: Vec<_> = preset
+            .gates
+            .iter()
+            .filter(|gate| gate.id() == "editorial.sentence_variance")
+            .collect();
+        assert_eq!(variance.len(), 1);
+        assert!(matches!(
+            variance[0],
+            ContentGate::ProseSentenceLengthVariance {
+                window_size: 6,
+                min_stddev_words: Some(6),
+                blocking: false,
+                ..
+            }
+        ));
+        let original = resolve_content_preset("news-style-en", &sources).unwrap();
+        assert!(
+            original
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::SentenceLengthVariance { .. }))
+        );
     }
 
     #[test]
