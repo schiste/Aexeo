@@ -49,3 +49,41 @@ fn markdown_destinations_are_checked_without_leaking_them_in_telemetry() {
     assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("private"));
 }
+
+#[test]
+fn malformed_percent_link_is_reported_with_markdown_location() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.md");
+    fs::write(&preset, "version=1\nname='links'\n[[gates]]\nid='urls'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+    fs::write(&article, "[bad](/bad%zz) [good](/good%20path)").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["gates"][0]["measurements"]["invalid_destinations"],
+        1
+    );
+    assert!(
+        report["gates"][0]["findings"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("percent")
+    );
+    assert_eq!(report["source_locations"][0]["line"], 1);
+    assert_eq!(report["source_locations"][0]["column"], 1);
+}
