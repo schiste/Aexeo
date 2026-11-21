@@ -64,6 +64,12 @@ unavailable check may become a pass.
   adapted incremental and change evaluation; other formats without complete
   list observations remain not checked. Missing capabilities remain not checked; this
   is neither a rendered-page assessment nor a publication verdict.
+  Standalone and composed incremental baselines can explicitly select the
+  static HTML main scope ([#706](https://github.com/schiste/Aexeo/pull/706),
+  [#707](https://github.com/schiste/Aexeo/pull/707)); the default remains the
+  full document. Missing, hidden or ambiguous main elements are not checked.
+  The choice does not filter the separately supplied collection or establish
+  browser visibility, inventory completeness, freshness or authorization.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with
   explicit rename bridging; [#533](https://github.com/schiste/Aexeo/pull/533)
