@@ -456,9 +456,9 @@ reconciliation not comparable, so no page is eligible:
 | A page served no marker, or none did | `audit_release_unattested` |
 | A resumed segment saw a new release value | `audit_snapshot_spans_releases` |
 
-Independently of release markers, an audit also requires a valid, ordered
-observed crawl window for inventory eligibility. A missing, incomplete or
-unparseable window raises `audit_snapshot_window_unverified`; an inverted window
+Independently of release markers, an HTTP or browser crawl audit also requires
+a valid, ordered observed crawl window for inventory eligibility. A missing,
+incomplete or unparseable window raises `audit_snapshot_window_unverified`; an inverted window
 raises `audit_snapshot_window_invalid`. A declared snapshot date outside the
 inclusive UTC days of that window raises `audit_snapshot_date_mismatch`.
 These checks preserve the declared date and the observations for review, but
