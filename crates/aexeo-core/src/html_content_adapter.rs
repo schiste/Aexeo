@@ -633,6 +633,7 @@ fn html_source_map_inner(
                 | "th"
                 | "div"
                 | "p"
+                | "pre"
                 | "h1"
                 | "h2"
                 | "h3"
@@ -832,6 +833,7 @@ fn html_source_map_inner(
                 _ => {}
             }
         }
+        let skip_pre_newline = !closing && tag == "pre";
         if closing {
             if collect_lists
                 && matches!(tag.as_str(), "ul" | "ol")
@@ -905,6 +907,7 @@ fn html_source_map_inner(
                     matches!(
                         parent.as_str(),
                         "p" | "dt"
+                            | "pre"
                             | "h1"
                             | "h2"
                             | "h3"
@@ -962,6 +965,16 @@ fn html_source_map_inner(
             }
         }
         cursor = end + 1;
+        // The HTML parser ignores one newline immediately after an opening
+        // pre tag, including a CRLF normalized to LF. Skip only that exact
+        // source sequence so later positions still point into the input.
+        if skip_pre_newline {
+            if source[cursor..].starts_with("\r\n") {
+                cursor += 2;
+            } else if source[cursor..].starts_with('\n') {
+                cursor += 1;
+            }
+        }
     }
     // Numeric reference labels are masked in the DOM projection. Verify a
     // second time before accepting the same-length substitution so recovered
@@ -1440,6 +1453,55 @@ mod tests {
             "<main><ul><li>one<li>two</li></ul></main>",
             "<main><div><li>one</li></div></main>",
             "<main><ul><li hidden>one</li></ul></main>",
+        ] {
+            let adapted = html_content("x", source).unwrap();
+            assert!(
+                html_source_map(source, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn maps_preformatted_source_without_guessing_recovered_markup() {
+        use crate::source_mapping::ContentSourceMap;
+        for newline in ["", "\n", "\r\n"] {
+            let source = format!(
+                "<main>\n<p>Avant.</p><pre>{newline}<code>écho &amp; suite\nligne</code></pre><p>Après <a href='/x'>ici</a>.</p></main>"
+            );
+            for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+                let adapted = html_content_with_scope("x", &source, scope).unwrap();
+                let text = adapted.input.text.as_deref().unwrap();
+                let map = html_source_map_with_scope(&source, text, scope).unwrap();
+                let original_index = crate::text_index::LineIndex::new(&source);
+                let projected_index = crate::text_index::LineIndex::new(text);
+                for (projected, original) in [
+                    ("écho", "écho"),
+                    ("&", "&amp;"),
+                    ("ligne", "ligne"),
+                    ("Après", "Après"),
+                    ("ici", "ici"),
+                ] {
+                    let (line, column) = projected_index
+                        .position(text, text.find(projected).unwrap())
+                        .unwrap();
+                    assert_eq!(
+                        map.source_position(&source, text, line, column),
+                        original_index.position(&source, source.find(original).unwrap()),
+                        "{projected} in {newline:?}"
+                    );
+                }
+                assert_eq!(
+                    map.link_position(&source, 0),
+                    original_index.position(&source, source.find("<a ").unwrap())
+                );
+            }
+        }
+        for source in [
+            "<main><pre hidden>hidden</pre></main>",
+            "<main><pre><code>broken</pre></code></main>",
+            "<main><p>before<pre>code</pre></p></main>",
+            "<main><pre>one<div>two</div></pre></main>",
         ] {
             let adapted = html_content("x", source).unwrap();
             assert!(

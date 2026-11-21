@@ -291,6 +291,54 @@ fn html_main_maps_to_article_body_in_a_complete_document() {
 }
 
 #[test]
+fn html_preformatted_content_preserves_cli_findings_and_aggregate_telemetry() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(
+        &file,
+        "<main>\n<pre>\n<code>é danger</code></pre>\n<p>danger</p>\n</main>",
+    )
+    .unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['danger']\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            file.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([
+            { "gate_id":"terms", "finding_index":0, "line":3, "column":9 },
+            { "gate_id":"terms", "finding_index":1, "line":4, "column":4 }
+        ])
+    );
+    assert_eq!(telemetry["source_mapping"]["mapped"], 2);
+    assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("danger"));
+}
+
+#[test]
 fn html_citation_elements_preserve_editorial_finding_positions() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("citation.html");
