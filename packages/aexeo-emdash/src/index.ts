@@ -194,9 +194,9 @@ export function aexeoPlugin(
             contentPreset: {
               ...options.contentPreset,
               ...(options.contentPreset.collections === undefined ? {} : { collections: [...options.contentPreset.collections] }),
-              ...(options.contentPreset.listStructureCompleteByCollection === undefined ? {} : { listStructureCompleteByCollection: [...options.contentPreset.listStructureCompleteByCollection] }),
+              ...(options.contentPreset.listStructureCompleteByCollection === undefined ? {} : { listStructureCompleteByCollection: Array.isArray(options.contentPreset.listStructureCompleteByCollection) ? [...options.contentPreset.listStructureCompleteByCollection] : [] }),
               ...(options.contentPreset.fragmentListStructureCompleteByCollection === undefined ? {} : { fragmentListStructureCompleteByCollection: Object.fromEntries(Object.entries(options.contentPreset.fragmentListStructureCompleteByCollection).map(([collection, fields]) => [collection, Array.isArray(fields) ? [...fields] : []])) }),
-              ...(options.contentPreset.revisionListStructureCompleteByCollection === undefined ? {} : { revisionListStructureCompleteByCollection: [...options.contentPreset.revisionListStructureCompleteByCollection] }),
+              ...(options.contentPreset.revisionListStructureCompleteByCollection === undefined ? {} : { revisionListStructureCompleteByCollection: Array.isArray(options.contentPreset.revisionListStructureCompleteByCollection) ? [...options.contentPreset.revisionListStructureCompleteByCollection] : [] }),
               ...(options.contentPreset.revisionFragmentListStructureCompleteByCollection === undefined ? {} : { revisionFragmentListStructureCompleteByCollection: Object.fromEntries(Object.entries(options.contentPreset.revisionFragmentListStructureCompleteByCollection).map(([collection, fields]) => [collection, Array.isArray(fields) ? [...fields] : []])) }),
               ...(options.contentPreset.sources === undefined
                 ? {}

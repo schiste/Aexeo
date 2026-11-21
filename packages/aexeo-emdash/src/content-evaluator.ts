@@ -1,3 +1,4 @@
+import { collectionListStructureAttested } from "./list-structure-attestation.js";
 import { emptyPresetSelectionCounts, selectContentPreset, type PresetSelectionCounts } from "./preset-selection.js";
 import { emitTelemetry } from "./telemetry.js";
 import { evaluateFragments, type FragmentAssessment } from "./fragment-evaluation.js";
@@ -123,7 +124,7 @@ export function withContentPreset(
     try {
       for (const [index, originalDocument] of documents.entries()) {
         const collection = context?.collections[index];
-        const attested = collection !== undefined && preset.listStructureCompleteByCollection?.includes(collection) === true;
+        const attested = collection !== undefined && collectionListStructureAttested(preset.listStructureCompleteByCollection, collection);
         const document = attested ? { ...originalDocument, list_structure_complete: true } : originalDocument;
         if (preset.collections !== undefined) {
           if (collection === undefined) throw new Error("collection is required for a scoped content preset");
