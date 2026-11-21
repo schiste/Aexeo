@@ -264,6 +264,90 @@ pub fn verify_declared_content<P: IndependentContent>(
     Ok(())
 }
 
+/// Check declared file-backed states against the corresponding candidate bytes.
+///
+/// The host selects a confined provider and must establish snapshot provenance,
+/// completeness, freshness and publication atomicity. URI sources are unavailable.
+/// This helper does not authorize publication or evaluate the content.
+pub fn verify_candidate_file_states<P: ConfinedContentFiles>(
+    change: &Change,
+    base: &crate::content_candidate::CandidateSnapshot,
+    after: &[crate::content_candidate::CandidateItem],
+    provider: &mut P,
+    max_state_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<(), SourceError> {
+    use aexeo_contracts::content_gate_protocol::Operation;
+    use std::collections::BTreeMap;
+
+    crate::content_candidate::overlay_candidate(base, change, after)
+        .map_err(|_| SourceError::InvalidChange)?;
+    let previous: BTreeMap<&str, _> = base
+        .items
+        .iter()
+        .map(|item| (item.entity_id.as_str(), item))
+        .collect();
+    let projected: BTreeMap<&str, _> = after
+        .iter()
+        .map(|item| (item.entity_id.as_str(), item))
+        .collect();
+    let mut remaining = max_total_bytes;
+    let mut buffer = [0u8; 8192];
+    for entry in &change.entries {
+        let old_id = if matches!(entry.operation, Operation::Rename) {
+            entry
+                .previous_entity_id
+                .as_deref()
+                .ok_or(SourceError::InvalidChange)?
+        } else {
+            &entry.entity_id
+        };
+        for (state, item) in [
+            (entry.before.as_ref(), previous.get(old_id)),
+            (
+                entry.after.as_ref(),
+                projected.get(entry.entity_id.as_str()),
+            ),
+        ] {
+            let Some(state) = state else { continue };
+            let expected = item.ok_or(SourceError::InvalidChange)?.source.as_bytes();
+            if expected.len() > max_state_bytes || expected.len() > remaining {
+                return Err(SourceError::TooLarge);
+            }
+            remaining -= expected.len();
+            if state.inline.is_some() {
+                continue;
+            }
+            let relative = state.file.as_deref().ok_or(SourceError::Unavailable)?;
+            let root = change
+                .content_root
+                .as_deref()
+                .ok_or(SourceError::InvalidChange)?;
+            let mut reader = provider
+                .open(Path::new(root), Path::new(relative))
+                .map_err(|_| SourceError::Unavailable)?;
+            let mut offset = 0usize;
+            loop {
+                let count = reader
+                    .read(&mut buffer)
+                    .map_err(|_| SourceError::Unavailable)?;
+                if count == 0 {
+                    break;
+                }
+                let end = offset.checked_add(count).ok_or(SourceError::TooLarge)?;
+                if expected.get(offset..end) != Some(&buffer[..count]) {
+                    return Err(SourceError::DigestMismatch);
+                }
+                offset = end;
+            }
+            if offset != expected.len() {
+                return Err(SourceError::DigestMismatch);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// An evaluated entry's proposed text; a deletion has no proposed text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedEntry {
@@ -359,6 +443,132 @@ mod tests {
                 {"entity_id": "deleted", "operation": "delete", "media_type": "text/plain"}
             ]
         })).unwrap()
+    }
+
+    #[test]
+    fn candidate_file_states_match_both_snapshots_with_confined_bounded_reads() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        let mut input = change();
+        input.entries.retain(|entry| entry.entity_id == "file");
+        input.entries[0].before = input.entries[0].after.clone();
+        let item = CandidateItem {
+            entity_id: "file".into(),
+            public_path: "/file".into(),
+            media_type: "text/markdown".into(),
+            revision: None,
+            sha256: input.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        };
+        let base = CandidateSnapshot {
+            scope: "published".into(),
+            site_id: "site".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![item.clone()],
+        };
+        let after = vec![item];
+        let mut files = Fixture {
+            bytes: b"abc".to_vec(),
+            opens: 0,
+        };
+        assert_eq!(
+            verify_candidate_file_states(&input, &base, &after, &mut files, 3, 6),
+            Ok(())
+        );
+        assert_eq!(files.opens, 2);
+        for bytes in [b"bad".as_slice(), b"ab".as_slice(), b"abcd".as_slice()] {
+            files.bytes = bytes.to_vec();
+            assert_eq!(
+                verify_candidate_file_states(&input, &base, &after, &mut files, 8, 16),
+                Err(SourceError::DigestMismatch)
+            );
+        }
+        files.bytes = b"abc".to_vec();
+        assert_eq!(
+            verify_candidate_file_states(&input, &base, &after, &mut files, 2, 6),
+            Err(SourceError::TooLarge)
+        );
+        assert_eq!(
+            verify_candidate_file_states(&input, &base, &after, &mut files, 3, 5),
+            Err(SourceError::TooLarge)
+        );
+        let mut uri = input.clone();
+        let state = uri.entries[0].before.as_mut().unwrap();
+        state.file = None;
+        state.uri = Some("https://example.invalid/old".into());
+        assert_eq!(
+            verify_candidate_file_states(&uri, &base, &after, &mut files, 3, 6),
+            Err(SourceError::Unavailable)
+        );
+        let mut deleted = input.clone();
+        deleted.entries[0].operation = aexeo_contracts::content_gate_protocol::Operation::Delete;
+        deleted.entries[0].after = None;
+        let previous_opens = files.opens;
+        assert_eq!(
+            verify_candidate_file_states(&deleted, &base, &[], &mut files, 3, 3),
+            Ok(())
+        );
+        assert_eq!(files.opens - previous_opens, 1);
+        files.bytes = b"bad".to_vec();
+        assert_eq!(
+            verify_candidate_file_states(&deleted, &base, &[], &mut files, 3, 3),
+            Err(SourceError::DigestMismatch)
+        );
+        files.bytes = b"abc".to_vec();
+        let mut renamed = input.clone();
+        renamed.entries[0].operation = aexeo_contracts::content_gate_protocol::Operation::Rename;
+        renamed.entries[0].previous_entity_id = Some("file".into());
+        renamed.entries[0].entity_id = "renamed".into();
+        let mut renamed_after = after.clone();
+        renamed_after[0].entity_id = "renamed".into();
+        renamed_after[0].public_path = "/renamed".into();
+        assert_eq!(
+            verify_candidate_file_states(&renamed, &base, &renamed_after, &mut files, 3, 6),
+            Ok(())
+        );
+        // Different before/after files must not be interchanged or substituted.
+        struct SeparateFiles {
+            wrong_before: bool,
+        }
+        impl ConfinedContentFiles for SeparateFiles {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &Path, relative: &Path) -> io::Result<Self::Reader> {
+                let content = if relative == Path::new("posts/old.md") {
+                    if self.wrong_before { b"bad" } else { b"xyz" }
+                } else if relative == Path::new("posts/a.md") {
+                    b"abc"
+                } else {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "unavailable"));
+                };
+                Ok(Cursor::new(content.to_vec()))
+            }
+        }
+        let mut distinct = input.clone();
+        let before = distinct.entries[0].before.as_mut().unwrap();
+        before.file = Some("posts/old.md".into());
+        before.sha256 = format!("{:x}", Sha256::digest(b"xyz"));
+        let mut distinct_base = base.clone();
+        distinct_base.items[0].source = "xyz".into();
+        distinct_base.items[0].sha256 = before.sha256.clone();
+        for wrong_before in [false, true] {
+            let result = verify_candidate_file_states(
+                &distinct,
+                &distinct_base,
+                &after,
+                &mut SeparateFiles { wrong_before },
+                3,
+                6,
+            );
+            assert_eq!(result.is_ok(), !wrong_before);
+        }
+        let mut altered = base.clone();
+        altered.items[0].source = "other".into();
+        assert_eq!(
+            verify_candidate_file_states(&input, &altered, &after, &mut files, 8, 16),
+            Err(SourceError::InvalidChange)
+        );
     }
 
     #[cfg(target_os = "linux")]

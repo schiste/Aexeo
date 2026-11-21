@@ -949,9 +949,9 @@ fn candidate_revisions_inner(
     if !context.base.complete {
         bail!("candidate base inventory is not declared complete");
     }
-    // Producers require inline bytes so the overlay can compare them exactly,
-    // including deleted and renamed entities. Independent verification may use
-    // references only when every state stream is checked before acceptance.
+    // Strict callers require inline bytes for exact overlay comparison.
+    // Reference-aware callers must independently verify every declared state,
+    // including deleted and renamed entities, before accepting the result.
     for entry in &context.decision.change.entries {
         for state in [entry.before.as_ref(), entry.after.as_ref()]
             .into_iter()
@@ -990,15 +990,43 @@ fn candidate_revisions_inner(
     Ok((base, candidate))
 }
 
-fn candidate_binding(
+// File-backed candidates are accepted only after confined, bounded reads
+// match both before and after snapshot bytes. URI retrieval remains unavailable.
+fn candidate_revisions_with_files<P: ConfinedContentFiles>(
+    context: &CandidateDecisionContext<'_>,
+    provider: &mut P,
+) -> Result<([u8; 32], [u8; 32])> {
+    let referenced = context.decision.change.entries.iter().any(|entry| {
+        [entry.before.as_ref(), entry.after.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|state| state.inline.is_none())
+    });
+    if !referenced {
+        return candidate_revisions(context);
+    }
+    let revisions = candidate_revisions_inner(context, false)?;
+    crate::content_gate_sources::verify_candidate_file_states(
+        context.decision.change,
+        context.base,
+        context.after,
+        provider,
+        context.decision.max_entry_bytes,
+        context.decision.max_total_bytes,
+    )?;
+    Ok(revisions)
+}
+
+fn candidate_binding<P: ConfinedContentFiles>(
     context: &CandidateDecisionContext<'_>,
     scope: HtmlContentScope,
     external_evidence: Option<&[u8]>,
+    provider: &mut P,
 ) -> Result<String> {
     use aexeo_contracts::content_gate_binding_v2::{
         CANDIDATE_REVISION_PROFILE, candidate_snapshot_binding,
     };
-    let (base_digest, candidate_digest) = candidate_revisions(context)?;
+    let (base_digest, candidate_digest) = candidate_revisions_with_files(context, provider)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let binding = candidate_snapshot_binding(
         &[
@@ -1118,7 +1146,7 @@ pub fn evaluate_draft_portable_candidate_verdict<P: ConfinedContentFiles>(
     scope: HtmlContentScope,
 ) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
     use aexeo_contracts::content_gate_portable_v2::{BoundVerdict, CurrentInputs};
-    let (base, candidate) = candidate_revisions(context)?;
+    let (base, candidate) = candidate_revisions_with_files(context, provider)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let inputs = CurrentInputs {
         artifacts: artifacts.as_inputs(),
@@ -1138,7 +1166,7 @@ pub fn evaluate_draft_portable_candidate_link_verdict<P: ConfinedContentFiles>(
     scope: HtmlContentScope,
 ) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
     use aexeo_contracts::content_gate_portable_v2::{BoundVerdict, CurrentInputs};
-    let (base, candidate) = candidate_revisions(context.candidate)?;
+    let (base, candidate) = candidate_revisions_with_files(context.candidate, provider)?;
     let links = LinkSnapshotDecisionContext {
         offline: context.candidate.decision,
         snapshots: context.snapshots,
@@ -1178,6 +1206,7 @@ pub fn revalidate_draft_portable_candidate<P: ConfinedContentFiles>(
         context,
         scope,
         evidence.as_ref().map(|a| a.external_evidence.as_slice()),
+        provider,
     )?;
     if previous.binding_sha256 != binding {
         bail!("draft portable decision inputs differ");
@@ -1210,7 +1239,7 @@ pub fn evaluate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     evaluated_at: &str,
     scope: HtmlContentScope,
 ) -> Result<ExperimentalCandidateVerdict> {
-    let binding = candidate_binding(context, scope, None)?;
+    let binding = candidate_binding(context, scope, None, provider)?;
     let receipt =
         evaluate_offline_receipt_with_html_scope(context.decision, provider, evaluated_at, scope)?;
     Ok(ExperimentalCandidateVerdict {
@@ -1236,7 +1265,7 @@ pub fn revalidate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     {
         bail!("unsupported experimental candidate verdict schema or profile");
     }
-    let binding = candidate_binding(context, scope, None)?;
+    let binding = candidate_binding(context, scope, None, provider)?;
     if previous.binding != binding {
         bail!("experimental candidate decision inputs differ");
     }
@@ -1277,7 +1306,7 @@ pub fn evaluate_experimental_candidate_link_verdict<P: ConfinedContentFiles>(
         snapshots: context.snapshots,
     };
     let evidence = links.artifacts_with_html_scope(scope)?.external_evidence;
-    let binding = candidate_binding(context.candidate, scope, Some(&evidence))?;
+    let binding = candidate_binding(context.candidate, scope, Some(&evidence), provider)?;
     let receipt =
         evaluate_link_snapshot_receipt_with_html_scope(&links, provider, evaluated_at, scope)?;
     Ok(ExperimentalCandidateVerdict {
@@ -1308,7 +1337,7 @@ pub fn revalidate_experimental_candidate_link_verdict<P: ConfinedContentFiles>(
         snapshots: context.snapshots,
     };
     let evidence = links.artifacts_with_html_scope(scope)?.external_evidence;
-    let binding = candidate_binding(context.candidate, scope, Some(&evidence))?;
+    let binding = candidate_binding(context.candidate, scope, Some(&evidence), provider)?;
     if previous.binding != binding {
         bail!("experimental candidate decision inputs differ");
     }
@@ -3277,7 +3306,7 @@ mod tests {
                 base: &base,
                 after: &after,
             };
-            assert!(candidate_revisions(&ctx).is_err()); // Producer stays inline-only.
+            assert!(candidate_revisions(&ctx).is_err()); // Strict path rejects references.
             let (base_digest, candidate_digest) = candidate_revisions_inner(&ctx, false).unwrap();
             let artifacts = decision.artifacts().unwrap();
             let current = CurrentInputs {
@@ -3397,7 +3426,7 @@ mod tests {
     }
 
     #[test]
-    fn candidate_deletion_binds_removed_base_and_requires_inline_before() {
+    fn candidate_deletion_binds_removed_base_and_requires_available_before() {
         use crate::content_candidate::{CandidateItem, CandidateSnapshot};
         let mut input = change();
         let entry = &mut input.entries[0];

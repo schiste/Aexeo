@@ -151,8 +151,11 @@ comparisons detect inconsistent labels; they do not authenticate the evaluator.
 The helper accepts referenced states only when the caller independently supplies
 a stream for every declared state, including before states. The stream digest
 must match the change and candidate snapshot; no reference or URI is fetched.
-This uses Aexeo's non-portable artifact encodings, and the candidate-bound
-producer still requires inline states. The caller must acquire and trust the
+This uses Aexeo's non-portable artifact encodings. The candidate-bound producer
+accepts local file states only through its host-selected confined provider; it
+compares each file against the corresponding snapshot and applies the per-state
+and aggregate byte limits across both before and after states. URI states remain
+unavailable to the producer. The caller must acquire and trust the
 context, bytes and optional evidence independently, establish snapshot completeness
 and freshness, and protect the publication boundary. The helper does not establish
 those properties or grant publication authorization.
@@ -204,10 +207,13 @@ candidate projection. The runner snapshots the map and files before and after
 the child and rejects observed changes. This cannot detect ABA changes, prove a
 coherent snapshot, or authenticate its source.
 
-This is verifier groundwork, **not end-to-end support**: Aexeo's current
-candidate-bound verdict producer still rejects non-inline states, and URI content
-is not fetched. Independent access to an appropriate passing fresh evaluator is
-required. No mapping or successful match grants publication authority.
+The Aexeo candidate-bound producer supports local file states through its
+host-selected confined provider; URI content is not fetched. The host must pass
+`--content-root` to the CLI, independently acquire the map and snapshots, and
+ensure that they describe the same candidate. The Python comparator and runner
+have been exercised against the real CLI. Other host implementations must add
+and test their own equivalent support. No mapping or successful match grants
+publication authority.
 
 ## Independent experimental comparator
 
