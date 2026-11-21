@@ -171,9 +171,12 @@ fn evaluate_item(
     let (input, context, link_count) = match (mode, item.media_type.as_str()) {
         (ProjectionMode::Adapted, "text/markdown") => {
             let (input, context, count) =
-                crate::markdown_adapter::markdown_input_with_links(&item.entity_id, &item.source)
-                    .map_err(|_| unavailable("Markdown projection failed"))?;
-            (input, Some(context), Some(count))
+                crate::markdown_adapter::markdown_input_with_observed_links(
+                    &item.entity_id,
+                    &item.source,
+                )
+                .map_err(|_| unavailable("Markdown projection failed"))?;
+            (input, Some(context), count)
         }
         (ProjectionMode::Adapted, "text/html") => {
             let adapted = crate::html_content_adapter::html_content(&item.entity_id, &item.source)
@@ -1853,6 +1856,21 @@ mod tests {
             serde_json::to_value(expected).unwrap()
         );
         assert!(reused > 0);
+    }
+
+    #[test]
+    fn adapted_incremental_refuses_unobserved_html_links() {
+        let (mut snapshot, _, _) = fixture();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n",
+        )
+        .unwrap();
+        for item in &mut snapshot.items {
+            item.media_type = "text/markdown".into();
+            item.source = "<a href=\"https://example.org\">source</a>".into();
+            item.sha256 = format!("{:x}", Sha256::digest(item.source.as_bytes()));
+        }
+        assert!(IncrementalBaseline::prepare_adapted(snapshot, preset).is_err());
     }
 
     #[test]
