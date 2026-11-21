@@ -487,6 +487,8 @@ pub fn html_source_map_with_scope(
         return None;
     }
     let mut stack: Vec<String> = Vec::new();
+    // Only explicitly ordered table sections are safe to map.
+    let mut table_sections = (false, false, false); // head, body, foot
     let mut selected_depth = None;
     let mut main_seen = false;
     let mut head_seen = false;
@@ -505,7 +507,11 @@ pub fn html_source_map_with_scope(
             let literal = &source[cursor..end];
             // Definition-list text outside an explicitly closed term or
             // description is not part of the supported mapping subset.
-            if stack.last().map(String::as_str) == Some("dl") && !literal.trim().is_empty() {
+            if matches!(
+                stack.last().map(String::as_str),
+                Some("dl" | "table" | "thead" | "tbody" | "tfoot" | "tr")
+            ) && !literal.trim().is_empty()
+            {
                 return None;
             }
             if scope == HtmlContentScope::Main && selected_depth.is_none() {
@@ -587,6 +593,13 @@ pub fn html_source_map_with_scope(
                 | "dl"
                 | "dt"
                 | "dd"
+                | "table"
+                | "thead"
+                | "tbody"
+                | "tfoot"
+                | "tr"
+                | "td"
+                | "th"
                 | "div"
                 | "p"
                 | "h1"
@@ -751,8 +764,25 @@ pub fn html_source_map_with_scope(
                 || (matches!(parent, Some("ul" | "ol")) && tag != "li")
                 || (matches!(tag.as_str(), "dt" | "dd") && parent != Some("dl"))
                 || (parent == Some("dl") && !matches!(tag.as_str(), "dt" | "dd"))
+                || (tag == "table" && stack.iter().any(|item| item == "table"))
+                || (matches!(tag.as_str(), "thead" | "tbody" | "tfoot") && parent != Some("table"))
+                || (tag == "tr" && !matches!(parent, Some("thead" | "tbody" | "tfoot")))
+                || (matches!(tag.as_str(), "td" | "th") && parent != Some("tr"))
+                || (parent == Some("table") && !matches!(tag.as_str(), "thead" | "tbody" | "tfoot"))
+                || (matches!(parent, Some("thead" | "tbody" | "tfoot")) && tag != "tr")
+                || (parent == Some("tr") && !matches!(tag.as_str(), "td" | "th"))
             {
                 return None;
+            }
+            match tag.as_str() {
+                "table" => table_sections = (false, false, false),
+                "thead" if table_sections.0 || table_sections.1 || table_sections.2 => return None,
+                "thead" => table_sections.0 = true,
+                "tbody" if table_sections.2 => return None,
+                "tbody" => table_sections.1 = true,
+                "tfoot" if table_sections.2 || !table_sections.1 => return None,
+                "tfoot" => table_sections.2 = true,
+                _ => {}
             }
         }
         if closing {
@@ -1090,6 +1120,52 @@ mod tests {
                 .unwrap()
                 .contains("Navigation")
         );
+    }
+
+    #[test]
+    fn maps_explicit_tables_and_rejects_parser_recovery() {
+        use crate::source_mapping::ContentSourceMap;
+        let source = "<main>\n<table><thead><tr><th>Nom</th></tr></thead><tbody><tr><td>Élan &amp; <a href='/preuve'>preuve</a></td></tr></tbody><tfoot><tr><td>Fin</td></tr></tfoot></table><p>Après</p></main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", source, scope).unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(source, text, scope).unwrap();
+            let projected = crate::text_index::LineIndex::new(text);
+            let original = crate::text_index::LineIndex::new(source);
+            for (output, input) in [
+                ("Élan", "Élan"),
+                ("&", "&amp;"),
+                ("preuve", "preuve</a>"),
+                ("Après", "Après"),
+            ] {
+                let (line, column) = projected
+                    .position(text, text.find(output).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(source, text, line, column),
+                    original.position(source, source.find(input).unwrap())
+                );
+            }
+            assert_eq!(
+                map.link_position(source, 0),
+                original.position(source, source.find("<a ").unwrap())
+            );
+        }
+        for source in [
+            "<main><table><tr><td>implicit body</td></tr></table></main>",
+            "<main><table>fostered<tbody><tr><td>x</td></tr></tbody></table></main>",
+            "<main><table><tbody><tr>fostered<td>x</td></tr></tbody></table></main>",
+            "<main><td>orphan</td></main>",
+            "<main><table><tbody><tr><td>x</tr></tbody></table></main>",
+            "<main><table><tbody><tr><td><table><tbody><tr><td>x</td></tr></tbody></table></td></tr></tbody></table></main>",
+            "<main><table><tfoot><tr><td>x</td></tr></tfoot><tbody><tr><td>y</td></tr></tbody></table></main>",
+        ] {
+            let adapted = html_content("x", source).unwrap();
+            assert!(
+                html_source_map(source, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{source}"
+            );
+        }
     }
 
     #[test]
