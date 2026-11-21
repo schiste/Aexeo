@@ -2033,6 +2033,79 @@ fn a_seeded_crawl_confirms_an_unlinked_published_page_in_one_command() {
 }
 
 #[test]
+fn a_failed_inventory_page_withholds_orphan_confirmation_but_preserves_redirect_evidence() {
+    let site = Site::start(vec![
+        ("/", html(r#"<main><a href="/old">Guide</a></main>"#)),
+        ("/old", moved_to_new()),
+        ("/new", html("<main>Guide</main>")),
+        ("/orphan", html("<main>Unlinked</main>")),
+        (
+            "/unavailable",
+            ("500 Internal Server Error", "text/html", String::new()),
+        ),
+    ]);
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let base = &site.base_url;
+    let mut context = inventory_context(&site, &["/", "/new", "/orphan"], &[]);
+    context["inventory"]["pages"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "url": format!("{base}/old"), "disposition": "redirect",
+            "target": format!("{base}/new"), "locale": "en"
+        }));
+    let (_, complete) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "x-release"],
+    );
+    let target = format!("{base}/new");
+    let orphan = format!("{base}/orphan");
+    let observed = legacy_finding(&complete, "LNK002", &target);
+    assert_eq!(observed["conclusion"], "inbound_observed", "{complete:#}");
+    assert_eq!(observed["via_redirect_source_pages"], 1, "{complete:#}");
+    assert_eq!(
+        legacy_finding(&complete, "LNK002", &orphan)["conclusion"],
+        "confirmed",
+        "{complete:#}"
+    );
+
+    context["inventory"]["pages"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "url": format!("{base}/unavailable"), "disposition": "published",
+            "target": null, "locale": "en"
+        }));
+    let (_, partial) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "x-release"],
+    );
+    assert_eq!(partial["crawl_complete"], false, "{partial:#}");
+    assert_eq!(
+        partial["reconciliation"]["comparable"], false,
+        "{partial:#}"
+    );
+    assert_eq!(
+        partial["reconciliation"]["eligible_pages"],
+        serde_json::json!([]),
+        "{partial:#}"
+    );
+    assert_eq!(
+        legacy_finding(&partial, "LNK002", &orphan)["conclusion"],
+        "not_eligible",
+        "{partial:#}"
+    );
+    let observed = legacy_finding(&partial, "LNK002", &target);
+    assert_eq!(observed["conclusion"], "inbound_observed", "{partial:#}");
+    assert_eq!(observed["via_redirect_source_pages"], 1, "{partial:#}");
+}
+
+#[test]
 fn a_seeded_crawl_without_any_locale_evidence_does_not_confirm_an_orphan() {
     let site = Site::start(vec![
         (
