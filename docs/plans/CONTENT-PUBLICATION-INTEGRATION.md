@@ -57,7 +57,10 @@ unavailable check may become a pass.
   a persistent cache or a general incremental site evaluator.
   An explicit adapted mode also compares mixed Markdown, static HTML and
   paragraph text for supported independent item gates, with reuse and full
-  evaluation regression tests. Missing capabilities remain not checked; this
+  evaluation regression tests. Adapted Markdown and HTML also support the
+  independent heading-hierarchy gate using complete ordered levels; mixed
+  presets can compose it with prose-only rhythm checks. Missing heading
+  observations remain not checked. Missing capabilities remain not checked; this
   is neither a rendered-page assessment nor a publication verdict.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with

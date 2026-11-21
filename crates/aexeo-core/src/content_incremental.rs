@@ -156,6 +156,7 @@ fn validate_preset(preset: &ContentPreset, mode: ProjectionMode) -> Result<(), N
                     | ContentGate::LinkCount { .. }
                     | ContentGate::RequiredHeadings { .. }
                     | ContentGate::HeadingLength { .. }
+                    | ContentGate::HeadingHierarchy { .. }
                     | ContentGate::DuplicateHeadings { .. }
             );
         !text_gate && !paragraph_gate && !structured_gate
@@ -176,16 +177,26 @@ fn evaluate_item(
         .gates
         .iter()
         .any(|gate| matches!(gate, ContentGate::ProseSentenceLengthVariance { .. }));
+    let wants_heading_levels = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::HeadingHierarchy { .. }));
+    let mut heading_levels = None;
     let mut paragraph_list_items = None;
     let (input, context, link_count) = match (mode, item.media_type.as_str()) {
-        (ProjectionMode::Adapted, "text/markdown") if classify_prose => {
+        (ProjectionMode::Adapted, "text/markdown") if classify_prose || wants_heading_levels => {
             let (input, context, count, map) =
                 crate::markdown_adapter::markdown_input_with_source_map(
                     &item.entity_id,
                     &item.source,
                 )
                 .map_err(|_| unavailable("Markdown projection failed"))?;
-            paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);
+            if classify_prose {
+                paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);
+            }
+            if wants_heading_levels {
+                heading_levels = map.heading_levels().map(<[u8]>::to_vec);
+            }
             let count = map.links_complete().then_some(count);
             (input, Some(context), count)
         }
@@ -198,8 +209,8 @@ fn evaluate_item(
                 .map_err(|_| unavailable("Markdown projection failed"))?;
             (input, Some(context), count)
         }
-        (ProjectionMode::Adapted, "text/html") if classify_prose => {
-            let (adapted, _, lists) =
+        (ProjectionMode::Adapted, "text/html") => {
+            let (adapted, levels, lists) =
                 crate::html_content_adapter::html_content_with_paragraph_list_items(
                     &item.entity_id,
                     &item.source,
@@ -207,12 +218,7 @@ fn evaluate_item(
                 )
                 .map_err(unavailable)?;
             paragraph_list_items = lists;
-            let count = adapted.destinations.len();
-            (adapted.input, Some(adapted.context), Some(count))
-        }
-        (ProjectionMode::Adapted, "text/html") => {
-            let adapted = crate::html_content_adapter::html_content(&item.entity_id, &item.source)
-                .map_err(unavailable)?;
+            heading_levels = Some(levels);
             let count = adapted.destinations.len();
             (adapted.input, Some(adapted.context), Some(count))
         }
@@ -250,7 +256,7 @@ fn evaluate_item(
             &input,
             &capabilities,
             None,
-            None,
+            heading_levels.as_deref(),
             true,
             None,
             None,
@@ -1905,6 +1911,120 @@ mod tests {
     }
 
     #[test]
+    fn heading_hierarchy_incremental_matches_full_and_withholds_unknown_levels() {
+        let (mut snapshot, _, mut change) = fixture();
+        for (index, item) in snapshot.items.iter_mut().enumerate() {
+            let (media, source) = if index % 2 == 0 {
+                ("text/markdown", "# One\n\n## Two\n\nText.\n")
+            } else {
+                ("text/html", "<h1>One</h1><h3>Three</h3><p>Text.</p>")
+            };
+            item.media_type = media.into();
+            item.source = source.into();
+            item.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\ninitial_level=1\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n").unwrap();
+        let baseline =
+            IncrementalBaseline::prepare_adapted(snapshot.clone(), preset.clone()).unwrap();
+        let mut updated = snapshot.items[0].clone();
+        updated.source = "# One\n\n### Skipped\n\nUpdated.\n".into();
+        updated.sha256 = format!("{:x}", Sha256::digest(updated.source.as_bytes()));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        );
+        update.media_type = updated.media_type.clone();
+        change.entries.push(update);
+        let candidate = overlay_candidate(&snapshot, &change, std::slice::from_ref(&updated))
+            .unwrap()
+            .candidate;
+        let expected: BTreeMap<_, _> = candidate
+            .items
+            .iter()
+            .map(|item| {
+                let (input, context, count, levels) = if item.media_type == "text/markdown" {
+                    let (input, context, count, map) =
+                        crate::markdown_adapter::markdown_input_with_source_map(
+                            &item.entity_id,
+                            &item.source,
+                        )
+                        .unwrap();
+                    (
+                        input,
+                        context,
+                        count,
+                        map.heading_levels().unwrap().to_vec(),
+                    )
+                } else {
+                    let (html, levels) =
+                        crate::html_content_adapter::html_content_with_scope_and_heading_levels(
+                            &item.entity_id,
+                            &item.source,
+                            crate::html_content_adapter::HtmlContentScope::Document,
+                        )
+                        .unwrap();
+                    let count = html.destinations.len();
+                    (html.input, html.context, count, levels)
+                };
+                let capabilities = ContentEvaluationContext {
+                    adapter: Some(&context),
+                    link_count: Some(count),
+                    ..Default::default()
+                };
+                (
+                    item.entity_id.clone(),
+                    preset
+                        .evaluate_with_heading_levels(
+                            &input,
+                            &capabilities,
+                            None,
+                            Some(&levels),
+                            true,
+                            None,
+                        )
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&updated))
+        else {
+            panic!("expected evaluated")
+        };
+        assert_eq!(
+            serde_json::to_value(&reports).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Failed);
+        assert!(evaluated > 0 && reused > 0);
+
+        let mut unknown = updated.clone();
+        unknown.source = "# One\n\n<h3>Unobserved</h3>\n".into();
+        unknown.sha256 = format!("{:x}", Sha256::digest(unknown.source.as_bytes()));
+        change.entries.clear();
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&unknown),
+        );
+        update.media_type = unknown.media_type.clone();
+        change.entries.push(update);
+        assert!(matches!(
+            baseline.evaluate(&change, &[unknown]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        let plain = fixture().0;
+        assert!(IncrementalBaseline::prepare_adapted(plain, preset).is_err());
+    }
+
+    #[test]
     fn adapted_incremental_refuses_unobserved_html_links() {
         let (mut snapshot, _, _) = fixture();
         let preset = ContentPreset::from_toml(
@@ -2090,7 +2210,7 @@ mod tests {
             item.source = source.into();
             item.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
         }
-        let preset = ContentPreset::from_toml("version=1\nname='prose'\n[[gates]]\nid='v'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='prose'\n[[gates]]\nid='v'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\n").unwrap();
         let mut next = snapshot.items[0].clone();
         next.source = format!(
             "{}\nAnother sentence. Another short sentence. Another last sentence.\n",
@@ -2111,23 +2231,28 @@ mod tests {
             .items
             .iter()
             .map(|item| {
-                let (input, context, lists) = if item.media_type == "text/markdown" {
+                let (input, context, levels, lists) = if item.media_type == "text/markdown" {
                     let (input, context, _, map) =
                         crate::markdown_adapter::markdown_input_with_source_map(
                             &item.entity_id,
                             &item.source,
                         )
                         .unwrap();
-                    (input, context, map.paragraph_list_items().unwrap().to_vec())
+                    (
+                        input,
+                        context,
+                        map.heading_levels().unwrap().to_vec(),
+                        map.paragraph_list_items().unwrap().to_vec(),
+                    )
                 } else {
-                    let (adapted, _, lists) =
+                    let (adapted, levels, lists) =
                         crate::html_content_adapter::html_content_with_paragraph_list_items(
                             &item.entity_id,
                             &item.source,
                             crate::html_content_adapter::HtmlContentScope::Document,
                         )
                         .unwrap();
-                    (adapted.input, adapted.context, lists.unwrap())
+                    (adapted.input, adapted.context, levels, lists.unwrap())
                 };
                 let caps = ContentEvaluationContext {
                     adapter: Some(&context),
@@ -2138,7 +2263,7 @@ mod tests {
                         &input,
                         &caps,
                         None,
-                        None,
+                        Some(&levels),
                         false,
                         None,
                         None,
