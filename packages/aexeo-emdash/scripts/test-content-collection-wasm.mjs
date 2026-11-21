@@ -455,6 +455,29 @@ assert.equal(citedReport.source_locations.length, 31);
 assert.equal(JSON.stringify(citedDocument), originalCitations);
 console.log("WASM sentence analysis preserves reference markers and source locations");
 
+// Segment boundaries and formatting must not change citation projection or erase
+// a year inside an ordinary linked label.
+const segmentedCitation = { route: "/segmented", title: "References", body: [{
+  markDefs: [{ _key: "ref", _type: "link", href: "#reference-source" }],
+  children: [
+    { _type: "span", text: "Élan." },
+    { _type: "span", text: "[", marks: ["ref"] },
+    { _type: "span", text: "17", marks: ["ref", "strong"] },
+    { _type: "span", text: "]", marks: ["ref"] },
+    { _type: "span", text: " Next. " },
+    { _type: "span", text: "Source ", marks: ["ref"] },
+    { _type: "span", text: "2025", marks: ["ref"] },
+  ],
+}] };
+const segmentedOriginal = JSON.stringify(segmentedCitation);
+const segmentedPreset = "version=1\nname='segmented'\n[[gates]]\nid='literal'\nkind='forbidden_terms'\nterms=['[17]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n";
+const segmentedReport = await evaluateContent(segmentedCitation, "segmented", { segmented: segmentedPreset });
+assert.equal(segmentedReport.gates[0].findings.length, 1);
+assert.equal(segmentedReport.gates[1].measurements.sentence_count, 3);
+assert.equal(segmentedReport.gates[1].findings.length, 1);
+assert.equal(JSON.stringify(segmentedCitation), segmentedOriginal);
+console.log("WASM retains segmented citations and linked prose years");
+
 // An explicitly supplied review date is evaluated against a fixed reference,
 // without consulting the wall clock or inferring factual accuracy.
 const reviewAge = `version=1\nname="review-age"\n[[gates]]\nid="age"\nkind="metadata_age"\nfield="last_reviewed"\nas_of="2024-03-01"\nmax_days=1\n`;

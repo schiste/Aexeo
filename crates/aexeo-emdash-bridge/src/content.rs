@@ -19,6 +19,19 @@ fn heading_level(style: &crate::BlockStyle) -> Option<u8> {
     }
 }
 
+fn reference_key<'a>(
+    span: &'a crate::PortableTextSpan,
+    link_keys: &std::collections::BTreeSet<&str>,
+    citation_keys: &std::collections::BTreeSet<&str>,
+) -> Option<&'a str> {
+    let mut links = span
+        .marks
+        .iter()
+        .filter(|mark| link_keys.contains(mark.as_str()));
+    let first = links.next()?.as_str();
+    (links.next().is_none() && citation_keys.contains(first)).then_some(first)
+}
+
 fn is_heading(style: &crate::BlockStyle) -> bool {
     heading_level(style).is_some()
 }
@@ -100,25 +113,44 @@ fn content_input_with_context(
             previous = current;
         }
         let block_start = text.len();
-        for child in &block.children {
-            match child {
-                PortableTextChild::Span(span) => {
-                    let numeric_marker = span.text.bytes().any(|byte| byte.is_ascii_digit())
-                        && span.text.bytes().all(|byte| {
-                            byte.is_ascii_digit()
-                                || matches!(byte, b'[' | b']' | b',' | b'-' | b' ')
-                        })
-                        && span
-                            .marks
-                            .iter()
-                            .any(|mark| citation_keys.contains(mark.as_str()));
-                    if numeric_marker {
-                        literal_projection.push_masked(&mut text, &span.text);
-                    } else {
-                        text.push_str(&span.text);
-                    }
+        // Evaluate the whole contiguous link label: Portable Text may split a
+        // citation across formatting spans, or split a prose label from its year.
+        let mut index = 0;
+        while index < block.children.len() {
+            let PortableTextChild::Span(first) = &block.children[index];
+            let Some(key) = first
+                .marks
+                .iter()
+                .find(|key| citation_keys.contains(key.as_str()))
+            else {
+                text.push_str(&first.text);
+                index += 1;
+                continue;
+            };
+            let mut end = index;
+            let mut numeric = true;
+            let mut has_digit = false;
+            while end < block.children.len() {
+                let PortableTextChild::Span(span) = &block.children[end];
+                if !span.marks.contains(key) {
+                    break;
+                }
+                numeric &= reference_key(span, &link_keys, &citation_keys) == Some(key.as_str());
+                has_digit |= span.text.bytes().any(|byte| byte.is_ascii_digit());
+                numeric &= span.text.bytes().all(|byte| {
+                    byte.is_ascii_digit() || matches!(byte, b'[' | b']' | b',' | b'-' | b' ')
+                });
+                end += 1;
+            }
+            for child in &block.children[index..end] {
+                let PortableTextChild::Span(span) = child;
+                if numeric && has_digit {
+                    literal_projection.push_masked(&mut text, &span.text);
+                } else {
+                    text.push_str(&span.text);
                 }
             }
+            index = end;
         }
         let block_text = text[block_start..].to_owned();
         if is_heading(&block.style) {
@@ -1867,6 +1899,53 @@ field = "slug"
         assert_eq!(locations.len(), 31);
         assert_eq!((locations[1].span_index, locations[1].utf16_offset), (3, 0));
         assert_eq!(document.body[0].children.len(), 69);
+    }
+
+    #[test]
+    fn segmented_reference_labels_are_masked_only_when_entire_link_is_numeric() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{
+                "markDefs":[{"_key":"ref", "_type":"link", "href":"#reference-source"}],
+                "children":[
+                    {"_type":"span", "text":"Élan."},
+                    {"_type":"span", "text":"[", "marks":["ref"]},
+                    {"_type":"span", "text":"17", "marks":["ref", "strong"]},
+                    {"_type":"span", "text":"]", "marks":["ref"]},
+                    {"_type":"span", "text":" Next. "},
+                    {"_type":"span", "text":"Source ", "marks":["ref"]},
+                    {"_type":"span", "text":"2025", "marks":["ref"]}
+                ]
+            }]
+        }))
+        .unwrap();
+        let (input, _, _, literal) = content_input_with_context(&document);
+        assert_eq!(input.text.as_deref(), Some("Élan.     Next. Source 2025"));
+        assert_eq!(literal.as_deref(), Some("Élan.[17] Next. Source 2025"));
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[17]', '2025']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=20\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].measurements["sentence_count"], 3);
+    }
+
+    #[test]
+    fn overlapping_links_keep_the_entire_ambiguous_label() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{
+                "markDefs":[
+                    {"_key":"ref", "_type":"link", "href":"#reference-source"},
+                    {"_key":"other", "_type":"link", "href":"/elsewhere"}
+                ],
+                "children":[
+                    {"_type":"span", "text":"Source ", "marks":["ref", "other"]},
+                    {"_type":"span", "text":"2025", "marks":["ref"]}
+                ]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(
+            content_input(&document).text.as_deref(),
+            Some("Source 2025")
+        );
     }
 
     #[test]
