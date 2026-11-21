@@ -2933,9 +2933,12 @@ impl ContentPreset {
                         let mut uncertain = 0usize;
                         let mut paragraphs_without_windows = 0usize;
                         let mut lengths = std::collections::VecDeque::new();
+                        let (mut sum, mut sum_squares) = (0u128, 0u128);
                         for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
                             if *reset_at_paragraph {
                                 lengths.clear();
+                                sum = 0;
+                                sum_squares = 0;
                             }
                             let windows_before = windows;
                             bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
@@ -2956,6 +2959,8 @@ impl ContentPreset {
                                 |segment, line, column| {
                                     if sentence_is_quoted(&mut quotes, &paragraph.text, segment) {
                                         lengths.clear();
+                                        sum = 0;
+                                        sum_squares = 0;
                                         return;
                                     }
                                     if segment.trim().is_empty() {
@@ -2963,26 +2968,26 @@ impl ContentPreset {
                                     }
                                     if !is_simple_latin_sentence(segment) {
                                         lengths.clear();
+                                        sum = 0;
+                                        sum_squares = 0;
                                         uncertain += 1;
                                         return;
                                     }
-                                    lengths.push_back((
-                                        segment.split_whitespace().count(),
-                                        line,
-                                        column,
-                                    ));
-                                    if lengths.len() > *window_size {
-                                        lengths.pop_front();
+                                    let count = segment.split_whitespace().count();
+                                    let count_wide = count as u128;
+                                    sum += count_wide;
+                                    sum_squares += count_wide * count_wide;
+                                    lengths.push_back((count, line, column));
+                                    if lengths.len() > *window_size
+                                        && let Some((old, _, _)) = lengths.pop_front()
+                                    {
+                                        let old = old as u128;
+                                        sum -= old;
+                                        sum_squares -= old * old;
                                     }
                                     if lengths.len() == *window_size {
                                         windows += 1;
                                         let n = *window_size as u128;
-                                        let sum: u128 =
-                                            lengths.iter().map(|(v, _, _)| *v as u128).sum();
-                                        let sum_squares: u128 = lengths
-                                            .iter()
-                                            .map(|(v, _, _)| (*v as u128).pow(2))
-                                            .sum();
                                         let numerator = n * sum_squares - sum * sum;
                                         if numerator < (threshold as u128).pow(2) * n * n {
                                             flagged += 1;
@@ -7014,6 +7019,75 @@ terms = ["bad"]
             .unwrap();
         assert_eq!(report.gates[0].status, GateStatus::Passed);
         assert_eq!(report.gates[0].measurements["windows_checked"], 1);
+    }
+
+    #[test]
+    fn sentence_variance_resets_rolling_sums_at_uncertain_and_quoted_sentences() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size=2\nmin_stddev_words=2\n").unwrap();
+        for text in [
+            "One two three four five. 中文文字. One. Two.",
+            "One two three four five. « Quoted words. » One. Two.",
+        ] {
+            let context = ContentContext {
+                paragraphs: Some(vec![ContentParagraph {
+                    text: text.into(),
+                    line: 1,
+                    column: 1,
+                }]),
+                ..Default::default()
+            };
+            let report = preset
+                .evaluate_with_context(&ContentInput::default(), None, None, Some(&context))
+                .unwrap();
+            assert_eq!(report.gates[0].measurements["windows_checked"], 1, "{text}");
+            assert_eq!(
+                report.gates[0].measurements["low_variance_windows"], 1,
+                "{text}"
+            );
+            assert_eq!(report.gates[0].findings.len(), 1, "{text}");
+        }
+    }
+
+    #[test]
+    fn sentence_variance_rolling_windows_match_reference_counts() {
+        let counts: Vec<usize> = (0..120).map(|i| 1 + (i * 17 % 13)).collect();
+        let text = counts
+            .iter()
+            .map(|n| format!("{}.", vec!["word"; *n].join(" ")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text,
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        for size in [2usize, 7, 64] {
+            let preset = ContentPreset::from_toml(&format!("version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size={size}\nmin_stddev_words=3\n")).unwrap();
+            let report = preset
+                .evaluate_with_context(&ContentInput::default(), None, None, Some(&context))
+                .unwrap();
+            let expected = counts
+                .windows(size)
+                .filter(|window| {
+                    let n = size as u128;
+                    let sum: u128 = window.iter().map(|v| *v as u128).sum();
+                    let squares: u128 = window.iter().map(|v| (*v as u128).pow(2)).sum();
+                    n * squares - sum * sum < 9 * n * n
+                })
+                .count();
+            assert_eq!(
+                report.gates[0].measurements["windows_checked"],
+                counts.len() - size + 1
+            );
+            assert_eq!(
+                report.gates[0].measurements["low_variance_windows"],
+                expected
+            );
+            assert_eq!(report.gates[0].findings.len(), expected);
+        }
     }
 
     #[test]
