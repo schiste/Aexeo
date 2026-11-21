@@ -144,6 +144,15 @@ both evaluators against the same owned base and metadata projection. Unsupported
 gates and presets missing either scope are rejected. Markdown, HTML and plain
 text use the same adapter and coverage requirements as `prepare_adapted`.
 
+Both `IncrementalBaseline::prepare_adapted_with_html_scope` and
+`ComposedBaseline::prepare_adapted_with_html_scope` let a host select the
+existing static HTML `Main` scope. The scope is retained for candidate
+evaluations; Markdown and plain-text behavior is unchanged. The collection
+projection is supplied separately and is not filtered by this HTML selection.
+Missing, hidden or ambiguous main elements are not checked. Existing
+`prepare_adapted` callers retain document scope. Static selection does not
+establish browser-rendered visibility or publication readiness.
+
 `evaluate` returns separate item and collection results. Inspect both scopes
 and every gate status; neither an item result nor the enclosing object is an
 aggregate pass or publication verdict. A missing metadata field can leave a

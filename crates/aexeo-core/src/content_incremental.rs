@@ -806,6 +806,22 @@ impl ComposedBaseline {
         metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
+        Self::prepare_adapted_with_html_scope(
+            snapshot,
+            metadata,
+            preset,
+            crate::html_content_adapter::HtmlContentScope::Document,
+        )
+    }
+
+    /// Select the static HTML scope for item gates while preserving the
+    /// separately evaluated, host-supplied collection projection.
+    pub fn prepare_adapted_with_html_scope(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+    ) -> Result<Self, NotChecked> {
         preset
             .validate()
             .map_err(|_| unavailable("invalid content preset"))?;
@@ -823,13 +839,18 @@ impl ComposedBaseline {
             ));
         }
         let items = if items.gates.iter().any(is_item_metadata_gate) {
-            IncrementalBaseline::prepare_adapted_with_metadata(
+            IncrementalBaseline::prepare_adapted_with_metadata_and_html_scope(
                 snapshot.clone(),
                 metadata.clone(),
                 items,
+                html_scope,
             )?
         } else {
-            IncrementalBaseline::prepare_adapted(snapshot.clone(), items)?
+            IncrementalBaseline::prepare_adapted_with_html_scope(
+                snapshot.clone(),
+                items,
+                html_scope,
+            )?
         };
         let collection = CollectionBaseline::prepare(snapshot, metadata, collection)?;
         Ok(Self { items, collection })
@@ -1204,6 +1225,89 @@ mod tests {
             result.items,
             IncrementalEvaluation::NotChecked { .. }
         ));
+    }
+
+    #[test]
+    fn composed_html_scope_applies_with_and_without_item_metadata() {
+        use crate::html_content_adapter::HtmlContentScope;
+        for require_metadata in [false, true] {
+            let (mut snapshot, _, mut change) = fixture();
+            for item in &mut snapshot.items {
+                item.media_type = "text/html".into();
+                item.source = "<nav>navigation words</nav><main>base words</main>".into();
+                item.sha256 = format!("{:x}", Sha256::digest(item.source.as_bytes()));
+            }
+            let metadata: BTreeMap<_, _> = snapshot
+                .items
+                .iter()
+                .map(|item| {
+                    (
+                        item.entity_id.clone(),
+                        Some(BTreeMap::from([
+                            ("slug".into(), item.entity_id.clone()),
+                            ("description".into(), "description".into()),
+                        ])),
+                    )
+                })
+                .collect();
+            let metadata_gate = if require_metadata {
+                "[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n"
+            } else {
+                ""
+            };
+            let source = format!(
+                "version=1\nname='mixed'\n[[gates]]\nid='words'\nkind='word_count'\nmin=2\n{metadata_gate}[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+            );
+            let preset = ContentPreset::from_toml(&source).unwrap();
+            let main = ComposedBaseline::prepare_adapted_with_html_scope(
+                snapshot.clone(),
+                metadata.clone(),
+                preset.clone(),
+                HtmlContentScope::Main,
+            )
+            .unwrap();
+            let whole =
+                ComposedBaseline::prepare_adapted(snapshot.clone(), metadata.clone(), preset)
+                    .unwrap();
+            let mut updated = snapshot.items[0].clone();
+            updated.source = "<nav>extra navigation words</nav><main>one</main>".into();
+            updated.sha256 = format!("{:x}", Sha256::digest(updated.source.as_bytes()));
+            let mut update = entry(
+                "a",
+                Operation::Update,
+                Some(&snapshot.items[0]),
+                Some(&updated),
+            );
+            update.media_type = updated.media_type.clone();
+            update.metadata = Some(BTreeMap::from([
+                ("slug".into(), "b".into()),
+                ("description".into(), "description".into()),
+            ]));
+            change.entries = vec![update];
+            let result = main.evaluate(&change, std::slice::from_ref(&updated));
+            let IncrementalEvaluation::Evaluated { reports, .. } = result.items else {
+                panic!("main item unavailable");
+            };
+            assert_eq!(reports["a"].gates[0].status, GateStatus::Failed);
+            let CollectionEvaluation::Report { report, .. } = result.collection else {
+                panic!("collection unavailable");
+            };
+            assert_eq!(report.gates[0].status, GateStatus::Failed);
+            let IncrementalEvaluation::Evaluated { reports, .. } = whole
+                .evaluate(&change, std::slice::from_ref(&updated))
+                .items
+            else {
+                panic!("whole item unavailable");
+            };
+            assert_eq!(reports["a"].gates[0].status, GateStatus::Passed);
+            updated.source = "<p>No main</p>".into();
+            updated.sha256 = format!("{:x}", Sha256::digest(updated.source.as_bytes()));
+            change.entries[0].after = Some(state(&updated));
+            assert!(matches!(
+                main.evaluate(&change, &[updated]).items,
+                IncrementalEvaluation::NotChecked { .. }
+            ));
+        }
     }
 
     #[test]
