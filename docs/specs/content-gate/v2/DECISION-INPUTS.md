@@ -213,6 +213,24 @@ CLI against those exact bytes, changed artifacts, and absent versus empty
 collections. It exercises the implementation boundary; it does not establish
 a portable artifact serialization, validate a verdict, or authenticate inputs.
 
+## Host-supplied URI content in Rust
+
+A trusted Rust host can implement `ConfinedContentFiles::open_uri` to supply
+already-acquired content for a specific change entity, before/after phase and
+URI. Its default implementation returns unavailable. The engine does not fetch
+URIs or grant network access. The host must enforce its own acquisition policy,
+confine or otherwise secure any access, and establish the identity, provenance
+and freshness of the snapshot it supplies. Existing CLI file providers do not
+implement this method, so URI states remain unavailable through the CLI.
+
+Candidate-bound draft evaluation checks every referenced before and after stream
+against its corresponding candidate snapshot with configured size limits; proposed
+content is read again and checked against its declared SHA-256 before evaluation.
+A changed or missing stream fails closed. Revalidation repeats those checks, and
+independent verification still requires independently supplied current state bytes.
+The provider and its input may change between reads: digest matching does not
+establish origin, prevent ABA races, or authorize publication.
+
 ## Independent comparison of offline receipts
 
 `compare_offline_receipts.py` compares a previous Aexeo offline receipt with a

@@ -208,7 +208,9 @@ the child and rejects observed changes. This cannot detect ABA changes, prove a
 coherent snapshot, or authenticate its source.
 
 The Aexeo candidate-bound producer supports local file states through its
-host-selected confined provider; URI content is not fetched. The host must pass
+host-selected confined provider. A Rust host can also explicitly supply URI-state
+bytes by implementing `open_uri` on that provider; see [decision inputs](DECISION-INPUTS.md#host-supplied-uri-content-in-rust).
+The engine does not fetch URIs and the CLI leaves them unavailable. The host must pass
 `--content-root` to the CLI, independently acquire the map and snapshots, and
 ensure that they describe the same candidate. The Python comparator and runner
 have been exercised against the real CLI. Other host implementations must add
