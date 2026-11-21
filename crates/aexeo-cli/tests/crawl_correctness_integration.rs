@@ -1070,7 +1070,7 @@ fn inventory_context(site: &Site, paths: &[&str], extra: &[&str]) -> Value {
         .chain(extra.iter().map(|url| url.to_string()))
         .map(|url| serde_json::json!({"url": url, "disposition": "published", "target": null, "locale": "en"}))
         .collect::<Vec<_>>();
-    serde_json::json!({"identity": identity, "snapshot_date": "2026-11-07",
+    serde_json::json!({"identity": identity,
         "inventory": {"identity": identity, "complete": true, "pages": pages}})
 }
 
@@ -2033,6 +2033,33 @@ fn a_seeded_crawl_confirms_an_unlinked_published_page_in_one_command() {
 }
 
 #[test]
+fn a_crawl_with_a_conflicting_declared_day_does_not_confirm_an_orphan() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let mut context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    context["snapshot_date"] = "2000-01-01".into();
+    let (_, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "x-release"],
+    );
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_snapshot_date_mismatch"),
+        "{report:#}"
+    );
+    assert_eq!(report["reconciliation"]["comparable"], false, "{report:#}");
+    let orphan = format!("{}/orphan", site.base_url);
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible"
+    );
+}
+
+#[test]
 fn a_failed_inventory_page_withholds_orphan_confirmation_but_preserves_redirect_evidence() {
     let site = Site::start(vec![
         ("/", html(r#"<main><a href="/old">Guide</a></main>"#)),
@@ -2345,7 +2372,8 @@ fn a_seed_inventory_without_identity_never_confirms_an_orphan() {
     let site = orphan_site();
     site.serve_header("X-Release", "r1");
     let temp = tempfile::tempdir().unwrap();
-    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let mut context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    context["snapshot_date"] = "2026-11-07".into();
     let mut anonymous = context["inventory"].clone();
     anonymous["identity"] = Value::Null;
     let orphan = format!("{}/orphan", site.base_url);
