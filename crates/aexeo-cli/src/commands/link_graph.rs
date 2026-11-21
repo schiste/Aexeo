@@ -170,6 +170,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "anchor_with_label_count": counts.anchor_with_label,
         "anchor_empty_count": counts.anchor_empty,
         "indeterminate_count": report.links.indeterminate.len(),
+        "locale_unverified_issue_present": report.issues.iter().any(|issue| issue == "inventory_document_locale_unverified"),
         "issue_count": report.issues.len(),
     });
     if let Some(mapping) = &report.static_url_mapping {

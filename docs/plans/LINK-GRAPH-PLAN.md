@@ -32,6 +32,12 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- Compare supported locale variants, extensions and private-use subtags instead
+  of ignoring them during orphan qualification. Different or unsupported suffixes
+  are unverified; malformed suffixes cannot establish a script or region
+  conflict. This bounded structural check does not validate the language
+  registry or prove the content language.
+
 - Withhold audit inventory eligibility for invalid snapshot dates, unobserved or
   inverted crawl windows, and declared dates outside the observed UTC window.
   Date agreement is only a consistency check; the host must still establish

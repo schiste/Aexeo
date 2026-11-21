@@ -52,6 +52,16 @@ snapshot is correct. `snapshot_date` accepts an ISO calendar date (`YYYY-MM-DD`)
 or RFC 3339 timestamp; an invalid value raises `snapshot_date_invalid` and
 withholds eligibility. Timestamps are compared as UTC calendar dates.
 
+Inventory locale and observed document language must agree on their primary
+language and on the presence and values of script and region. Supported variant,
+extension and private-use subtags must also match in order, ignoring case.
+Different, malformed, unsupported or missing subtags produce
+`inventory_document_locale_unverified` and prevent orphan confirmation;
+conflicting primary languages, scripts or regions retain their mismatch reasons.
+This is a bounded structural comparison, not a complete BCP 47 or language
+registry validator. Agreement does not prove the content language or publication
+surface, and some equivalent locale spellings may remain unverified.
+
 `requested_url` is optional on an input page and records the URL fetched when
 it differs from `url`. `redirect_chain` is also optional: the redirect responses
 followed from `requested_url` to `url`, in request order, each as
@@ -194,8 +204,9 @@ of a complete crawl. The field is absent in older reports.
 
 Add `--telemetry` to write a single JSON event containing only duration, page,
 link and issue counts to standard error, including counts of conditional and
-unclassified link observations. It is opt-in and does not include page URLs or
-content. The normal report contains the evidence and should be handled
+unclassified link observations. The `locale_unverified_issue_present` boolean
+reports whether that issue was raised; false does not establish locale coverage.
+Telemetry is opt-in and does not include page URLs, locale values or content. The normal report contains the evidence and should be handled
 accordingly.
 
 ## Inventory aliases
