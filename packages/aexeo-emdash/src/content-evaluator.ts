@@ -53,6 +53,12 @@ export type LinkObservationProvider = (request: {
   collection: string | undefined;
 }) => Promise<BoundLinkObservations["observations"]>;
 
+/** Reject malformed or misaligned provider responses before they reach the evaluator. */
+const VALID_LINK_OBSERVATIONS = new Set(["reachable", "not_found", "not_checked", "not_applicable"]);
+export function validLinkObservations(value: unknown, count: number): value is BoundLinkObservations["observations"] {
+  return Array.isArray(value) && value.length === count && value.every((item) => VALID_LINK_OBSERVATIONS.has(item));
+}
+
 export interface LinkProviderTelemetry {
   duration_ms: number;
   status: "success" | "error" | "unavailable";
@@ -171,9 +177,7 @@ export function withContentPreset(
               linkUnavailableReason = "link projection unavailable from adapter";
             } else {
               const observations = await linkProvider({ destinations: [...projection.destinations], route: document.route, locale: document.lang, preset: name, collection });
-              const valid = new Set(["reachable", "not_found", "not_checked", "not_applicable"]);
-              if (!Array.isArray(observations) || observations.length !== projection.destinations.length ||
-                  observations.some((value) => !valid.has(value))) throw new Error("invalid link observations");
+              if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
               report = await evaluate(document, name, preset.sources, evidenceSources, undefined,
                 externalResults, { ...projection, observations });
               status = "success";

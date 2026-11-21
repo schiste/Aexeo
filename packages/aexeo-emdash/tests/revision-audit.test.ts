@@ -13,6 +13,58 @@ function host() {
 const report = { preset: "article", input_id: "/revision/one", gates: [], applied_fixes: [] };
 
 describe("revision audits", () => {
+  it("observes links only for the exact requested revision and binds results to its projection", async () => {
+    const { ctx } = host();
+    const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    const checked = { ...initial, gates: [{ ...initial.gates[0]!, status: "passed" as const, reason: null }] };
+    const evaluate = vi.fn(async (...args: unknown[]) => args[6] ? checked : initial);
+    const projectLinks = vi.fn(async (document: any) => ({ document, destinations: ["https://example.org/historical"] }));
+    const observer = vi.fn(async () => ["reachable" as const]);
+    const telemetry = vi.fn();
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article" }, evaluate, projectLinks, revisionLinkObservations: observer, onLinkProviderTelemetry: telemetry,
+    });
+    expect(result).toMatchObject({ status: "evaluated", report: checked, assurance: { runtime_providers: "revision_link_observer_invoked", publication_authorization: "not_granted" } });
+    expect(observer).toHaveBeenCalledWith({ collection: "posts", id: "one", revision: "rev1", locale: "en", preset: "article", destinations: ["https://example.org/historical"] });
+    expect(JSON.stringify(projectLinks.mock.calls)).toContain("Historical sentence.");
+    expect(JSON.stringify(projectLinks.mock.calls)).not.toContain("current body");
+    expect(evaluate.mock.calls[1]?.[6]).toMatchObject({ destinations: ["https://example.org/historical"], observations: ["reachable"] });
+    expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: "success" }));
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain("example.org");
+  });
+
+  it("keeps revision link gates unchecked on missing projections and observer failures", async () => {
+    const { ctx } = host();
+    const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    for (const mode of ["unavailable", "failed", "invalid"] as const) {
+      const evaluate = vi.fn(async () => initial);
+      const observer = vi.fn(async () => { if (mode === "failed") throw new Error("private-url"); return ["bogus"] as never; });
+      const events = vi.fn();
+      const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+        preset: { name: "article" }, evaluate, revisionLinkObservations: observer, onLinkProviderTelemetry: events,
+        projectLinks: async (document) => mode === "unavailable" ? null : { document, destinations: ["https://private.example"] },
+      });
+      expect(result.status).toBe("evaluated");
+      if (result.status !== "evaluated") throw new Error("expected report");
+      expect(result.report.gates[0]?.status).toBe("not_checked");
+      expect(result.report.gates[0]?.reason).toBe(mode === "unavailable" ? "link projection unavailable from adapter" : "link observation failed");
+      expect(JSON.stringify(result)).not.toContain("private-url");
+      expect(JSON.stringify(events.mock.calls)).not.toContain("private.example");
+      expect(observer).toHaveBeenCalledTimes(mode === "unavailable" ? 0 : 1);
+      expect(evaluate).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("does not invoke a revision observer when the preset needs no link observations", async () => {
+    const { ctx } = host();
+    const observer = vi.fn();
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article" }, evaluate: async () => report, revisionLinkObservations: observer, projectLinks: vi.fn(),
+    });
+    expect(result.status).toBe("evaluated");
+    expect(observer).not.toHaveBeenCalled();
+  });
+
   it("evaluates the requested revision, stores it and refreshes currentness on read", async () => {
     const { ctx, current } = host();
     const evaluate = vi.fn(async () => report);
