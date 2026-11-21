@@ -204,6 +204,51 @@ pub(crate) fn numeric_reference_marker(href: &str, text: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'[' | b']' | b',' | b'-' | b' '))
 }
 
+// Recognize explicit HTTP(S) URLs without changing their text or crossing an
+// adapter block. Bounded scanning avoids repeatedly parsing unbounded tokens.
+fn http_url_end(
+    text: &str,
+    start: usize,
+    block_end: Option<usize>,
+    starts_block: bool,
+) -> Option<usize> {
+    const MAX_URL_BYTES: usize = 2048;
+    let tail = text.get(start..)?;
+    if !(tail.starts_with("https://") || tail.starts_with("http://")) {
+        return None;
+    }
+    if start > 0
+        && !starts_block
+        && !text[..start].chars().next_back().is_some_and(|c| {
+            c.is_whitespace() || matches!(c, '(' | '[' | '{' | '«' | '“' | '\'' | '"')
+        })
+    {
+        return None;
+    }
+    let mut end = start;
+    for (relative, ch) in tail.char_indices() {
+        let offset = start + relative;
+        if block_end.is_some_and(|boundary| offset >= boundary) || ch.is_whitespace() {
+            break;
+        }
+        if relative + ch.len_utf8() > MAX_URL_BYTES {
+            return None;
+        }
+        end = offset + ch.len_utf8();
+    }
+    let candidate = text[start..end].trim_end_matches(|ch| {
+        matches!(
+            ch,
+            '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '»' | '”' | '\'' | '"'
+        )
+    });
+    let parsed = url::Url::parse(candidate).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return None;
+    }
+    Some(start + candidate.len())
+}
+
 fn for_each_sentence(
     text: &str,
     mut line: usize,
@@ -218,6 +263,7 @@ fn for_each_sentence(
     let mut next_block = 0;
     let mut after_delimiter = false;
     let mut adjacent_to_delimiter = false;
+    let mut protected_url_end = 0;
     for (offset, ch) in text
         .char_indices()
         .map(|(offset, ch)| (offset, Some(ch)))
@@ -242,6 +288,16 @@ fn for_each_sentence(
                 after_delimiter = false;
             }
         }
+        if ch == Some('h') && offset >= protected_url_end {
+            let following_block = block_ends[next_block..]
+                .iter()
+                .copied()
+                .find(|&end| end > offset);
+            if let Some(end) = http_url_end(text, offset, following_block, block_end) {
+                protected_url_end = end;
+            }
+        }
+        let in_url = offset < protected_url_end;
         let decimal_point = !block_end
             && ch == Some('.')
             && text[..offset]
@@ -303,8 +359,10 @@ fn for_each_sentence(
                             })
                 })
             });
-        let delimiter =
-            !decimal_point && !abbreviation && ch.is_none_or(|ch| delimiters.contains(ch));
+        let delimiter = !in_url
+            && !decimal_point
+            && !abbreviation
+            && ch.is_none_or(|ch| delimiters.contains(ch));
         if block_end || delimiter {
             after_delimiter = delimiter && ch.is_some();
             adjacent_to_delimiter = after_delimiter;
@@ -5187,6 +5245,63 @@ mod tests {
                 "{kind}"
             );
         }
+    }
+
+    #[test]
+    fn sentence_measurements_keep_http_urls_inside_their_sentence() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=20\n",
+        )
+        .unwrap();
+        for text in [
+            "See https://example.org/a.b?x=1&y=2. Next sentence.",
+            "Read (https://www.example.org/v1.2). Next sentence!",
+            "Voir https://exemple.fr/école. Suite.",
+        ] {
+            let report = preset.evaluate(&literal_input(text)).unwrap();
+            assert_eq!(report.gates[0].measurements["sentence_count"], 2, "{text}");
+        }
+    }
+
+    #[test]
+    fn http_url_segmentation_is_bounded_and_preserves_sentence_positions() {
+        let text = "See https://example.org/v1.2?key=value. Next sentence.";
+        let mut observed = Vec::new();
+        for_each_sentence(text, 1, 1, &[], ".!?", &[], |sentence, line, column| {
+            if !sentence.trim().is_empty() {
+                observed.push((sentence.trim().to_string(), line, column));
+            }
+        });
+        assert_eq!(
+            observed,
+            vec![
+                ("See https://example.org/v1.2?key=value".into(), 1, 1),
+                ("Next sentence".into(), 1, 41),
+            ]
+        );
+        let url = "https://example.org/page";
+        assert_eq!(http_url_end(url, 0, None, false), Some(url.len()));
+        assert_eq!(http_url_end(url, 0, Some(15), false), Some(15));
+        assert_eq!(http_url_end("https://", 0, None, false), None);
+        assert_eq!(
+            http_url_end("wordhttps://example.org", 4, None, false),
+            None
+        );
+        assert_eq!(
+            http_url_end(
+                &format!("https://example.org/{}", "x".repeat(2048)),
+                0,
+                None,
+                false
+            ),
+            None
+        );
+        let joined = "Firsthttps://example.org/a.b?x=1. Next.";
+        let mut count = 0;
+        for_each_sentence(joined, 1, 1, &[5, 5], ".!?", &[], |sentence, _, _| {
+            count += usize::from(!sentence.trim().is_empty());
+        });
+        assert_eq!(count, 3);
     }
 
     #[test]

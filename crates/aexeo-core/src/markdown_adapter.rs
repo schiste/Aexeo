@@ -1765,6 +1765,20 @@ min = 2
     }
 
     #[test]
+    fn sentence_measurements_keep_visible_http_urls_intact() {
+        let result = report(
+            "See https://example.org/a.b?x=1. Next sentence.",
+            "kind='sentence_length'\nmax_words=1",
+        );
+        assert_eq!(result.measurements["sentence_count"], 2);
+        assert_eq!(result.findings.len(), 2);
+        assert_eq!(
+            (result.findings[1].line, result.findings[1].column),
+            (1, 34)
+        );
+    }
+
+    #[test]
     fn block_ends_are_sentence_boundaries() {
         use crate::content_gate::GateStatus;
         let gate = "kind='sentence_length'\nmax_words=6\nblocking=false";

@@ -294,6 +294,9 @@ registry before considering the release delivered.
   three advisory low-variance windows crossing or contained in the list. The
   existing paragraph reset prevents cross-paragraph windows but does not identify
   lists or assess whether a repeated list rhythm is intentional.
+- [x] Preserve internal punctuation in bounded, recognized HTTP(S) URLs during
+  shared sentence segmentation, without fetching links. Trailing punctuation,
+  unsupported URL forms and adapter block boundaries remain heuristic.
 - [x] Configurable sentence-length heuristic and opt-in composed preset ([PR #29](https://github.com/schiste/Aexeo/pull/29)).
 - [x] Optional, exact case-sensitive abbreviation exceptions for sentence length
   ([PR #125](https://github.com/schiste/Aexeo/pull/125)); they do not provide
