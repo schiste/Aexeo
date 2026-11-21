@@ -92,6 +92,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `packages/aexeo-emdash`, run `npm run build:wasm && npm run build:ts &&
   npm run build:bundle && npm run test:wasm`. TypeScript alone does not create
   `dist/content.js`, which the WASM tests import.
+  The build bundles private modules into public entry points instead of emitting
+  every internal JavaScript file. Exercise integration tests through a shipped
+  entry point such as `dist/configured.js`, not a private `dist/*.js` path.
 - For whole-word literal gates, test decomposed combining marks and lowercase
   expansions, both whole-word and substring modes, and confirm later match
   positions across CLI adapters and the rebuilt EmDash WASM bridge.
