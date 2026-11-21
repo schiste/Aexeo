@@ -43,7 +43,9 @@ protocol or general incremental evaluation of arbitrary presets.
 static HTML use their shared content adapters, with document scope for HTML.
 The supported independent item gates include the text and paragraph gates of
 `prepare_paragraph_text`, plus `LinkCount`, `RequiredHeadings`, `HeadingLength`,
-`HeadingHierarchy` and `DuplicateHeadings`. Heading hierarchy uses the complete
+`HeadingHierarchy`, `DuplicateHeadings` and `ListItemCount`. List counts require
+complete Markdown list observations; HTML, plain text and Markdown with
+unobserved HTML are `not_checked` for this gate. Heading hierarchy uses the complete
 ordered levels projected from each Markdown or HTML source. Markdown containing
 unobserved HTML and plain text cannot supply complete heading levels and cause
 `not_checked` for this gate. A gate whose required capability is unavailable for

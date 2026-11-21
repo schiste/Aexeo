@@ -60,7 +60,9 @@ unavailable check may become a pass.
   evaluation regression tests. Adapted Markdown and HTML also support the
   independent heading-hierarchy gate using complete ordered levels; mixed
   presets can compose it with prose-only rhythm checks. Missing heading
-  observations remain not checked. Missing capabilities remain not checked; this
+  observations remain not checked. Markdown list-count gates also work in
+  adapted incremental and change evaluation; other formats without complete
+  list observations remain not checked. Missing capabilities remain not checked; this
   is neither a rendered-page assessment nor a publication verdict.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with
