@@ -572,6 +572,11 @@ registry before considering the release delivered.
   It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  The conservative HTML source mapper preserves positions through explicitly
+  nested bidirectional inline elements, including Arabic text and links
+  ([PR #705](https://github.com/schiste/Aexeo/pull/705)). Hidden or malformed
+  structures remain unmapped; this does not validate browser rendering or
+  translation quality.
   Conservatively map explicitly nested HTML `aside` and `address` containers;
   hidden and malformed structures remain unmapped. This is static source
   mapping, not a browser visibility guarantee.
