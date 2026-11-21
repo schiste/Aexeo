@@ -337,7 +337,10 @@ identity. This comparison is not a complete BCP 47 validator.
   entry served in English is `not_eligible` for a confirmed orphan. A seeded
   crawl with a foreign inventory URL and a fetched, unlinked local page also
   checks that reconciliation has no eligible pages and the local orphan finding
-  remains `not_eligible`. These local fixtures do not establish locale-region
+  remains `not_eligible`. A separate seeded fixture verifies that a confirmed
+  orphan becomes ineligible when another published inventory page returns 500,
+  while an observed link through a verified redirect remains credited. These
+  local fixtures do not establish locale-region
   equivalence or substitute for a matching real site.
   On 2026-11-10 the Preview CMS schema was accessible, but a direct article
   request redirected to Cloudflare Access login; the HTML remained unobserved.
