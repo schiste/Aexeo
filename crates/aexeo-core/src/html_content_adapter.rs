@@ -640,6 +640,8 @@ fn html_source_map_inner(
                 | "h5"
                 | "h6"
                 | "span"
+                | "bdi"
+                | "bdo"
                 | "b"
                 | "strong"
                 | "del"
@@ -1718,6 +1720,40 @@ mod tests {
         ] {
             let adapted = html_content("x", html).unwrap();
             assert!(html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none());
+        }
+    }
+
+    #[test]
+    fn maps_bidirectional_inline_text_without_guessing_incomplete_markup() {
+        let html = "<main>\n<p>Avant <bdi dir='auto'>مرحبا <a href='/ar'>عالم</a></bdi> après <bdo dir='rtl'>نص</bdo>.</p>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let source_index = crate::text_index::LineIndex::new(html);
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            for needle in ["Avant", "مرحبا", "عالم", "après", "نص"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(needle).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(map.link_starts.len(), 1);
+        }
+        for html in [
+            "<main><p>Avant <bdi>مرحبا</p></main>",
+            "<main><p>Avant <bdo hidden>نص</bdo></p></main>",
+            "<main><p>Avant <bdi>مرحبا</bdo></p></main>",
+        ] {
+            let adapted = html_content("x", html).unwrap();
+            assert!(
+                html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{html}"
+            );
         }
     }
 
