@@ -340,6 +340,17 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 &id, &text, scope,
             ) {
                 Ok((adapted, levels, list_items)) => {
+                    if preset
+                        .gates
+                        .iter()
+                        .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
+                    {
+                        structured_lists = adapted.input.text.as_deref().and_then(|projected| {
+                            aexeo_core::html_content_adapter::html_structured_lists(
+                                &text, projected, scope,
+                            )
+                        });
+                    }
                     heading_levels = Some(levels);
                     paragraph_list_items = list_items;
                     if html_projection.is_some() {
