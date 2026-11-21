@@ -38,6 +38,22 @@ describe("portable content API", () => {
     expect(JSON.stringify(onTelemetry.mock.calls[0]?.[0])).not.toContain("example.org");
   });
 
+  it("types classified paragraphs and aggregates only measured prose coverage", async () => {
+    const gate: ContentGateResult = { gate_id: "private-gate", status: "failed", blocking: false,
+      scope: "document", required_capability: "classified_paragraphs", findings: [], reason: null,
+      measurements: { list_paragraphs_excluded: 2, windows_checked: 3 } };
+    const unknown: ContentGateResult = { gate_id: "unknown", status: "not_checked", blocking: false, scope: "document", required_capability: "classified_paragraphs", findings: [], reason: "unavailable" };
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [gate, gate, unknown], applied_fixes: [] }));
+    const onTelemetry = vi.fn();
+    await evaluateContent({ route: "/private", title: "Private", body: [] }, "custom", {}, undefined, onTelemetry);
+    const event = onTelemetry.mock.calls[0]?.[0];
+    expect(event.prose_variance).toEqual({ measured_gates: 2, list_paragraphs_excluded: 4, windows_checked: 6 });
+    expect(JSON.stringify(event)).not.toContain("private");
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [unknown], applied_fixes: [] }));
+    await evaluateContent({ route: "/private", title: "Private", body: [] }, "custom", {}, undefined, onTelemetry);
+    expect(onTelemetry.mock.calls[1]?.[0].prose_variance).toBeUndefined();
+  });
+
   it("passes the document and preset sources to the bridge", async () => {
     const document = { route: "/sample", title: "Sample", body: [] };
     const sources = { custom: "version = 1" };

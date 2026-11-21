@@ -36,6 +36,7 @@ export interface RevisionAuditOptions {
   projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>;
   revisionLinkObservations?: RevisionLinkObservationProvider | undefined;
   onLinkProviderTelemetry?: ((event: LinkProviderTelemetry) => void) | undefined;
+  onContentEvaluationTelemetry?: ((event: ContentEvaluationTelemetry) => void) | undefined;
 }
 
 const reportKey = (id: string) => `revision-audit:${id}`;
@@ -86,7 +87,9 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   // A runtime provider replaces static evidence in the ordinary evaluator.
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;
-  let report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
+  let report = options.onContentEvaluationTelemetry
+    ? await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence, options.onContentEvaluationTelemetry)
+    : await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
   let revisionObserverInvoked = false;
   if (options.revisionLinkObservations && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
     const started = options.onLinkProviderTelemetry ? performance.now() : 0;
@@ -104,7 +107,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
           preset: selected.name, destinations: [...projection.destinations] });
         if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
         report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence,
-          undefined, undefined, { ...projection, observations });
+          options.onContentEvaluationTelemetry, undefined, { ...projection, observations });
         status = "success";
       }
     } catch {

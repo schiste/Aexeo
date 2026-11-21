@@ -43,6 +43,7 @@ import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import { evaluateContent, projectContentInput, projectLinkDestinations } from "./content.js";
 import { withContentPreset } from "./content-evaluator.js";
+import type { ContentEvaluationTelemetry } from "./content.js";
 import type { ContentPresetOptions, ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
 export type { ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
 import type { CustomBlockMappings, DescriptionField, MetadataFields, EmdashContentItem } from "./adapter.js";
@@ -214,6 +215,8 @@ export interface ConfiguredPluginRuntime {
   evidenceSources?: EvidenceSourceProvider;
   onEvidenceSourceTelemetry?: (event: EvidenceSourceTelemetry) => void;
   onPresetSelectionTelemetry?: (event: PresetSelectionTelemetry) => void;
+  /** Aggregate per evaluation, including retries for host-provided evidence. */
+  onContentEvaluationTelemetry?: (event: ContentEvaluationTelemetry) => void;
   externalGates?: ExternalGateProvider;
   onExternalGateTelemetry?: (event: ExternalGateTelemetry) => void;
   linkObservations?: LinkObservationProvider;
@@ -249,7 +252,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
   // throws on empty rules ({} with neither routePattern nor ruleIds);
   // that error surfaces clearly in the host's startup logs.
   const suppressionFilter = compileSuppressions(options.suppressions);
-  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry, runtime.evidenceSources, runtime.onEvidenceSourceTelemetry, runtime.onPresetSelectionTelemetry, options.blockMappings);
+  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry, runtime.evidenceSources, runtime.onEvidenceSourceTelemetry, runtime.onPresetSelectionTelemetry, options.blockMappings, runtime.onContentEvaluationTelemetry);
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need
@@ -299,7 +302,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128).optional() }),
         handler: async (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string; field?: string } }) => {
           const startedAt = Date.now();
-          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, projectLinks: projectLinkDestinations, revisionLinkObservations: runtime.revisionLinkObservations, onLinkProviderTelemetry: runtime.onLinkProviderTelemetry });
+          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, projectLinks: projectLinkDestinations, revisionLinkObservations: runtime.revisionLinkObservations, onLinkProviderTelemetry: runtime.onLinkProviderTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
           try { ctx.log?.info("aexeo.revision_audit", { status: result.status, ...(result.status === "not_checked" ? { reason: result.reason } : { revision_status: result.revision_status }), scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },
