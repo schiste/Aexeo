@@ -2,6 +2,7 @@ import { adaptContentItem, type CustomBlockMappings, type EmdashContentItem } fr
 import type { ContentPresetOptions } from "./content-evaluator.js";
 import type { ContentReport } from "./content.js";
 import { selectFragmentPreset } from "./fragment-selection.js";
+import { fragmentListStructureAttested } from "./list-structure-attestation.js";
 import { withCmsSourceLocation, type StoredDocument } from "./plugin.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
@@ -37,6 +38,9 @@ export async function evaluateFragments(
     }
     try {
       const adapted = adaptContentItem(item, { route: document.route, contentFields: [field], ...(blockMappings ? { blockMappings } : {}) });
+      if (fragmentListStructureAttested(preset.fragmentListStructureCompleteByCollection, collection, field)) {
+        adapted.document.list_structure_complete = true;
+      }
       // A fragment is not an observed rendered page or a page metadata source.
       adapted.document.observed_metadata_fields = [];
       delete adapted.document.description_source_observed;
