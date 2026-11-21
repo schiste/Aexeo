@@ -3,6 +3,7 @@ import { validLinkObservations } from "./content-evaluator.js";
 import type { ContentPresetOptions, LinkProviderTelemetry } from "./content-evaluator.js";
 import { emitTelemetry } from "./telemetry.js";
 import { selectFragmentPreset } from "./fragment-selection.js";
+import { collectionListStructureAttested, fragmentListStructureAttested } from "./list-structure-attestation.js";
 import { selectContentPreset } from "./preset-selection.js";
 import type { ContentReport, ContentEvaluationTelemetry, ExternalGateResult, BoundLinkObservations, LinkDestinationProjection } from "./content.js";
 import type { SandboxCtx } from "./plugin.js";
@@ -35,6 +36,7 @@ export interface RevisionAuditOptions {
   projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>;
   revisionLinkObservations?: RevisionLinkObservationProvider | undefined;
   onLinkProviderTelemetry?: ((event: LinkProviderTelemetry) => void) | undefined;
+  onContentEvaluationTelemetry?: ((event: ContentEvaluationTelemetry) => void) | undefined;
 }
 
 const reportKey = (id: string) => `revision-audit:${id}`;
@@ -78,10 +80,16 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     ...(contentFields === undefined ? {} : { contentFields }),
     ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }),
     ...(options.metadataFieldsByCollection?.[collection] === undefined ? {} : { metadataFields: options.metadataFieldsByCollection[collection] }) });
+  const listStructureAttested = field === undefined
+    ? collectionListStructureAttested(options.preset?.revisionListStructureCompleteByCollection, collection)
+    : fragmentListStructureAttested(options.preset?.revisionFragmentListStructureCompleteByCollection, collection, field);
+  if (listStructureAttested) adapted.document.list_structure_complete = true;
   // A runtime provider replaces static evidence in the ordinary evaluator.
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;
-  let report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
+  let report = options.onContentEvaluationTelemetry
+    ? await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence, options.onContentEvaluationTelemetry)
+    : await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
   let revisionObserverInvoked = false;
   if (options.revisionLinkObservations && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
     const started = options.onLinkProviderTelemetry ? performance.now() : 0;
@@ -99,7 +107,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
           preset: selected.name, destinations: [...projection.destinations] });
         if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
         report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence,
-          undefined, undefined, { ...projection, observations });
+          options.onContentEvaluationTelemetry, undefined, { ...projection, observations });
         status = "success";
       }
     } catch {

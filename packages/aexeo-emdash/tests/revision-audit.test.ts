@@ -13,6 +13,28 @@ function host() {
 const report = { preset: "article", input_id: "/revision/one", gates: [], applied_fixes: [] };
 
 describe("revision audits", () => {
+  it("requires separate historical attestations for whole documents and fields", async () => {
+    const { ctx, revision } = host();
+    (revision.data as Record<string, unknown>).intro = "Historical introduction.";
+    const evaluate = vi.fn(async (_document: import("../src/types.js").EmdashDocument) => report);
+    const base = { name: "article", listStructureCompleteByCollection: ["posts"],
+      fragmentListStructureCompleteByCollection: { posts: ["intro"] },
+      fragmentFieldsByCollection: { posts: { intro: "fragment" } } };
+    const full = { collection: "posts", id: "one", revision: "rev1" };
+    const fragment = { ...full, field: "intro" };
+    await auditRevision(ctx as never, full, { preset: base, evaluate });
+    await auditRevision(ctx as never, fragment, { preset: base, evaluate });
+    expect(evaluate.mock.calls[0]?.[0].list_structure_complete).toBeUndefined();
+    expect(evaluate.mock.calls[1]?.[0].list_structure_complete).toBeUndefined();
+    await auditRevision(ctx as never, full, { preset: { ...base, revisionListStructureCompleteByCollection: ["posts"] }, evaluate });
+    await auditRevision(ctx as never, fragment, { preset: { ...base, revisionFragmentListStructureCompleteByCollection: { posts: ["intro"] } }, evaluate });
+    expect(evaluate.mock.calls[2]?.[0].list_structure_complete).toBe(true);
+    expect(evaluate.mock.calls[3]?.[0].list_structure_complete).toBe(true);
+    await auditRevision(ctx as never, fragment, { preset: { ...base, revisionFragmentListStructureCompleteByCollection: { posts: ["body"] } }, evaluate });
+    expect(evaluate.mock.calls[4]?.[0].list_structure_complete).toBeUndefined();
+    expect(revision.data.content[0]?.children[0]?.text).toBe("Historical sentence.");
+  });
+
   it("observes links only for the exact requested revision and binds results to its projection", async () => {
     const { ctx } = host();
     const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };

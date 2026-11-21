@@ -417,6 +417,26 @@ describe("custom block mappings", () => {
     expect(JSON.stringify(events)).not.toContain("private");
   });
 
+  it("forwards only explicitly attested sandbox list coverage on save", async () => {
+    const content = item("list-sandbox", NEW);
+    content.data.body = [{ _type: "block", listItem: "bullet", level: 1, children: [{ _type: "span", text: "List item" }] }];
+    const { ctx } = host([content]);
+    await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
+    let raw: unknown = '["pages"]';
+    ctx.settings = { get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === "list_structure_complete_collections" ? raw : null) as T | null, set: async () => {} };
+    const requests: any[] = [];
+    ctx.http = { fetch: async (_url, init) => { requests.push(JSON.parse(init?.body ?? "{}")); return { status: 200, ok: true, text: async () => "[]" }; } };
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    expect(requests[0].documents[0].list_structure_complete).toBe(true);
+    raw = '"pages"';
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    expect(requests[1].documents[0].list_structure_complete).toBeUndefined();
+    raw = '["pages"]';
+    content.data.body = [...content.data.body as unknown[], { _type: "unknownComponent" }];
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    expect(requests[2].documents[0].body_capabilities).not.toContain("paragraphs");
+  });
+
   it("forwards sandbox settings into the sidecar document", async () => {
     const content = item("mapped-sandbox", NEW);
     content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];

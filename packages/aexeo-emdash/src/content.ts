@@ -7,7 +7,7 @@ export interface ContentGateResult {
   status: "passed" | "failed" | "not_checked";
   blocking: boolean;
   scope: "document" | "collection" | "site";
-  required_capability: "text" | "source_text" | "metadata" | "headings" | "heading_levels" | "structured_lists" | "paragraphs" | "links" | "link_destinations" | "link_reachability" | "literal_markdown_links" | "collection_metadata" | "site" | "extension" | "text_and_evidence";
+  required_capability: "text" | "source_text" | "metadata" | "headings" | "heading_levels" | "structured_lists" | "classified_paragraphs" | "paragraphs" | "links" | "link_destinations" | "link_reachability" | "literal_markdown_links" | "collection_metadata" | "site" | "extension" | "text_and_evidence";
   findings: Finding[];
   reason: string | null;
   measurements?: Record<string, number>;
@@ -46,6 +46,8 @@ export interface ContentEvaluationTelemetry {
   /** Aggregate destination occurrences; omitted when the gate did not measure them. */
   link_destinations?: { checked: number; invalid: number };
   link_reachability?: { checked: number; not_found: number; unchecked: number };
+  /** Aggregate counts, omitted when no prose-variance gate was measured. */
+  prose_variance?: { measured_gates: number; list_paragraphs_excluded: number; windows_checked: number };
 }
 
 /** Exact projected input bound to external extension results; may contain private content. */
@@ -119,6 +121,13 @@ export async function evaluateContent(
       event.source_locations_unmapped = report.source_mapping.unmapped;
     }
     for (const gate of report.gates) {
+      const excluded = gate.measurements?.list_paragraphs_excluded;
+      if (gate.required_capability === "classified_paragraphs" && excluded !== undefined) {
+        event.prose_variance ??= { measured_gates: 0, list_paragraphs_excluded: 0, windows_checked: 0 };
+        event.prose_variance.measured_gates += 1;
+        event.prose_variance.list_paragraphs_excluded += excluded;
+        event.prose_variance.windows_checked += gate.measurements?.windows_checked ?? 0;
+      }
       if (gate.required_capability === "link_reachability" && gate.measurements) {
         const { checked_destinations, not_found_destinations, unchecked_destinations } = gate.measurements;
         if (checked_destinations !== undefined && not_found_destinations !== undefined && unchecked_destinations !== undefined) {

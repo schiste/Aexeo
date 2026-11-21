@@ -49,6 +49,12 @@ appropriate to each collection. Language selection does not translate content,
 infer its actual language, or establish that a heuristic is appropriate. Trusted
 runtime hosts may pass `onPresetSelectionTelemetry` to receive aggregate counts
 by matching level and success/error; it contains no locales, routes or content.
+The runtime can also supply `onContentEvaluationTelemetry` for aggregate local
+evaluation coverage, including measured prose-variance gates, list paragraphs
+excluded and windows checked. Events contain no document text, route or gate ID.
+One document can produce multiple events when an evaluation is repeated after
+obtaining host evidence. Unobserved prose coverage is omitted rather than zero.
+Fragment and historical revision evaluations emit the same aggregate event.
 
 ## External gates in configured mode
 
@@ -795,3 +801,42 @@ absence were observed; `unavailable_fields` overrides it. Missing keys outside
 the observed set are unknown. Keep the entire input unchanged in each result:
 Aexeo marks the gate `not_checked` if the coverage or projected input changed.
 Providers must handle unknown values rather than treating them as absent.
+
+### Sandboxed list structure coverage
+
+A sandbox host may set **Collections with complete list structure (JSON)** to
+an explicit JSON array such as `["posts"]`. This attests that the current
+body projection for those collections preserves every list boundary, including
+custom components. Save and Refresh forward the attestation to the sidecar;
+other collections and absent or invalid settings remain unassessed for gates
+that require list structure. Incomplete body capabilities still prevent these
+gates from running, even for an attested collection. The aggregate
+`aexeo.sandbox_list_coverage` log records configuration status and document
+counts without routes, content, or collection names. Configure an appropriate
+preset on the worker separately; this setting does not activate a preset,
+assess historical revisions or authorize publication.
+
+### List structure for fragments and historical revisions
+
+The prose-only rhythm and list-count gates require a complete list projection.
+Attest it separately for current fragments, whole historical documents and
+historical fragments. For example:
+
+```ts
+contentPreset: {
+  name: "article",
+  fragmentFieldsByCollection: { posts: { intro: "prose-variance-review" } },
+  fragmentListStructureCompleteByCollection: { posts: ["intro"] },
+  revisionListStructureCompleteByCollection: ["posts"],
+  revisionFragmentListStructureCompleteByCollection: { posts: ["intro"] },
+}
+```
+
+These options are independent of `listStructureCompleteByCollection`, which
+only covers current whole documents. Enable each option only after verifying
+that the corresponding host projection preserves all list boundaries,
+including mapped custom components; historical attestations must cover older
+schemas too. An omitted or mismatched collection or field remains unassessed.
+An attestation does not override incomplete body capabilities caused by
+unknown components. These gates provide editorial prompts, not a factuality
+check or authorization to publish.

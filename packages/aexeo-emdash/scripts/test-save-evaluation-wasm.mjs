@@ -99,7 +99,8 @@ kind="prose_sentence_length_variance"
 window_size=3
 min_stddev_words=2
 `;
-  const configured = createPlugin({ contentPreset: { name: "prose", sources: { prose: preset }, listStructureCompleteByCollection: ["pages"] } });
+  const events = [];
+  const configured = createPlugin({ contentPreset: { name: "prose", sources: { prose: preset }, listStructureCompleteByCollection: ["pages"] } }, { onContentEvaluationTelemetry: event => events.push(event) });
   const page = item("prose-lists", { data: { body: [block("a", "One two. Three four. Five six."), { ...block("list", "List one. List two. List three."), listItem: "bullet", level: 1 }, block("b", "Seven eight. Nine ten. Eleven twelve.")] } });
   const host = fakeHost([page]);
   const evaluate = () => configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
@@ -108,10 +109,13 @@ min_stddev_words=2
   assert.equal(gate.status, "failed");
   assert.equal(gate.measurements.windows_checked, 2);
   assert.equal(gate.measurements.list_paragraphs_excluded, 1);
+  assert.deepEqual(events[0].prose_variance, { measured_gates: 1, list_paragraphs_excluded: 1, windows_checked: 2 });
+  assert.ok(!JSON.stringify(events[0]).includes("prose-lists"));
   page.data.body.push({ _type: "unknownComponent", _key: "unknown" });
   await evaluate();
   gate = host.store.get("findings:/prose-lists").assessment.gates.find((item) => item.gate_id === "variance");
   assert.equal(gate.status, "not_checked");
+  assert.equal(events[1].prose_variance, undefined);
   assert.deepEqual(host.logged, []);
   console.log("WASM configured prose variance honors list and body completeness");
 }
@@ -1066,10 +1070,11 @@ kind="metadata_length"
 field="title"
 max=1
 `;
+  const telemetry = [];
   const configured = createPlugin({ contentPreset: {
     name: "article", sources: { article, fragment }, autoAuditFragments: true,
     fragmentFieldsByCollection: { pages: { intro: "fragment", missing: "fragment" } },
-  } });
+  } }, { onContentEvaluationTelemetry: event => telemetry.push(event) });
   const page = item("fragment-save", { data: {
     body: [block("body", "The complete article body.")],
     intro: [block("intro", "A risk needs attention.")],
@@ -1077,6 +1082,8 @@ max=1
   const host = fakeHost([page]);
   const runSave = () => configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   await runSave();
+  assert.equal(telemetry.length, 2);
+  assert.ok(!JSON.stringify(telemetry).includes("fragment-save"));
   let stored = host.store.get("findings:/fragment-save");
   assert.ok(stored.fragments, JSON.stringify({ stored, logged: host.logged }));
   assert.equal(stored.fragments[0].status, "evaluated");
