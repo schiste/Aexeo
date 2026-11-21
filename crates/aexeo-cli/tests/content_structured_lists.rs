@@ -10,6 +10,13 @@ fn structured_list_gate_checks_markdown_and_withholds_unknown_structure() {
         ("markdown", "- one\n- two\n", "passed"),
         ("markdown", "<ul><li>unknown</li></ul>", "not_checked"),
         ("text", "one, two and three", "not_checked"),
+        (
+            "html",
+            "<ul><li>one</li><li>two</li><li>three</li></ul>",
+            "failed",
+        ),
+        ("html", "<ul><li>one</li><li>two</li></ul>", "passed"),
+        ("html", "<ul hidden><li>one</li></ul>", "not_checked"),
     ] {
         let article = dir.path().join("article");
         fs::write(&article, content).unwrap();
