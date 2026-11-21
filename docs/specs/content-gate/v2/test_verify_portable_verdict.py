@@ -21,6 +21,8 @@ class PortableComparison(unittest.TestCase):
         self.artifacts = {k: v.encode() for k, v in self.fixture['artifacts'].items()}
         self.required = ['gate:7:article:words']
         self.identity = ('aexeo', '0.0.24')
+        self.fresh_exit_code = 0
+        self.fresh_timed_out = False
 
     @staticmethod
     def encoded(value):
@@ -29,11 +31,20 @@ class PortableComparison(unittest.TestCase):
     def check(self):
         return compare(self.encoded(self.previous), self.encoded(self.fresh),
                        self.encoded(self.fixture['base']), self.encoded(self.fixture['after']),
-                       self.artifacts, self.required, self.identity)
+                       self.artifacts, self.required, self.identity,
+                       self.fresh_exit_code, self.fresh_timed_out)
 
     def test_matching_independently_supplied_inputs_and_verdict(self):
         self.assertEqual(self.check(), {'input_binding': 'match', 'fresh_verdict_match': True,
                                        'required_check_count': 1, 'publication_authorized': False})
+
+    def test_fresh_process_must_complete_successfully(self):
+        for code, timed_out in ((1, False), (2, False), (None, False), (True, False),
+                                (0.0, False), (0, True), (0, None), (0, 0), (0, "false")):
+            with self.subTest(code=code, timed_out=timed_out):
+                self.fresh_exit_code, self.fresh_timed_out = code, timed_out
+                with self.assertRaises(VerificationError):
+                    self.check()
 
     def test_both_verdicts_use_one_schema_snapshot(self):
         original = Path.read_text
@@ -286,10 +297,18 @@ class PortableComparison(unittest.TestCase):
             for name, path in paths.items():
                 command.extend(['--' + name.replace('_', '-'), str(path)])
             command.extend(['--require-check', self.required[0], '--validator-name', self.identity[0],
-                            '--validator-version', self.identity[1]])
+                            '--validator-version', self.identity[1], '--fresh-exit-code', '0',
+                            '--fresh-timed-out', 'false'])
             result = subprocess.run(command, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            for bad_code, timed_out in (('1', 'false'), ('2', 'false'), ('0', 'true')):
+                bad = command[:-3] + [bad_code, '--fresh-timed-out', timed_out]
+                rejected = subprocess.run(bad, capture_output=True, text=True, check=False)
+                self.assertEqual(rejected.returncode, 2)
+                self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+            missing = subprocess.run(command[:-4], capture_output=True, text=True, check=False)
+            self.assertNotEqual(missing.returncode, 0)
             paths['resolved_policy'].write_bytes(b'changed')
             result = subprocess.run(command, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 2)
@@ -322,7 +341,8 @@ class PortableComparison(unittest.TestCase):
                 path.write_bytes(value)
                 command.extend(['--' + name.replace('_', '-'), str(path)])
             command.extend(['--require-check', self.required[0], '--validator-name', self.identity[0],
-                            '--validator-version', self.identity[1]])
+                            '--validator-version', self.identity[1], '--fresh-exit-code', '0',
+                            '--fresh-timed-out', 'false'])
             result = subprocess.run(command, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(json.loads(result.stdout), {'matched': False, 'publication_authorized': False})

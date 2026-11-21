@@ -154,7 +154,11 @@ obtained fresh envelope and current base, after-projections and exact artifact
 bytes. Supply `--previous`, `--fresh`, `--base`, `--after`, `--change`,
 `--resolved-policy`, `--host-options`, `--evaluator`, optional `--collection`,
 optional `--external-evidence`, repeatable `--require-check`, and
-`--validator-name` and `--validator-version`.
+`--validator-name`, `--validator-version`, `--fresh-exit-code`, and
+`--fresh-timed-out` (`true` or `false`). The last two values must be observed
+by the caller for the fresh evaluator; a missing value, nonzero exit or timeout
+prevents a match even when a passing verdict file exists. These are caller
+assertions, not proof of execution.
 The producer's artifact encodings are still Aexeo-specific; the host must
 obtain them independently rather than trust a bundle from the previous result.
 The comparator accepts no evidence for the offline profile, or exact snapshot
