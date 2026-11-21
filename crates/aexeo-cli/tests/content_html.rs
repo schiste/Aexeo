@@ -418,7 +418,19 @@ fn html_main_scope_excludes_navigation_and_reports_incomplete_scope() {
         .find(|event| event["event"] == "content_evaluation")
         .unwrap();
     assert_eq!(event["html_projection"]["scope"], "main");
-    for source in ["<p>Article</p>", "<main>One</main><main>Two</main>"] {
+    let output = run("<svg><main>navigation</main></svg><main><p>Article</p></main>");
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "passed");
+    assert_eq!(
+        report["source_location_capability"]["status"],
+        "unavailable"
+    );
+    for source in [
+        "<p>Article</p>",
+        "<main>One</main><main>Two</main>",
+        "<svg><main>navigation</main></svg>",
+    ] {
         let output = run(source);
         let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(report["gates"][0]["status"], "not_checked");
