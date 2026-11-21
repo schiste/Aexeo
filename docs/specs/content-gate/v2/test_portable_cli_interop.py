@@ -63,11 +63,30 @@ class PortableCliInterop(unittest.TestCase):
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            native = os.environ.get('AETHYME_CLI_BIN')
+            if native:
+                manifest = {name: str(root / name) for name in
+                            ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'external_evidence')}
+                manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
+                    validator_name='aexeo', validator_version='0.0.24',
+                    required_checks=['gate:7:article:links'], fresh_exit_code=0, fresh_timed_out=False)
+                (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
+                native_env = dict(os.environ)
+                native_env.pop('AETHYME_GATE_WORKER_ID', None)
+                native_command = [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')]
+                native_result = subprocess.run(native_command, env=native_env, capture_output=True, text=True, check=False)
+                self.assertEqual(native_result.returncode, 0, native_result.stderr + native_result.stdout)
+                self.assertFalse(json.loads(native_result.stdout)['publication_authorized'])
             evidence = root / 'external_evidence'
             evidence.write_text(evidence.read_text(encoding='utf-8') + ' ', encoding='utf-8')
             rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(rejected.returncode, 2)
             self.assertNotIn('example.org', rejected.stdout + rejected.stderr)
+            if native:
+                native_rejected = subprocess.run(native_command, env=native_env, capture_output=True, text=True, check=False)
+                self.assertEqual(native_rejected.returncode, 2, native_rejected.stderr + native_rejected.stdout)
+                self.assertFalse(json.loads(native_rejected.stdout)['publication_authorized'])
+                self.assertNotIn('example.org', native_rejected.stdout + native_rejected.stderr)
             for field, value in (('source_sha256', '0' * 64),
                                  ('destinations', ['https://example.org/other'])):
                 malformed = json.loads(json.dumps(snapshot))
