@@ -210,6 +210,15 @@ registry before considering the release delivered.
 - [x] Withhold findings from known native rule families in CMS-only views, including old stored findings, except explicitly tagged content-preset results and two page-level checks supported by a complete body. Unknown host rule IDs remain the host evaluator’s responsibility; the native-family list must track new native rules.
 
 - [x] Select content presets by exact locale and collection in both configured EmDash and the crawl worker, with explicit precedence and language-neutral fallback under host control. Locale does not prove the language of the text.
+- [x] An optional host-provided historical-revision locale selects the EmDash
+  audit preset and reaches its link observer; invalid or unavailable projections
+  are not checked ([PR #698](https://github.com/schiste/Aexeo/pull/698)). The
+  host remains responsible for binding the projection to the requested revision.
+- [x] Preserve citation labels for literal gates and bind EmDash external gate
+  inputs to the validated unmasked reference text, so a citation-only change
+  cannot reuse a stale result ([PR #700](https://github.com/schiste/Aexeo/pull/700),
+  [PR #701](https://github.com/schiste/Aexeo/pull/701)). Rhythm projections may
+  still mask citation markers; input binding does not authenticate the evaluator.
 - [x] Both EmDash assessment views display each gate’s scope and required capability, including an unknown state for older records.
 - [x] Aggregate gate coverage and measurements for word count, required metadata,
   required headings and forbidden terms. Unavailable measurements remain absent.
@@ -258,6 +267,9 @@ registry before considering the release delivered.
 - [x] Optional, exact case-sensitive abbreviation exceptions for sentence length
   ([PR #125](https://github.com/schiste/Aexeo/pull/125)); they do not provide
   linguistic segmentation and can hide a true sentence end.
+  Multi-period configured exceptions are recognized as a whole
+  ([PR #699](https://github.com/schiste/Aexeo/pull/699)); this remains an
+  explicit heuristic, not language-aware sentence segmentation.
 - [x] Optional paragraph character-length gate for text without whitespace word
   boundaries ([PR #126](https://github.com/schiste/Aexeo/pull/126)), with
   Markdown/EmDash parity and explicit `not_checked` for missing paragraphs.
@@ -468,6 +480,11 @@ registry before considering the release delivered.
   establish evidence authenticity, freshness or publication authorization.
   The optional cross-process test checks that the native Aethyme comparator
   also rejects unsuccessful, timed-out and missing fresh process status.
+  The draft Python comparator validates offline host options and cross-checks
+  the HTML scope extension against them; the Rust candidate verifier also
+  compares that extension with its independently selected scope
+  ([PR #703](https://github.com/schiste/Aexeo/pull/703)). These checks do not
+  authenticate the options, evaluator, inputs or publication boundary.
   The independent draft Python comparator also requires an explicitly supplied
   successful fresh process exit and no timeout; these remain caller assertions,
   not authenticated execution or publication authorization.
@@ -555,6 +572,11 @@ registry before considering the release delivered.
   It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  The conservative HTML source mapper preserves positions through explicitly
+  nested bidirectional inline elements, including Arabic text and links
+  ([PR #705](https://github.com/schiste/Aexeo/pull/705)). Hidden or malformed
+  structures remain unmapped; this does not validate browser rendering or
+  translation quality.
   Conservatively map explicitly nested HTML `aside` and `address` containers;
   hidden and malformed structures remain unmapped. This is static source
   mapping, not a browser visibility guarantee.
