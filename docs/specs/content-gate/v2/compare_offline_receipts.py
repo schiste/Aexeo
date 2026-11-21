@@ -195,7 +195,7 @@ def read_content_map(path):
     return result
 
 
-def verify_content_states(change, content_files):
+def verify_content_states(change, content_files, *, in_memory=False):
     """Verify inline and explicitly supplied external bytes within one budget."""
     unused = set(content_files)
     remaining = MAX_ARTIFACT_BYTES
@@ -221,7 +221,14 @@ def verify_content_states(change, content_files):
             else:
                 if key not in content_files:
                     raise VerificationError("missing content file")
-                digest, size = _digest_file(content_files[key], remaining)
+                source = content_files[key]
+                if in_memory:
+                    if not isinstance(source, bytes):
+                        raise VerificationError("independent content bytes required")
+                    size = len(source)
+                    digest = hashlib.sha256(source).hexdigest()
+                else:
+                    digest, size = _digest_file(source, remaining)
                 unused.remove(key)
             if size > remaining:
                 raise VerificationError("content exceeds size limit")

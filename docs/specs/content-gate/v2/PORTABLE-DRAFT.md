@@ -188,6 +188,24 @@ between verification and publication. Matching still returns
 `publication_authorized: false`. The experimental profile remains unsuitable as
 a publication gate until the host enforces the full protocol and boundary.
 
+### Referenced content in the independent Python verifier
+
+The Python comparator and runner accept an optional `--content-files map.json`.
+The host supplies a JSON array such as
+`[{"entry":0,"state":"after","path":"/trusted/article.txt"}]`. Entries are
+zero-based change-entry indexes and `before` or `after` states. The map must
+cover every referenced state exactly, and must not map inline or absent states.
+The verifier reads only the host-supplied local paths, never the file or URI in
+the change. It checks the bytes against the declared digest and the matching
+candidate projection. The runner snapshots the map and files before and after
+the child and rejects observed changes. This cannot detect ABA changes, prove a
+coherent snapshot, or authenticate its source.
+
+This is verifier groundwork, **not end-to-end support**: Aexeo's current
+candidate-bound verdict producer still rejects non-inline states, and URI content
+is not fetched. Independent access to an appropriate passing fresh evaluator is
+required. No mapping or successful match grants publication authority.
+
 ## Independent experimental comparator
 
 `verify_portable_verdict.py` compares a previous envelope to an independently

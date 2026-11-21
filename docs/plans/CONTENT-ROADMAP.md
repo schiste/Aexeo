@@ -864,3 +864,11 @@ missing fields retain observed prose but make body capabilities unavailable.
 
 - [x] Export one offline, source-bound link-observation template for a complete
   multi-entry content change; reject incomplete projections without replacing output.
+
+### Experimental referenced-content verification
+
+- [x] Independently bind host-provided local content bytes to referenced change
+  states and candidate projections in the draft Python comparator and runner.
+- [ ] Extend the Aexeo candidate-bound producer and establish real end-to-end
+  interoperability without weakening independent content checks; URI fetching,
+  snapshot provenance and publication authorization remain separate concerns.

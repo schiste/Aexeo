@@ -16,7 +16,7 @@ import tempfile
 import time
 
 from verify_candidate_inputs import LIMIT, VerificationError, read_stable
-from verify_portable_verdict import MAX_ENVELOPE_BYTES, REQUIRED, compare
+from verify_portable_verdict import MAX_ENVELOPE_BYTES, REQUIRED, compare, read_mapped_content
 
 
 def read_inputs(paths):
@@ -52,12 +52,16 @@ def read_fresh(path):
     return data
 
 
-def run(paths, command, timeout, required_checks, expected_validator):
+def run(paths, command, timeout, required_checks, expected_validator, content_files=None):
     """Observe one direct process and compare independently supplied inputs."""
     if (not command or any(not isinstance(arg, str) or not arg for arg in command)
             or not math.isfinite(timeout) or not 0 < timeout <= 300):
         raise VerificationError('invalid evaluator command or timeout')
     inputs = read_inputs(paths)
+    map_bytes = read_stable(content_files) if content_files is not None else None
+    content_bytes = read_mapped_content(content_files) if content_files is not None else None
+    if content_files is not None and map_bytes != read_stable(content_files):
+        raise VerificationError('content map changed during reading')
     with tempfile.TemporaryDirectory(prefix='aexeo-portable-run-') as directory:
         output = Path(directory) / 'fresh.json'
         env = os.environ.copy()
@@ -73,13 +77,17 @@ def run(paths, command, timeout, required_checks, expected_validator):
         fresh = read_fresh(output)
         if inputs != read_inputs(paths):
             raise VerificationError('inputs changed during evaluation')
+        if content_files is not None and (map_bytes != read_stable(content_files) or
+                content_bytes != read_mapped_content(content_files) or
+                map_bytes != read_stable(content_files)):
+            raise VerificationError('content files changed during evaluation')
         artifacts = {name: inputs[name] for name in REQUIRED}
         for name in ('collection', 'external_evidence'):
             if name in inputs:
                 artifacts[name] = inputs[name]
         return compare(inputs['previous'], fresh, inputs['base'], inputs['after'],
                        artifacts, required_checks, expected_validator,
-                       completed.returncode, False)
+                       completed.returncode, False, content_bytes)
 
 
 def main():
@@ -88,6 +96,7 @@ def main():
                  'host-options', 'evaluator'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--collection')
+    parser.add_argument('--content-files', help='host-provided local content file map')
     parser.add_argument('--external-evidence')
     parser.add_argument('--require-check', action='append', required=True)
     parser.add_argument('--validator-name', required=True)
@@ -104,7 +113,7 @@ def main():
     started = time.perf_counter()
     try:
         result = run(paths, command, args.timeout_seconds, args.require_check,
-                     (args.validator_name, args.validator_version))
+                     (args.validator_name, args.validator_version), args.content_files)
     except (VerificationError, OSError, ValueError, TypeError, KeyError) as error:
         print(json.dumps({'matched': False, 'publication_authorized': False}))
         print(str(error), file=sys.stderr)
@@ -117,6 +126,7 @@ def main():
                  'duration_ms': round((time.perf_counter() - started) * 1000, 3),
                  'required_check_count': len(args.require_check),
                  'collection_supplied': args.collection is not None,
+                 'content_files_supplied': args.content_files is not None,
                  'external_evidence_supplied': args.external_evidence is not None}
         print(json.dumps(event, separators=(',', ':')), file=sys.stderr)
     return code
