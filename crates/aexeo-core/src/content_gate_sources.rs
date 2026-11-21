@@ -502,6 +502,32 @@ mod tests {
             verify_candidate_file_states(&uri, &base, &after, &mut files, 3, 6),
             Err(SourceError::Unavailable)
         );
+        let mut deleted = input.clone();
+        deleted.entries[0].operation = aexeo_contracts::content_gate_protocol::Operation::Delete;
+        deleted.entries[0].after = None;
+        let previous_opens = files.opens;
+        assert_eq!(
+            verify_candidate_file_states(&deleted, &base, &[], &mut files, 3, 3),
+            Ok(())
+        );
+        assert_eq!(files.opens - previous_opens, 1);
+        files.bytes = b"bad".to_vec();
+        assert_eq!(
+            verify_candidate_file_states(&deleted, &base, &[], &mut files, 3, 3),
+            Err(SourceError::DigestMismatch)
+        );
+        files.bytes = b"abc".to_vec();
+        let mut renamed = input.clone();
+        renamed.entries[0].operation = aexeo_contracts::content_gate_protocol::Operation::Rename;
+        renamed.entries[0].previous_entity_id = Some("file".into());
+        renamed.entries[0].entity_id = "renamed".into();
+        let mut renamed_after = after.clone();
+        renamed_after[0].entity_id = "renamed".into();
+        renamed_after[0].public_path = "/renamed".into();
+        assert_eq!(
+            verify_candidate_file_states(&renamed, &base, &renamed_after, &mut files, 3, 6),
+            Ok(())
+        );
         let mut altered = base.clone();
         altered.items[0].source = "other".into();
         assert_eq!(

@@ -869,6 +869,8 @@ missing fields retain observed prose but make body capabilities unavailable.
 
 - [x] Independently bind host-provided local content bytes to referenced change
   states and candidate projections in the draft Python comparator and runner.
-- [ ] Extend the Aexeo candidate-bound producer and establish real end-to-end
-  interoperability without weakening independent content checks; URI fetching,
-  snapshot provenance and publication authorization remain separate concerns.
+- [x] Support confined local file states in the Aexeo candidate-bound producer;
+  exercise the real CLI with the independent Python comparator and runner.
+- [ ] Establish equivalent referenced-content interoperability in other hosts;
+  URI fetching, snapshot provenance and publication authorization remain separate
+  concerns.

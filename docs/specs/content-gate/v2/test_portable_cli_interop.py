@@ -13,6 +13,68 @@ ROOT = HERE.parents[3]
 
 
 class PortableCliInterop(unittest.TestCase):
+    def test_file_backed_candidate_with_real_cli_and_independent_runner(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        change = json.loads(fixture['artifacts']['change'])
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-file-') as directory:
+            root = Path(directory)
+            state = change['entries'][0]['after']
+            source = state.pop('inline')
+            state['file'] = 'article.txt'
+            change['content_root'] = str(root)
+            (root / 'article.txt').write_text(source, encoding='utf-8')
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(json.dumps(change), encoding='utf-8')
+            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n", encoding='utf-8')
+            (root / 'content-map').write_text(json.dumps([{'entry': 0, 'state': 'after',
+                'path': str(root / 'article.txt')}]), encoding='utf-8')
+            binary = os.environ.get('AEXEO_CLI_BIN')
+            executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+            common = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
+                '--offline-receipt', '--evaluator-identity', 'build', '--content-root', str(root)]
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            export = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+            self.assertEqual(export.returncode, 0, export.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                '--candidate-after', str(root / 'after'), '--draft-portable-verdict', '--telemetry']
+            for name in ('previous', 'fresh'):
+                replay = ['--verify-draft-portable-verdict', str(root / 'previous')] if name == 'fresh' else []
+                result = subprocess.run(command + replay, cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)), capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                events = [json.loads(line) for line in result.stderr.splitlines() if line.startswith('{')]
+                event = next(event for event in events if event.get('event') == 'content_change_portable_draft')
+                self.assertEqual(event['file_state_count'], 1)
+                self.assertNotIn(str(root), result.stderr)
+            verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+            for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                verify += ['--' + name.replace('_', '-'), str(root / name)]
+            verify += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
+                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', '0',
+                '--fresh-timed-out', 'false']
+            result = subprocess.run(verify, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            runner = [sys.executable, str(HERE / 'run_portable_verdict.py')]
+            for name in ('previous', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                runner += ['--' + name.replace('_', '-'), str(root / name)]
+            runner += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
+                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--timeout-seconds', '180', '--']
+            result = subprocess.run(runner + command, cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            (root / 'article.txt').write_text('substituted', encoding='utf-8')
+            self.assertEqual(subprocess.run(verify, capture_output=True, text=True).returncode, 2)
+            rejected = subprocess.run(command, cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'rejected')), capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse((root / 'rejected').exists())
+
     def test_source_bound_links_with_real_cli_and_independent_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         source = '[first](https://example.org/a)'

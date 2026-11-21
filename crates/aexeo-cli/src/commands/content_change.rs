@@ -1036,7 +1036,10 @@ fn command_candidate_bound_verdict(
                 "{}",
                 serde_json::json!({"event":"content_change_portable_draft", "version":1,
                 "status":verdict.verdict.status, "collection_supplied":decision.collection.is_some(),
-                "link_snapshot_supplied":snapshots.is_some(), "revalidation":args.contains_id("verify-draft-portable-verdict")})
+                "link_snapshot_supplied":snapshots.is_some(), "revalidation":args.contains_id("verify-draft-portable-verdict"),
+                "file_state_count":decision.change.entries.iter().flat_map(|entry|
+                    [entry.before.as_ref(), entry.after.as_ref()].into_iter().flatten())
+                    .filter(|state| state.file.is_some()).count()})
             );
         }
         return Ok(verdict_exit_code(verdict.verdict.status));
