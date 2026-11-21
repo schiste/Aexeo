@@ -45,8 +45,8 @@ pub struct ContentContext {
     /// term does not match across it. Word counts treat it as a separator.
     /// Raw text has no known block structure.
     pub block_ends: Option<Vec<usize>>,
-    /// Why the adapter withheld the input. It explains the `not_checked` status
-    /// of each gate that needed that input.
+    /// Why the adapter withheld the body. This explains missing text, paragraph,
+    /// heading, and source-text capabilities; independent errors keep their own reason.
     pub input_limit: Option<String>,
     /// Metadata keys whose values or absence were not observed by the adapter.
     pub unavailable_metadata_fields: Vec<String>,
@@ -4259,18 +4259,15 @@ impl ContentPreset {
             if omitted > 0 {
                 measurements.insert(FINDINGS_OMITTED.into(), omitted);
             }
-            if reason.is_some()
-                && !matches!(
-                    gate,
-                    ContentGate::RequiredMetadata { .. }
-                        | ContentGate::MetadataLength { .. }
-                        | ContentGate::MetadataAge { .. }
-                        | ContentGate::UniqueCollectionMetadata { .. }
-                        | ContentGate::Custom { .. }
-                        | ContentGate::SiteGroup { .. }
-                        | ContentGate::SiteAudit { .. }
-                )
-                && let Some(limit) = context.and_then(|context| context.input_limit.as_ref())
+            // An adapter's body limitation only explains missing body capabilities.
+            // It must not overwrite independent evidence, structural, or resource errors.
+            if matches!(
+                reason.as_deref(),
+                Some("text is unavailable from this adapter")
+                    | Some("paragraphs are unavailable from this adapter")
+                    | Some("headings are unavailable from this adapter")
+                    | Some("source text is unavailable from this adapter")
+            ) && let Some(limit) = context.and_then(|context| context.input_limit.as_ref())
             {
                 reason = Some(limit.clone());
             }
@@ -7299,5 +7296,32 @@ terms = ["bad"]
             .collect::<Vec<_>>()
             .join(",");
         assert!(ContentPreset::from_toml(&config.replace("'café', 'best price'", &many)).is_err());
+    }
+
+    #[test]
+    fn body_limit_does_not_hide_missing_composition_reason() {
+        let preset = ContentPreset::from_toml("version=1\nname='coverage'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n").unwrap();
+        let input = ContentInput {
+            id: "example".into(),
+            source_text: Some("<div>Text</div>".into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            input_limit: Some("body contains unobserved HTML".into()),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(
+            report.gates[0].reason.as_deref(),
+            Some("body contains unobserved HTML")
+        );
+        assert_eq!(report.gates[1].status, GateStatus::NotChecked);
+        assert_eq!(
+            report.gates[1].reason.as_deref(),
+            Some("document or structured composition is unavailable")
+        );
     }
 }
