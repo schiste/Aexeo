@@ -1046,6 +1046,31 @@ fn print_telemetry(
             "exceedances": length_exceedances,
         });
     }
+    let mut prose_gates = 0usize;
+    let mut prose_excluded = 0usize;
+    let mut prose_windows = 0usize;
+    for (result, gate) in report.gates.iter().zip(&preset.gates) {
+        if matches!(gate, ContentGate::ProseSentenceLengthVariance { .. })
+            && let Some(&excluded) = result.measurements.get("list_paragraphs_excluded")
+        {
+            prose_gates += 1;
+            prose_excluded = prose_excluded.saturating_add(excluded);
+            prose_windows = prose_windows.saturating_add(
+                result
+                    .measurements
+                    .get("windows_checked")
+                    .copied()
+                    .unwrap_or(0),
+            );
+        }
+    }
+    if prose_gates > 0 {
+        event["prose_variance"] = serde_json::json!({
+            "measured_gates": prose_gates,
+            "list_paragraphs_excluded": prose_excluded,
+            "windows_checked": prose_windows,
+        });
+    }
     if let Some((input_load_ms, adapter_ms, external_load_ms)) = stages {
         event["stages"] =
             serde_json::json!({"input_load_ms": input_load_ms, "adapter_ms": adapter_ms});

@@ -512,6 +512,7 @@ fn prose_variance_uses_html_list_boundaries_and_withholds_incomplete_structure()
                 &format!("custom={}", preset.display()),
                 "--format",
                 "json",
+                "--telemetry",
             ])
             .output()
             .unwrap();
@@ -529,6 +530,21 @@ fn prose_variance_uses_html_list_boundaries_and_withholds_incomplete_structure()
             );
             assert_eq!(report["gates"][0]["measurements"]["windows_checked"], 2);
             assert_eq!(report["gates"][0]["findings"].as_array().unwrap().len(), 2);
+            assert_eq!(report["source_locations"][0]["column"], 4);
+            assert_eq!(report["source_locations"][1]["column"], 97);
+            let telemetry = String::from_utf8_lossy(&output.stderr);
+            let event: serde_json::Value = telemetry
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .find(|event| event["event"] == "content_evaluation")
+                .unwrap();
+            assert_eq!(
+                event["prose_variance"],
+                serde_json::json!({
+                    "measured_gates": 1, "list_paragraphs_excluded": 1, "windows_checked": 2
+                })
+            );
+            assert!(!telemetry.contains(source));
         } else {
             assert!(
                 report["gates"][0]["findings"]
