@@ -555,3 +555,41 @@ fn prose_variance_uses_html_list_boundaries_and_withholds_incomplete_structure()
         }
     }
 }
+
+#[test]
+fn prose_variance_withholds_main_scope_nested_in_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='variance'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+    fs::write(
+        &input,
+        "<ul><li><main><p>One two. Three four. Five six.</p></main></li></ul>",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            input.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert!(
+        report["gates"][0]["findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
