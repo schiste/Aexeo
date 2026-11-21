@@ -1,8 +1,10 @@
 import { adaptContentItem, type CustomBlockMappings, type DescriptionField, type MetadataFields, type EmdashContentItem } from "./adapter.js";
-import type { ContentPresetOptions } from "./content-evaluator.js";
+import { validLinkObservations } from "./content-evaluator.js";
+import type { ContentPresetOptions, LinkProviderTelemetry } from "./content-evaluator.js";
+import { emitTelemetry } from "./telemetry.js";
 import { selectFragmentPreset } from "./fragment-selection.js";
 import { selectContentPreset } from "./preset-selection.js";
-import type { ContentReport } from "./content.js";
+import type { ContentReport, ContentEvaluationTelemetry, ExternalGateResult, BoundLinkObservations, LinkDestinationProjection } from "./content.js";
 import type { SandboxCtx } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
 import { cmsBodyCoverage } from "./cms-coverage.js";
@@ -14,6 +16,14 @@ type RevisionContext = SandboxCtx & { content: SandboxCtx["content"] & {
   get?: (collection: string, id: string) => Promise<Current | null>;
   getRevision?: (collection: string, id: string, revision: string) => Promise<Revision | null>;
 } };
+/** Explicitly installed trusted observer for one immutable host-provided revision.
+ * Destinations and revision identifiers may be sensitive; hosts control network policy,
+ * access, timeout and freshness. The provider must not substitute another revision. */
+export type RevisionLinkObservationProvider = (request: {
+  collection: string; id: string; revision: string; field?: string;
+  locale: string | undefined; preset: string; destinations: readonly string[];
+}) => Promise<BoundLinkObservations["observations"]>;
+
 export interface RevisionAuditOptions {
   preset?: ContentPresetOptions | undefined;
   blockMappings?: CustomBlockMappings | undefined;
@@ -21,7 +31,10 @@ export interface RevisionAuditOptions {
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
   metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   evidenceProviderConfigured?: boolean;
-  evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>) => Promise<ContentReport>;
+  evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[], linkObservations?: BoundLinkObservations) => Promise<ContentReport>;
+  projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>;
+  revisionLinkObservations?: RevisionLinkObservationProvider | undefined;
+  onLinkProviderTelemetry?: ((event: LinkProviderTelemetry) => void) | undefined;
 }
 
 const reportKey = (id: string) => `revision-audit:${id}`;
@@ -68,17 +81,45 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   // A runtime provider replaces static evidence in the ordinary evaluator.
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;
-  const report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
+  let report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
+  let revisionObserverInvoked = false;
+  if (options.revisionLinkObservations && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
+    const started = options.onLinkProviderTelemetry ? performance.now() : 0;
+    let status: LinkProviderTelemetry["status"] = "error";
+    let reason: string | undefined;
+    try {
+      const projection = options.projectLinks ? await options.projectLinks(adapted.document) : null;
+      if (projection === null) {
+        status = "unavailable";
+        reason = "link projection unavailable from adapter";
+      } else {
+        revisionObserverInvoked = true;
+        const observations = await options.revisionLinkObservations({ collection, id, revision,
+          ...(field === undefined ? {} : { field }), locale: localeAtAudit ?? undefined,
+          preset: selected.name, destinations: [...projection.destinations] });
+        if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
+        report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence,
+          undefined, undefined, { ...projection, observations });
+        status = "success";
+      }
+    } catch {
+      // Keep local results and do not disclose private provider error details.
+      reason = "link observation failed";
+    } finally {
+      if (options.onLinkProviderTelemetry) emitTelemetry(options.onLinkProviderTelemetry, { duration_ms: performance.now() - started, status });
+    }
+    if (reason) report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "link_reachability" && gate.status === "not_checked" ? { ...gate, reason } : gate) };
+  }
   const latest = await currentOrUnknown(ctx, collection, id);
   const auditId = crypto.randomUUID();
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
-    preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation: LIMITATION,
+    preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation: revisionObserverInvoked ? LIMITATION.replace("Only local configured content checks run; runtime providers are not invoked.", "An explicitly configured revision link observer ran; other runtime providers were not invoked.") : LIMITATION,
     assurance: {
       purpose: "editorial_review" as const,
       publication_authorization: "not_granted" as const,
       rendered_page: "not_checked" as const,
       source_freshness: "not_checked" as const,
-      runtime_providers: "not_invoked" as const,
+      runtime_providers: revisionObserverInvoked ? "revision_link_observer_invoked" as const : "not_invoked" as const,
       locale_source: "current_record" as const,
     },
     input_coverage: {
