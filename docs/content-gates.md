@@ -1761,7 +1761,8 @@ particular, these manifests do not attest freshness or ownership of an identity.
 
 ### Experimental incremental batches
 
-`aexeo-cli content-incremental --input batch.json` evaluates independent proposals
+`aexeo-cli content-incremental --input batch.json` (or `--input -` for a
+JSON batch on stdin) evaluates independent proposals
 against the **same** host-provided base and resolved preset in one process. It
 prepares the base once and reuses unchanged item reports. Each proposal is an
 alternative against that base, not a sequence of edits. The bounded JSON input
@@ -1772,7 +1773,18 @@ uses schema `aexeo.content-incremental-batch/v1-experimental`, with `snapshot`
 objects with `change` and `after`, as in `content-impact`). The batch is limited
 to 16 MiB, 256 base items or changed projections per proposal, and 16 proposals.
 Only inline change content is supported. Site, source and external gates remain
-unsupported and are `not_checked`.
+unsupported and are `not_checked`. A complete synthetic example is
+[`incremental-batch.json`](../crates/aexeo-cli/tests/fixtures/incremental-batch.json);
+it exercises a composed item and collection preset and is tested through the
+CLI. The example is illustrative; it does not establish a real site's inventory.
+Pipe it without a temporary file using:
+
+```sh
+cat crates/aexeo-cli/tests/fixtures/incremental-batch.json | aexeo-cli content-incremental --input -
+```
+
+Both file and stdin input use the same byte limit and strict duplicate-key
+validation. Results stream to stdout; telemetry, when enabled, goes to stderr.
 
 An optional `base_metadata` object maps every base entity ID to a complete map
 of string fields, or to `null` if its metadata was not observed. An empty map

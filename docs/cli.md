@@ -256,7 +256,7 @@ Usage: content-incremental [OPTIONS] --input <input>
 
 Options:
       --input <input>
-          Versioned JSON batch containing private content
+          Versioned JSON batch file, or - for stdin; may contain private content
 
       --telemetry
           Emit aggregate timing and counts to stderr
