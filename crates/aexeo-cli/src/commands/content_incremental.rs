@@ -6,7 +6,11 @@ use aexeo_contracts::{
 };
 use aexeo_core::{
     content_candidate::{CandidateItem, CandidateSnapshot},
-    content_incremental::{IncrementalBaseline, IncrementalEvaluation},
+    content_gate::{ContentGate, ContentPreset},
+    content_incremental::{
+        CollectionBaseline, CollectionEvaluation, ComposedBaseline, IncrementalBaseline,
+        IncrementalEvaluation, NotChecked,
+    },
     content_presets::{builtin_content_presets, resolve_content_preset},
     html_content_adapter::HtmlContentScope,
 };
@@ -32,9 +36,19 @@ struct Batch {
     #[serde(default)]
     preset_sources: BTreeMap<String, String>,
     mode: Mode,
+    #[serde(default, deserialize_with = "metadata_if_present")]
+    base_metadata: Option<Metadata>,
     proposals: Vec<Proposal>,
 }
-#[derive(Deserialize)]
+type Metadata = BTreeMap<String, Option<BTreeMap<String, String>>>;
+
+fn metadata_if_present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Metadata>, D::Error> {
+    Metadata::deserialize(deserializer).map(Some)
+}
+
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Mode {
     Plain,
@@ -47,6 +61,110 @@ enum Mode {
 struct Proposal {
     change: Change,
     after: Vec<CandidateItem>,
+}
+
+enum Baseline {
+    Items(IncrementalBaseline),
+    Collection(CollectionBaseline),
+    Composed(Box<ComposedBaseline>),
+}
+
+fn prepare_baseline(
+    snapshot: CandidateSnapshot,
+    metadata: Option<Metadata>,
+    preset: ContentPreset,
+    mode: Mode,
+) -> Result<Baseline, NotChecked> {
+    let collection_gates = preset
+        .gates
+        .iter()
+        .filter(|gate| matches!(gate, ContentGate::UniqueCollectionMetadata { .. }))
+        .count();
+    if collection_gates > 0 {
+        let metadata = metadata.ok_or_else(|| NotChecked {
+            reason: "base metadata inventory is required for collection gates".into(),
+        })?;
+        if collection_gates == preset.gates.len() {
+            return CollectionBaseline::prepare(snapshot, metadata, preset)
+                .map(Baseline::Collection);
+        }
+        let scope = match mode {
+            Mode::Adapted => HtmlContentScope::Document,
+            Mode::AdaptedMain => HtmlContentScope::Main,
+            _ => {
+                return Err(NotChecked {
+                    reason: "mixed item and collection gates require an adapted mode".into(),
+                });
+            }
+        };
+        return ComposedBaseline::prepare_adapted_with_html_scope(
+            snapshot, metadata, preset, scope,
+        )
+        .map(|baseline| Baseline::Composed(Box::new(baseline)));
+    }
+    let baseline = match (mode, metadata) {
+        (Mode::Plain, None) => IncrementalBaseline::prepare(snapshot, preset),
+        (Mode::ParagraphText, None) => {
+            IncrementalBaseline::prepare_paragraph_text(snapshot, preset)
+        }
+        (Mode::Adapted, None) => IncrementalBaseline::prepare_adapted(snapshot, preset),
+        (Mode::AdaptedMain, None) => IncrementalBaseline::prepare_adapted_with_html_scope(
+            snapshot,
+            preset,
+            HtmlContentScope::Main,
+        ),
+        (Mode::Adapted | Mode::AdaptedMain, Some(metadata)) => {
+            let scope = if matches!(mode, Mode::AdaptedMain) {
+                HtmlContentScope::Main
+            } else {
+                HtmlContentScope::Document
+            };
+            IncrementalBaseline::prepare_adapted_with_metadata_and_html_scope(
+                snapshot, metadata, preset, scope,
+            )
+        }
+        (_, Some(_)) => {
+            return Err(NotChecked {
+                reason: "base metadata requires an adapted mode".into(),
+            });
+        }
+    };
+    baseline.map(Baseline::Items)
+}
+
+#[derive(Default)]
+struct Totals {
+    not_checked: usize,
+    evaluated: usize,
+    reused: usize,
+    blocking_failed: bool,
+}
+impl Totals {
+    fn items(&mut self, result: &IncrementalEvaluation) -> bool {
+        match result {
+            IncrementalEvaluation::NotChecked { .. } => true,
+            IncrementalEvaluation::Evaluated {
+                evaluated,
+                reused,
+                reports,
+                ..
+            } => {
+                self.evaluated += evaluated;
+                self.reused += reused;
+                self.blocking_failed |= reports.values().any(|r| r.summary.blocking_failed > 0);
+                false
+            }
+        }
+    }
+    fn collection(&mut self, result: &CollectionEvaluation) -> bool {
+        match result {
+            CollectionEvaluation::NotChecked { .. } => true,
+            CollectionEvaluation::Report { report, .. } => {
+                self.blocking_failed |= report.summary.blocking_failed > 0;
+                report.summary.not_checked > 0
+            }
+        }
+    }
 }
 
 pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
@@ -81,68 +199,56 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     let mut sources = builtin_content_presets();
     sources.extend(batch.preset_sources);
     let preset = resolve_content_preset(&batch.preset, &sources)?;
-    let baseline = match batch.mode {
-        Mode::Plain => IncrementalBaseline::prepare(batch.snapshot, preset),
-        Mode::ParagraphText => IncrementalBaseline::prepare_paragraph_text(batch.snapshot, preset),
-        Mode::Adapted => IncrementalBaseline::prepare_adapted(batch.snapshot, preset),
-        Mode::AdaptedMain => IncrementalBaseline::prepare_adapted_with_html_scope(
-            batch.snapshot,
-            preset,
-            HtmlContentScope::Main,
-        ),
-    };
+    let baseline = prepare_baseline(batch.snapshot, batch.base_metadata, preset, batch.mode);
     let mut stdout = io::BufWriter::new(io::stdout().lock());
-    let mut not_checked = 0usize;
-    let mut evaluated = 0usize;
-    let mut reused = 0usize;
-    let mut blocking_failed = false;
-    match baseline {
-        Err(error) => {
-            not_checked = batch.proposals.len();
-            for (index, _) in batch.proposals.iter().enumerate() {
-                serde_json::to_writer(
-                    &mut stdout,
-                    &serde_json::json!({"schema":"aexeo.content-incremental-result/v1-experimental", "proposal_index":index, "result":{"status":"not_checked", "reason":error.reason}}),
-                )?;
-                writeln!(stdout)?;
-            }
-        }
-        Ok(baseline) => {
-            for (index, proposal) in batch.proposals.iter().enumerate() {
+    let mut totals = Totals::default();
+    for (index, proposal) in batch.proposals.iter().enumerate() {
+        let (result, unchecked) = match &baseline {
+            Err(error) => (
+                serde_json::json!({"status":"not_checked", "reason":error.reason}),
+                true,
+            ),
+            Ok(Baseline::Items(baseline)) => {
                 let result = baseline.evaluate(&proposal.change, &proposal.after);
-                match &result {
-                    IncrementalEvaluation::NotChecked { .. } => not_checked += 1,
-                    IncrementalEvaluation::Evaluated {
-                        evaluated: e,
-                        reused: r,
-                        reports,
-                        ..
-                    } => {
-                        evaluated += e;
-                        reused += r;
-                        blocking_failed |= reports
-                            .values()
-                            .any(|report| report.summary.blocking_failed > 0);
-                    }
-                }
-                serde_json::to_writer(
-                    &mut stdout,
-                    &serde_json::json!({"schema":"aexeo.content-incremental-result/v1-experimental", "proposal_index":index, "result":result}),
-                )?;
-                writeln!(stdout)?;
+                let unchecked = totals.items(&result);
+                (serde_json::to_value(result)?, unchecked)
             }
-        }
+            Ok(Baseline::Collection(baseline)) => {
+                let result = baseline.evaluate(&proposal.change, &proposal.after);
+                let unchecked = totals.collection(&result);
+                (
+                    serde_json::json!({"status":"collection", "collection":result}),
+                    unchecked,
+                )
+            }
+            Ok(Baseline::Composed(baseline)) => {
+                let result = baseline.evaluate(&proposal.change, &proposal.after);
+                // Evaluate both sides even when one is unchecked: preserve all observed diagnostics.
+                let item_unchecked = totals.items(&result.items);
+                let collection_unchecked = totals.collection(&result.collection);
+                (
+                    serde_json::json!({"status":"composed", "change_id":result.change_id, "items":result.items, "collection":result.collection}),
+                    item_unchecked || collection_unchecked,
+                )
+            }
+        };
+        totals.not_checked += usize::from(unchecked);
+        serde_json::to_writer(
+            &mut stdout,
+            &serde_json::json!({"schema":"aexeo.content-incremental-result/v1-experimental", "proposal_index":index, "result":result}),
+        )?;
+        writeln!(stdout)?;
     }
     stdout.flush()?;
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":not_checked, "evaluated":evaluated, "reused":reused, "blocking_failed":blocking_failed})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed})
         );
     }
-    Ok(if not_checked != 0 {
+    Ok(if totals.not_checked != 0 {
         2
-    } else if blocking_failed {
+    } else if totals.blocking_failed {
         1
     } else {
         0
