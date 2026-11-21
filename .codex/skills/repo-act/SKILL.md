@@ -35,7 +35,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   database is locked and whether an Aethyme cleanup process is still live. A
   transient lock can accompany that error; wait and retry before assuming a
   schema migration is needed. Never delete or rewrite the broker database to
-  clear a lock.
+  clear a lock. If concurrent broker operations report a lock, wait for each
+  command to finish, check the broker and any external action's actual state,
+  then retry only the unfinished operations sequentially.
 - Before a guarded PR merge, fetch the full live `headRefOid` directly from
   `gh pr view --json headRefOid` and pass that exact value to
   `--match-head-commit`; never reconstruct a full SHA from an abbreviated log.
