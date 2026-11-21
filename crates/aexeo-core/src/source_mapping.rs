@@ -21,6 +21,7 @@ pub fn prose_gate_has_positions(gate: &crate::content_gate::ContentGate) -> bool
             | ContentGate::TrailingIngClause { .. }
             | ContentGate::SimilarSentenceLengths { .. }
             | ContentGate::SentenceLengthVariance { .. }
+            | ContentGate::ProseSentenceLengthVariance { .. }
             | ContentGate::InlineTripleCandidates { .. }
             | ContentGate::DuplicateParagraphs { .. }
             | ContentGate::ParagraphCharacterLength { .. }
