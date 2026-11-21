@@ -463,3 +463,20 @@ fn markdown_with_html_does_not_treat_unobserved_prose_as_empty() {
         assert!(!telemetry.to_string().contains("present in HTML"));
     }
 }
+
+#[test]
+fn markdown_html_preserves_independent_composition_unavailability_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("workflow.toml");
+    let draft = dir.path().join("article.md");
+    fs::write(&preset, "version=1\nname='workflow'\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nblocking=false\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n").unwrap();
+    fs::write(&draft, "<div>Text in HTML.</div>\n").unwrap();
+    let (report, telemetry) = evaluate(&draft, &preset, "markdown");
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(
+        report["gates"][0]["reason"],
+        "document or structured composition is unavailable"
+    );
+    assert_eq!(telemetry["summary"]["not_checked"], 1);
+    assert!(!telemetry.to_string().contains("Text in HTML"));
+}
