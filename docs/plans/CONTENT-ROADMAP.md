@@ -354,6 +354,11 @@ registry before considering the release delivered.
   ([PR #387](https://github.com/schiste/Aexeo/pull/387)), and the CLI and
   experimental offline receipts bind and revalidate the selected scope. Static
   markup does not prove browser visibility or source freshness.
+- [x] Support verified static HTML list observations in the single-content CLI
+  ([#687](https://github.com/schiste/Aexeo/pull/687),
+  [#688](https://github.com/schiste/Aexeo/pull/688)). Only requested list gates
+  incur the extra projection; hidden, malformed or ambiguous structures remain
+  `not_checked`. Static HTML is not proof of browser-rendered visibility.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
   The single-content CLI accepts source- and destination-bound host link
