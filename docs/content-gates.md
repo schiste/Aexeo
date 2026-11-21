@@ -1770,14 +1770,28 @@ uses schema `aexeo.content-incremental-batch/v1-experimental`, with `snapshot`
 `preset_sources` (name-to-TOML map, overriding built-ins), `mode` (`plain`,
 `paragraph_text`, `adapted`, or `adapted_main`), and `proposals` (an array of
 objects with `change` and `after`, as in `content-impact`). The batch is limited
-to 16 MiB, 256 base or projected items, and 16 proposals. Only inline change
-content is supported. No metadata, collection, site, source, or external gates
-are supplied by this interface; unsupported gates are `not_checked`.
+to 16 MiB, 256 base items or changed projections per proposal, and 16 proposals.
+Only inline change content is supported. Site, source and external gates remain
+unsupported and are `not_checked`.
+
+An optional `base_metadata` object maps every base entity ID to a complete map
+of string fields, or to `null` if its metadata was not observed. An empty map
+means metadata was observed but no fields were present. The outer object must
+be omitted or be a map; `null` is invalid. For each created, updated or renamed
+entity the change entry must provide its own complete `metadata` map. Missing
+projections stay unavailable. The host must bind metadata to the corresponding
+revision and establish its authenticity and freshness. Item metadata gates and
+mixed item/collection presets require `adapted` or `adapted_main` mode.
+Collection-only presets may use any mode. The supported collection gate is
+`unique_collection_metadata`; other collection gates are not inferred.
 
 Stdout is newline-delimited JSON, one result per proposal, in input order. Each
 record has `schema`, `proposal_index`, and `result`. An `evaluated` result has
 item reports and `evaluated`/`reused` counts; individual gates can still report
-findings. Exit 0 means every proposal was evaluated without blocking failures; advisory
+findings. A `collection` result contains a `collection` report, and a `composed`
+result contains separate `items` and `collection` results. An unavailable
+collection gate can retain observed findings while still making the proposal
+not checked. Exit 0 means every proposal was evaluated without blocking failures; advisory
 findings can still exist. Exit 1 means at least one blocking gate failed. Exit 2
 means at least one proposal was not checked; invalid input or execution errors
 also produce a nonzero exit. Consumers must inspect all records and the exit
@@ -1786,5 +1800,5 @@ aggregate counts and timing to stderr without source text. Both the input and
 result reports may contain private information.
 
 The host asserts snapshot completeness and revision freshness; Aexeo does not
-authenticate them. These experimental item reports are not a publication
-verdict and do not establish collection, site, source, or publication safety.
+authenticate them. These experimental item and collection reports are not a
+publication verdict and do not establish site, source, or publication safety.
