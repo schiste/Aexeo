@@ -42,16 +42,17 @@ protocol or general incremental evaluation of arbitrary presets.
 `text/html` snapshots. Plain text uses the paragraph-text mode; Markdown and
 static HTML use their shared content adapters, with document scope for HTML.
 The supported independent item gates include the text and paragraph gates of
-`prepare_paragraph_text`, plus `LinkCount`, `RequiredHeadings`, `HeadingLength`,
+`prepare_paragraph_text`, plus `LinkCount`, `LinkDestinations`, `RequiredHeadings`, `HeadingLength`,
 `HeadingHierarchy`, `DuplicateHeadings` and `ListItemCount`. List counts require
-complete Markdown list observations; HTML, plain text and Markdown with
+complete Markdown or verified static HTML list observations; plain text and Markdown with
 unobserved HTML are `not_checked` for this gate. Heading hierarchy uses the complete
 ordered levels projected from each Markdown or HTML source. Markdown containing
 unobserved HTML and plain text cannot supply complete heading levels and cause
 `not_checked` for this gate. A gate whose required capability is unavailable for
 any item causes `not_checked`, including link or heading checks on plain text.
-Other formats, destination or reachability checks, metadata,
-site, collection and external gates remain unsupported. Inline before/after
+Destination checks use the complete per-item source projection and do not fetch links;
+Markdown containing unobserved HTML and plain text remain `not_checked` for this gate.
+Other formats, reachability checks, metadata, site, collection and external gates remain unsupported. Inline before/after
 content and the same complete, host-supplied inventory are still required.
 Route-link projections are not required for these item-local gates; any link
 count is extracted from that item's supplied source, not the host route graph.
