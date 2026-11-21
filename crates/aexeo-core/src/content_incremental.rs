@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::{
     content_candidate::{
-        CandidateItem, CandidateOverlay, CandidateSnapshot, overlay_candidate, validate_inventory,
+        CandidateItem, CandidateOverlay, CandidateSnapshot, ValidatedCandidateSnapshot,
     },
     content_gate::{
         ContentEvaluationContext, ContentGate, ContentInput, ContentPreset, ContentReport,
@@ -30,7 +30,7 @@ fn unavailable(reason: impl Into<String>) -> NotChecked {
 }
 
 fn checked_overlay(
-    snapshot: &CandidateSnapshot,
+    snapshot: &ValidatedCandidateSnapshot,
     change: &Change,
     after: &[CandidateItem],
 ) -> Result<CandidateOverlay, NotChecked> {
@@ -43,14 +43,14 @@ fn checked_overlay(
     {
         return Err(unavailable("only inline change content is supported"));
     }
-    overlay_candidate(snapshot, change, after).map_err(unavailable)
+    snapshot.overlay(change, after).map_err(unavailable)
 }
 
 /// Reports evaluated by this binary from an owned base and owned preset.
 /// Construct once and reuse for multiple proposals against the same base.
 /// The cache is intentionally not serializable and has no mutable accessors.
 pub struct IncrementalBaseline {
-    snapshot: CandidateSnapshot,
+    snapshot: ValidatedCandidateSnapshot,
     preset: ContentPreset,
     reports: BTreeMap<String, ContentReport>,
     mode: ProjectionMode,
@@ -88,6 +88,8 @@ pub enum IncrementalEvaluation {
     },
 }
 
+// Inventories are validated at baseline construction or by the candidate
+// overlay. This check only covers scope and mode-specific applicability.
 fn validate_scope(snapshot: &CandidateSnapshot, mode: ProjectionMode) -> Result<(), NotChecked> {
     if snapshot.scope.is_empty() || snapshot.site_id.is_empty() || snapshot.base.revision.is_empty()
     {
@@ -96,7 +98,6 @@ fn validate_scope(snapshot: &CandidateSnapshot, mode: ProjectionMode) -> Result<
     if !snapshot.complete {
         return Err(unavailable("snapshot completeness is not attested"));
     }
-    validate_inventory(&snapshot.items).map_err(unavailable)?;
     if snapshot
         .items
         .iter()
@@ -390,6 +391,7 @@ impl IncrementalBaseline {
         mode: ProjectionMode,
         metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
     ) -> Result<Self, NotChecked> {
+        let snapshot = ValidatedCandidateSnapshot::new(snapshot).map_err(unavailable)?;
         validate_scope(&snapshot, mode)?;
         if metadata.as_ref().is_some_and(|projections| {
             projections.len() != snapshot.items.len()
@@ -535,7 +537,7 @@ impl IncrementalBaseline {
 /// metadata projection per entity, including explicit unavailable projections.
 /// The projection and its relation to the base revision are host assertions.
 pub struct CollectionBaseline {
-    snapshot: CandidateSnapshot,
+    snapshot: ValidatedCandidateSnapshot,
     metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
     preset: ContentPreset,
 }
@@ -582,6 +584,7 @@ impl CollectionBaseline {
         metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
+        let snapshot = ValidatedCandidateSnapshot::new(snapshot).map_err(unavailable)?;
         if snapshot.scope.is_empty()
             || snapshot.site_id.is_empty()
             || snapshot.base.revision.is_empty()
@@ -589,7 +592,6 @@ impl CollectionBaseline {
         {
             return Err(unavailable("complete snapshot scope and base are required"));
         }
-        validate_inventory(&snapshot.items).map_err(unavailable)?;
         if metadata.len() != snapshot.items.len()
             || snapshot
                 .items
@@ -825,6 +827,7 @@ impl ComposedBaseline {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::content_candidate::overlay_candidate;
     use aexeo_contracts::content_gate_protocol::{
         Base, BaseKind, ContentState, Entry, Operation, Origin, OriginKind,
     };

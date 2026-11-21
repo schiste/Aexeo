@@ -131,6 +131,33 @@ fn validate_inventory_inner(
     Ok(())
 }
 
+/// An owned, immutable snapshot whose inventory was validated in this process.
+/// This capability is deliberately crate-private and cannot be deserialized.
+pub(crate) struct ValidatedCandidateSnapshot(CandidateSnapshot);
+
+impl ValidatedCandidateSnapshot {
+    pub(crate) fn new(snapshot: CandidateSnapshot) -> Result<Self, &'static str> {
+        validate_inventory(&snapshot.items)?;
+        Ok(Self(snapshot))
+    }
+
+    pub(crate) fn overlay(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+    ) -> Result<CandidateOverlay, &'static str> {
+        overlay_candidate_inner(&self.0, change, after, true)
+    }
+}
+
+impl std::ops::Deref for ValidatedCandidateSnapshot {
+    type Target = CandidateSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Apply a v1 change to a host snapshot and compute one-hop route impact.
 ///
 /// `after` contains exactly one projected item per non-delete entry. Both
@@ -143,6 +170,15 @@ pub fn overlay_candidate(
     base: &CandidateSnapshot,
     change: &Change,
     after: &[CandidateItem],
+) -> Result<CandidateOverlay, &'static str> {
+    overlay_candidate_inner(base, change, after, false)
+}
+
+fn overlay_candidate_inner(
+    base: &CandidateSnapshot,
+    change: &Change,
+    after: &[CandidateItem],
+    base_prevalidated: bool,
 ) -> Result<CandidateOverlay, &'static str> {
     validate_change_structure(change).map_err(|_| "invalid change")?;
     if base.scope.is_empty() || base.site_id.is_empty() || base.base != change.base {
@@ -164,7 +200,9 @@ pub fn overlay_candidate(
     {
         return Err("snapshot site URL mismatch");
     }
-    validate_inventory(&base.items)?;
+    if !base_prevalidated {
+        validate_inventory(&base.items)?;
+    }
     validate_inventory(after)?;
     let mut items: BTreeMap<&str, &CandidateItem> = base
         .items
@@ -901,6 +939,45 @@ mod tests {
         assert!(!impact.link_impact_complete);
         assert!(!impact.reasons.is_empty());
         assert_eq!(impact.affected, ["b", "c"]);
+    }
+
+    #[test]
+    fn validated_snapshot_matches_full_overlay_and_still_rejects_bad_projections() {
+        let (snapshot, mut change) = setup();
+        let after = item("a", "/a", "replacement", Some(vec![]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&after),
+        ));
+        let validated = ValidatedCandidateSnapshot::new(snapshot.clone()).unwrap();
+        assert_eq!(
+            validated.overlay(&change, std::slice::from_ref(&after)),
+            overlay_candidate(&snapshot, &change, std::slice::from_ref(&after)),
+        );
+        let mut bad_after = after.clone();
+        bad_after.source.push_str("tampered");
+        assert!(
+            validated
+                .overlay(&change, std::slice::from_ref(&bad_after))
+                .is_err()
+        );
+        assert_eq!(
+            validated.overlay(&change, &[bad_after.clone()]),
+            overlay_candidate(&snapshot, &change, &[bad_after]),
+        );
+        let mut bad_base = snapshot.clone();
+        bad_base.items[0].source.push_str("tampered");
+        assert!(ValidatedCandidateSnapshot::new(bad_base).is_err());
+        let mut collision = after;
+        collision.public_path = snapshot.items[1].public_path.clone();
+        change.entries[0].public_path = Some(collision.public_path.clone());
+        assert_eq!(
+            validated.overlay(&change, std::slice::from_ref(&collision)),
+            overlay_candidate(&snapshot, &change, std::slice::from_ref(&collision)),
+        );
+        assert!(validated.overlay(&change, &[collision]).is_err());
     }
 
     #[test]
