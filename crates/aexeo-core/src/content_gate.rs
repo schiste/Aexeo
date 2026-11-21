@@ -3865,12 +3865,23 @@ impl ContentPreset {
                     }
                 }
                 ContentGate::HeadingHierarchy { initial_level, .. } => {
+                    if let Some(level) = initial_level {
+                        measurements.insert("initial_level".into(), usize::from(*level));
+                    }
                     match (input.headings.as_ref(), heading_levels) {
                         (Some(headings), Some(levels))
                             if headings.len() == levels.len()
                                 && levels.iter().all(|level| (1..=6).contains(level)) =>
                         {
                             measurements.insert("heading_count".into(), levels.len());
+                            if let Some(level) = levels.first() {
+                                measurements
+                                    .insert("first_heading_level".into(), usize::from(*level));
+                            }
+                            if let Some(level) = levels.iter().max() {
+                                measurements
+                                    .insert("deepest_heading_level".into(), usize::from(*level));
+                            }
                             let mut skipped = 0;
                             for index in heading_hierarchy_indices(levels, *initial_level) {
                                 skipped += 1;
@@ -5774,6 +5785,9 @@ field = "slug"
         let report = evaluate(&[2, 4, 2]);
         assert_eq!(report.gates[0].status, GateStatus::Failed);
         assert_eq!(report.gates[0].measurements["skipped_levels"], 1);
+        assert_eq!(report.gates[0].measurements["first_heading_level"], 2);
+        assert_eq!(report.gates[0].measurements["deepest_heading_level"], 4);
+        assert!(!report.gates[0].measurements.contains_key("initial_level"));
         assert!(report.gates[0].findings[0].message.contains("#2"));
         assert_eq!(evaluate(&[2, 4]).gates[0].status, GateStatus::NotChecked);
         assert_eq!(evaluate(&[2, 7, 2]).gates[0].status, GateStatus::NotChecked);
@@ -5785,6 +5799,36 @@ field = "slug"
                 .gates[0]
                 .status,
             GateStatus::Failed
+        );
+        let unknown = fragment.evaluate(&input).unwrap();
+        assert_eq!(unknown.gates[0].measurements["initial_level"], 1);
+        assert!(
+            !unknown.gates[0]
+                .measurements
+                .contains_key("first_heading_level")
+        );
+        assert!(
+            !unknown.gates[0]
+                .measurements
+                .contains_key("deepest_heading_level")
+        );
+        let empty = ContentInput {
+            headings: Some(vec![]),
+            ..Default::default()
+        };
+        let empty_report = fragment
+            .evaluate_with_heading_levels(&empty, &context, None, Some(&[]), true, None)
+            .unwrap();
+        assert_eq!(empty_report.gates[0].measurements["heading_count"], 0);
+        assert!(
+            !empty_report.gates[0]
+                .measurements
+                .contains_key("first_heading_level")
+        );
+        assert!(
+            !empty_report.gates[0]
+                .measurements
+                .contains_key("deepest_heading_level")
         );
         assert!(ContentPreset::from_toml("version=1\nname='bad'\n[[gates]]\nid='h'\nkind='heading_hierarchy'\ninitial_level=7\n").is_err());
     }
