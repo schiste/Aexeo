@@ -1,0 +1,10 @@
+version = 1
+name = "German transition review"
+
+[[gates]]
+id = "editorial.transition_openings"
+kind = "sentence_opening_terms"
+terms = ["Außerdem", "Darüber hinaus", "Zusammenfassend"]
+max_per_paragraph = 1
+delimiters = ".!?"
+blocking = false

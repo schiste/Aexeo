@@ -1,0 +1,3 @@
+version = 1
+name = "Opinion style review, German"
+extends = ["news-style-de", "opinion-style-adjustments"]

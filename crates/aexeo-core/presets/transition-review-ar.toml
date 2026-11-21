@@ -1,0 +1,10 @@
+version = 1
+name = "Arabic transition review"
+
+[[gates]]
+id = "editorial.transition_openings"
+kind = "sentence_opening_terms"
+terms = ["بالإضافة إلى ذلك", "علاوة على ذلك", "في الختام"]
+max_per_paragraph = 1
+delimiters = ".!?؟"
+blocking = false

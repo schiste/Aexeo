@@ -1,0 +1,10 @@
+version = 1
+name = "Italian transition review"
+
+[[gates]]
+id = "editorial.transition_openings"
+kind = "sentence_opening_terms"
+terms = ["Inoltre", "Di conseguenza", "In conclusione"]
+max_per_paragraph = 1
+delimiters = ".!?"
+blocking = false
