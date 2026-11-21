@@ -263,6 +263,35 @@ pub fn portable_text_structured_lists(
     Some(result)
 }
 
+/// Classify projected paragraphs by list membership, in projection order.
+///
+/// `complete` asserts that the host observed all original body blocks, including
+/// custom components. A list item omitted from paragraph projection prevents a
+/// complete observation because it could hide a break between prose paragraphs.
+pub fn portable_text_paragraph_list_items(
+    document: &EmdashDocument,
+    complete: bool,
+) -> Option<Vec<bool>> {
+    portable_text_structured_lists(document, complete)?;
+    if document
+        .body
+        .iter()
+        .any(|block| block.list_item.is_some() && !matches!(block.style, crate::BlockStyle::Normal))
+    {
+        return None;
+    }
+    Some(
+        document
+            .body
+            .iter()
+            .filter_map(|block| {
+                matches!(block.style, crate::BlockStyle::Normal)
+                    .then_some(block.list_item.is_some())
+            })
+            .collect(),
+    )
+}
+
 /// Location inside the exact Portable Text snapshot passed to evaluation.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EmdashSourceLocation {
@@ -948,6 +977,37 @@ mod tests {
                 locations[0].utf16_offset
             ),
             (0, 1, 0)
+        );
+    }
+
+    #[test]
+    fn paragraph_list_classification_requires_complete_projected_blocks() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"children":[]},{"style":"h2","children":[]},{"listItem":"bullet","level":1,"children":[]},{"listItem":"bullet","level":2,"children":[]},{"children":[]}]}"#).unwrap();
+        assert_eq!(portable_text_paragraph_list_items(&document, false), None);
+        assert_eq!(
+            portable_text_paragraph_list_items(&document, true),
+            Some(vec![false, true, true, false])
+        );
+        assert_eq!(
+            content_input_with_context(&document)
+                .1
+                .paragraphs
+                .unwrap()
+                .len(),
+            4
+        );
+        let invalid: EmdashDocument = serde_json::from_str(
+            r#"{"route":"/x","title":"T","body":[{"listItem":"bullet","level":2,"children":[]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(portable_text_paragraph_list_items(&invalid, true), None);
+        let hidden: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"style":"h2","listItem":"bullet","children":[]}]}"#).unwrap();
+        assert_eq!(portable_text_paragraph_list_items(&hidden, true), None);
+        let empty: EmdashDocument =
+            serde_json::from_str(r#"{"route":"/x","title":"T","body":[]}"#).unwrap();
+        assert_eq!(
+            portable_text_paragraph_list_items(&empty, true),
+            Some(vec![])
         );
     }
 
