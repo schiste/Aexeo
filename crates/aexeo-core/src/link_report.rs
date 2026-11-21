@@ -381,17 +381,21 @@ impl AuditLinkContext {
     /// as a `--context` file does, else the inventory's own identity and no
     /// date.
     pub fn from_inventory_document(data: &[u8]) -> anyhow::Result<Self> {
+        Self::from_inventory_value(crate::link_inventory::parse_link_context_json(data)?)
+    }
+
+    fn from_inventory_value(value: serde_json::Value) -> anyhow::Result<Self> {
         #[derive(Deserialize)]
         struct Declared {
             identity: Option<SurfaceIdentity>,
             snapshot_date: Option<String>,
         }
-        let inventory = InventorySnapshot::from_json_document(data)?;
-        let value: serde_json::Value = serde_json::from_slice(data)?;
-        let declared: Declared = serde_json::from_value(value.clone())?;
+        let declared = Declared::deserialize(&value)?;
+        let identity_present = value.get("identity").is_some();
+        let inventory = InventorySnapshot::from_json_value(value)?;
         // An explicit null is an assertion that the crawl identity is unknown;
         // only an omitted identity may inherit the inventory's claimed identity.
-        let identity = if value.get("identity").is_some() {
+        let identity = if identity_present {
             declared.identity
         } else {
             inventory.identity.clone()
@@ -407,12 +411,12 @@ impl AuditLinkContext {
     /// An omitted identity in an export adopts its inventory's claimed identity;
     /// explicit `null` stays unknown. These are caller assertions, not proof.
     pub fn from_context_document(data: &[u8]) -> anyhow::Result<Self> {
-        let value: serde_json::Value = serde_json::from_slice(data)?;
+        let value = crate::link_inventory::parse_link_context_json(data)?;
         if value.get("inventory").is_none()
             && value.get("complete").is_some()
             && value.get("pages").is_some()
         {
-            return Self::from_inventory_document(data);
+            return Self::from_inventory_value(value);
         }
         let identity_missing = value.get("identity").is_none();
         let mut context: Self = serde_json::from_value(value)?;
@@ -1738,6 +1742,17 @@ mod tests {
         assert_eq!(serde_json::json!(context.identity), declared);
         assert_eq!(context.snapshot_date.as_deref(), Some("2026-01-01"));
         assert!(context.inventory.is_some());
+    }
+
+    #[test]
+    fn audit_link_context_rejects_ambiguous_json() {
+        let documents: &[&[u8]] = &[
+            br#"{"identity":null,"identity":null,"snapshot_date":null,"inventory":null}"#,
+            br#"{"identity":null,"snapshot_date":null,"inventory":{"identity":null,"complete":false,"complete":true,"pages":[]}}"#,
+        ];
+        for document in documents {
+            assert!(AuditLinkContext::from_context_document(document).is_err());
+        }
     }
 
     #[test]
