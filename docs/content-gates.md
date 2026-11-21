@@ -1621,6 +1621,23 @@ change the seed deliberately to select another. The report records
 Neither the configuration nor findings establish authorship or guarantee any
 outcome from AI detectors. Review the passage before proposing an edit.
 
+### Prose-only sentence variance (host API)
+
+The opt-in `prose_sentence_length_variance` gate accepts the same settings as
+`sentence_length_variance`, but excludes list paragraphs and breaks rolling
+windows at each excluded paragraph. Its `list_paragraphs_excluded` measurement
+reports the number excluded. The host must call
+`ContentPreset::evaluate_with_paragraph_list_items` with one classification per
+projected paragraph, in the same order, and attest that the projection and
+classification are complete. Missing or mismatched classification is
+`not_checked`; it is never assumed to mean there are no lists. This API does
+not establish source completeness on the host's behalf.
+
+The CLI, content-change and EmDash/WASM entry points do not yet pass this
+observation. The new gate therefore remains `not_checked` through those paths
+until their adapters are integrated. Incremental candidate evaluation does not
+support it yet. Existing sentence-variance configurations retain their behavior.
+
 ### Possible inline triples
 
 The opt-in `inline-triples-en` and `inline-triples-fr` presets report surface
