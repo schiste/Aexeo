@@ -528,6 +528,41 @@ mod tests {
             verify_candidate_file_states(&renamed, &base, &renamed_after, &mut files, 3, 6),
             Ok(())
         );
+        // Different before/after files must not be interchanged or substituted.
+        struct SeparateFiles {
+            wrong_before: bool,
+        }
+        impl ConfinedContentFiles for SeparateFiles {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &Path, relative: &Path) -> io::Result<Self::Reader> {
+                let content = if relative == Path::new("posts/old.md") {
+                    if self.wrong_before { b"bad" } else { b"xyz" }
+                } else if relative == Path::new("posts/a.md") {
+                    b"abc"
+                } else {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "unavailable"));
+                };
+                Ok(Cursor::new(content.to_vec()))
+            }
+        }
+        let mut distinct = input.clone();
+        let before = distinct.entries[0].before.as_mut().unwrap();
+        before.file = Some("posts/old.md".into());
+        before.sha256 = format!("{:x}", Sha256::digest(b"xyz"));
+        let mut distinct_base = base.clone();
+        distinct_base.items[0].source = "xyz".into();
+        distinct_base.items[0].sha256 = before.sha256.clone();
+        for wrong_before in [false, true] {
+            let result = verify_candidate_file_states(
+                &distinct,
+                &distinct_base,
+                &after,
+                &mut SeparateFiles { wrong_before },
+                3,
+                6,
+            );
+            assert_eq!(result.is_ok(), !wrong_before);
+        }
         let mut altered = base.clone();
         altered.items[0].source = "other".into();
         assert_eq!(
