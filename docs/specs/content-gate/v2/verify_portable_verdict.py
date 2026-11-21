@@ -91,6 +91,12 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         raise VerificationError('bound verdict exceeds size limit')
     previous, fresh = parse(previous_bytes), parse(fresh_bytes)
     validate_schemas((previous, fresh), HERE / 'bound-verdict.schema.json')
+    policy = parse(artifacts['resolved_policy'])
+    if not isinstance(policy, dict) or 'name' not in policy:
+        raise VerificationError('resolved policy name is unavailable')
+    text(policy['name'], empty=False)
+    if not policy['name'].strip():
+        raise VerificationError('resolved policy name is empty')
     host_options = parse(artifacts['host_options'])
     html_scope = validate_host_options(host_options)
     change = parse(artifacts['change'])
@@ -129,6 +135,8 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         validate_verdict(verdict)
         if verdict['validator']['version'] != host_options['engine_version']:
             raise VerificationError('validator version does not match host options')
+        if verdict['validator'].get('profile') != policy['name']:
+            raise VerificationError('validator profile does not match resolved policy')
         require_passed_checks(verdict, required_checks)
         require_validator_identity(verdict, expected_validator)
         if not _typed_equal(verdict['subject'], subject):

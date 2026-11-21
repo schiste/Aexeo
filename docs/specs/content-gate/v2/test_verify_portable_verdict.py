@@ -219,6 +219,34 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             self.check()
 
+    def test_rebound_policy_name_matches_both_verdict_profiles(self):
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        original = json.loads(self.artifacts['resolved_policy'])
+
+        def rebind():
+            inputs = dict(self.artifacts, collection=self.artifacts.get('collection'),
+                          external_evidence=self.artifacts.get('external_evidence'),
+                          candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                          candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                          candidate_revision_sha256=revision_digest(candidate))
+            self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+
+        for name in ('different-policy', '', '   ', None):
+            self.artifacts['resolved_policy'] = self.encoded(dict(original, name=name))
+            rebind()
+            with self.subTest(name=name), self.assertRaises(VerificationError):
+                self.check()
+        self.artifacts['resolved_policy'] = self.encoded(original)
+        rebind()
+        for key in ('previous', 'fresh'):
+            envelope = getattr(self, key)
+            envelope['verdict']['validator']['profile'] = 'different-policy'
+            with self.subTest(verdict=key), self.assertRaises(VerificationError):
+                self.check()
+            envelope['verdict']['validator']['profile'] = original['name']
+        self.assertFalse(self.check()['publication_authorized'])
+
     def test_rebound_host_options_require_valid_shape_and_matching_html_scope(self):
         self.assertFalse(self.check()['publication_authorized'])
         change = json.loads(self.artifacts['change'])
