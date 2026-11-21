@@ -39,6 +39,17 @@ pub struct InventorySnapshot {
     pub pages: Vec<InventoryPage>,
 }
 
+// Bound the shared duplicate-key parser without limiting normal large site inventories.
+pub(crate) const MAX_LINK_CONTEXT_BYTES: usize = 128 * 1024 * 1024;
+
+pub(crate) fn parse_link_context_json(data: &[u8]) -> anyhow::Result<serde_json::Value> {
+    anyhow::ensure!(
+        data.len() <= MAX_LINK_CONTEXT_BYTES,
+        "link context exceeds size limit"
+    );
+    Ok(aexeo_contracts::content_gate_change_validation::parse_unique_json_value(data)?)
+}
+
 impl InventorySnapshot {
     /// Fingerprint the ordered, typed inventory including identity and metadata.
     /// This detects mismatches; it does not authenticate the inventory producer.
@@ -53,11 +64,17 @@ impl InventorySnapshot {
     /// Read an inventory either on its own or under an `inventory` key, as in
     /// a link graph input, an audit link context or an EmDash export.
     pub fn from_json_document(data: &[u8]) -> anyhow::Result<Self> {
-        let value: serde_json::Value = serde_json::from_slice(data)?;
-        let inventory = match value.get("inventory") {
-            Some(serde_json::Value::Null) => anyhow::bail!("the document has a null inventory"),
-            Some(inventory) => inventory.clone(),
-            None => value,
+        Self::from_json_value(parse_link_context_json(data)?)
+    }
+
+    pub(crate) fn from_json_value(value: serde_json::Value) -> anyhow::Result<Self> {
+        let inventory = match value {
+            serde_json::Value::Object(mut object) => match object.remove("inventory") {
+                Some(serde_json::Value::Null) => anyhow::bail!("the document has a null inventory"),
+                Some(inventory) => inventory,
+                None => serde_json::Value::Object(object),
+            },
+            other => other,
         };
         Ok(serde_json::from_value(inventory)?)
     }
@@ -369,6 +386,18 @@ mod tests {
         );
         assert!(InventorySnapshot::from_json_document(br#"{"inventory":null}"#).is_err());
         assert!(InventorySnapshot::from_json_document(br#"{"pages":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn inventory_documents_reject_duplicate_keys_at_any_depth() {
+        let documents: &[&[u8]] = &[
+            br#"{"identity":null,"complete":false,"complete":true,"pages":[]}"#,
+            br#"{"inventory":{"identity":null,"complete":true,"pages":[{"url":"https://example.org/a","url":"https://example.org/b","disposition":"published","target":null,"locale":null}]}}"#,
+            br#"{"inventory":null,"inventory":{"identity":null,"complete":true,"pages":[]}}"#,
+        ];
+        for document in documents {
+            assert!(InventorySnapshot::from_json_document(document).is_err());
+        }
     }
 
     #[test]

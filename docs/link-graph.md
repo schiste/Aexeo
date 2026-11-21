@@ -260,6 +260,12 @@ a `noindex` entry served with a 2xx status, captured headers and no noindex
 directive raises it, as does a `published` entry observed noindex. A `noindex`
 entry needs no target and is never eligible.
 
+Inventory documents read as crawl seeds or audit link contexts must be at most
+128 MiB and contain no repeated JSON object keys, including in nested values.
+Invalid documents are rejected instead of choosing one of several values for
+identity, completeness or page metadata. This validation does not authenticate
+the inventory or prove that its contents describe the audited release.
+
 ## Runtime audit artifacts
 
 Run `aexeo-cli link-graph audit.json --audit` to analyze pages in an Aexeo

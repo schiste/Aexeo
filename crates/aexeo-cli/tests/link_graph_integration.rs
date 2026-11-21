@@ -1,6 +1,34 @@
 use std::{fs, process::Command};
 
 #[test]
+fn static_graph_rejects_ambiguous_inventory_context() {
+    let temp = tempfile::tempdir().unwrap();
+    let site = temp.path().join("site");
+    fs::create_dir(&site).unwrap();
+    fs::write(
+        site.join("index.html"),
+        "<html lang='en'><main>Home</main></html>",
+    )
+    .unwrap();
+    let context = temp.path().join("context.json");
+    fs::write(
+        &context,
+        r#"{"inventory":{"identity":null,"complete":false,"complete":true,"pages":[]}}"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["link-graph", "--static-site"])
+        .arg(&site)
+        .args(["--site-origin", "https://example.org", "--context"])
+        .arg(context)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid audit link context"));
+}
+
+#[test]
 fn graph_report_exposes_evidence_and_private_opt_in_telemetry() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("input.json");
