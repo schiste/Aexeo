@@ -618,6 +618,10 @@ registry before considering the release delivered.
   explicit finding references, while preserving optional v1 `check_id`.
   It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
+- [x] Preserve HTML source positions through explicitly closed, well-nested
+  preformatted blocks, including the parser's initial LF or CRLF handling.
+  Ambiguous, hidden or malformed markup remains unmapped; this does not assert
+  rendered visibility or assess the meaning of code examples.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
   The conservative HTML source mapper preserves positions through explicitly
   nested bidirectional inline elements, including Arabic text and links
