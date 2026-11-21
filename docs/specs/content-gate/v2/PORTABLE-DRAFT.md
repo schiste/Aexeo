@@ -141,7 +141,8 @@ reconstructs the candidate revision digests and Aexeo decision artifacts from
 an independently supplied candidate context, then verifies the required passing
 checks and independently supplied content streams. An incomplete declared base,
 changed candidate, policy, scope, evidence or content fails the comparison. It
-inherits the candidate implementation's inline-state restriction and Aexeo's
+also rejects a verdict whose declared HTML scope differs from the independently
+selected scope. It inherits the candidate implementation's inline-state restriction and Aexeo's
 non-portable artifact encodings. The caller must acquire and trust the context,
 bytes and optional evidence independently, establish snapshot completeness and
 freshness, and protect the publication boundary. The helper does not establish
