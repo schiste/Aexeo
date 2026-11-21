@@ -871,6 +871,9 @@ missing fields retain observed prose but make body capabilities unavailable.
   states and candidate projections in the draft Python comparator and runner.
 - [x] Support confined local file states in the Aexeo candidate-bound producer;
   exercise the real CLI with the independent Python comparator and runner.
+- [x] Avoid a second inventory overlay when checking confined file states in the
+  candidate verdict path; public file checks still validate the overlay and
+  bounded byte comparisons remain unchanged.
 - [ ] Establish equivalent referenced-content interoperability in other hosts;
   URI fetching, snapshot provenance and publication authorization remain separate
   concerns.

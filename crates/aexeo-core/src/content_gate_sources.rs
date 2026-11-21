@@ -277,11 +277,32 @@ pub fn verify_candidate_file_states<P: ConfinedContentFiles>(
     max_state_bytes: usize,
     max_total_bytes: usize,
 ) -> Result<(), SourceError> {
+    crate::content_candidate::overlay_candidate(base, change, after)
+        .map_err(|_| SourceError::InvalidChange)?;
+    verify_candidate_file_states_after_overlay(
+        change,
+        base,
+        after,
+        provider,
+        max_state_bytes,
+        max_total_bytes,
+    )
+}
+
+// The caller must have successfully validated the overlay for these exact
+// immutable inputs. Keeping this private to the crate avoids rebuilding the
+// potentially large candidate inventory when the verdict path already did so.
+pub(crate) fn verify_candidate_file_states_after_overlay<P: ConfinedContentFiles>(
+    change: &Change,
+    base: &crate::content_candidate::CandidateSnapshot,
+    after: &[crate::content_candidate::CandidateItem],
+    provider: &mut P,
+    max_state_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<(), SourceError> {
     use aexeo_contracts::content_gate_protocol::Operation;
     use std::collections::BTreeMap;
 
-    crate::content_candidate::overlay_candidate(base, change, after)
-        .map_err(|_| SourceError::InvalidChange)?;
     let previous: BTreeMap<&str, _> = base
         .items
         .iter()
