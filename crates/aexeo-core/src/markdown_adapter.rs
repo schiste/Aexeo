@@ -42,7 +42,8 @@ impl MarkdownSourceMap {
         !self.contains_html
     }
 
-    /// Classify projected paragraphs in order; `None` means markup was unobserved.
+    /// Classify projected paragraphs in order; `None` means markup was unobserved
+    /// or a list item did not produce any projected paragraph.
     /// `true` denotes a paragraph inside a list item, including nested lists.
     pub fn paragraph_list_items(&self) -> Option<&[bool]> {
         self.paragraph_list_items_complete
@@ -843,6 +844,7 @@ struct Projection {
     headings: Vec<String>,
     ranges: Vec<(usize, usize, bool)>,
     list_item_depth: usize,
+    unrepresented_list_item: bool,
     block_ends: Vec<usize>,
     link_count: usize,
     definitions: std::collections::BTreeMap<String, String>,
@@ -964,9 +966,11 @@ impl Projection {
                 self.end_block();
             }
             Node::ListItem(_) => {
+                let paragraphs_before = self.ranges.len();
                 self.list_item_depth += 1;
                 self.visit_children(node, source, source_map);
                 self.list_item_depth -= 1;
+                self.unrepresented_list_item |= self.ranges.len() == paragraphs_before;
             }
             Node::Paragraph(_) | Node::TableCell(_) => {
                 let start = self.text.len();
@@ -1019,6 +1023,7 @@ fn extract_markdown_from_root(
         headings,
         ranges,
         list_item_depth: _,
+        unrepresented_list_item,
         block_ends,
         link_count,
         definitions: _,
@@ -1047,7 +1052,7 @@ fn extract_markdown_from_root(
         cursor = start;
     }
     let complete = !source_map.contains_html;
-    source_map.paragraph_list_items_complete = complete;
+    source_map.paragraph_list_items_complete = complete && !unrepresented_list_item;
     Ok((
         ContentInput {
             id: id.into(),
@@ -1105,6 +1110,14 @@ mod tests {
         );
         let (_, _, _, empty) = markdown_input_with_source_map("x", "").unwrap();
         assert_eq!(empty.paragraph_list_items(), Some(&[][..]));
+    }
+
+    #[test]
+    fn empty_list_items_withhold_paragraph_list_classification() {
+        let (_, context, _, map) =
+            markdown_input_with_source_map("x", "Before.\n\n- \n\nAfter.").unwrap();
+        assert_eq!(context.paragraphs.unwrap().len(), 2);
+        assert_eq!(map.paragraph_list_items(), None);
     }
 
     #[test]
