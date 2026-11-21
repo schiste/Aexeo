@@ -345,3 +345,11 @@ it("attests list completeness only for configured collections without mutating d
   expect(seen[1]?.list_structure_complete).toBeUndefined();
   expect(doc.list_structure_complete).toBeUndefined();
 });
+
+it("does not treat a malformed string collection attestation as consent", async () => {
+  const seen: EmdashDocument[] = [];
+  const malformed = "posts" as unknown as readonly string[];
+  const evaluator = withContentPreset(base, { name: "article", listStructureCompleteByCollection: malformed }, async (document) => { seen.push(document); return { ...report, gates: [] }; });
+  await evaluator([doc], { collections: ["posts"] });
+  expect(seen[0]?.list_structure_complete).toBeUndefined();
+});

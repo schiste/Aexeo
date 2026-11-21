@@ -3,6 +3,7 @@ import { validLinkObservations } from "./content-evaluator.js";
 import type { ContentPresetOptions, LinkProviderTelemetry } from "./content-evaluator.js";
 import { emitTelemetry } from "./telemetry.js";
 import { selectFragmentPreset } from "./fragment-selection.js";
+import { collectionListStructureAttested, fragmentListStructureAttested } from "./list-structure-attestation.js";
 import { selectContentPreset } from "./preset-selection.js";
 import type { ContentReport, ContentEvaluationTelemetry, ExternalGateResult, BoundLinkObservations, LinkDestinationProjection } from "./content.js";
 import type { SandboxCtx } from "./plugin.js";
@@ -79,6 +80,10 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     ...(contentFields === undefined ? {} : { contentFields }),
     ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }),
     ...(options.metadataFieldsByCollection?.[collection] === undefined ? {} : { metadataFields: options.metadataFieldsByCollection[collection] }) });
+  const listStructureAttested = field === undefined
+    ? collectionListStructureAttested(options.preset?.revisionListStructureCompleteByCollection, collection)
+    : fragmentListStructureAttested(options.preset?.revisionFragmentListStructureCompleteByCollection, collection, field);
+  if (listStructureAttested) adapted.document.list_structure_complete = true;
   // A runtime provider replaces static evidence in the ordinary evaluator.
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;

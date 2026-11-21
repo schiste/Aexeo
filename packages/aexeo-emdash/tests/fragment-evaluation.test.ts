@@ -28,6 +28,18 @@ describe("automatic fragment evaluation", () => {
     expect(evaluate).toHaveBeenCalledTimes(3);
   });
 
+  it("attests only explicitly configured fragment fields, separately from whole content", async () => {
+    const evaluate = vi.fn(async (_document: EmdashDocument, name: string) => ({ ...report, preset: name }));
+    const evaluator = withContentPreset(base, { name: "article", autoAuditFragments: true,
+      listStructureCompleteByCollection: ["posts"],
+      fragmentListStructureCompleteByCollection: { posts: ["intro"] },
+      fragmentFieldsByCollection: { posts: { intro: "fragment", body: "fragment" } } }, evaluate);
+    await evaluator([document], { collections: ["posts"], sourceItems: [item] });
+    expect(evaluate.mock.calls[0]?.[0].list_structure_complete).toBe(true);
+    expect(evaluate.mock.calls[1]?.[0].list_structure_complete).toBe(true);
+    expect(evaluate.mock.calls[2]?.[0].list_structure_complete).toBeUndefined();
+  });
+
   it("freezes field data before awaiting the base evaluation", async () => {
     const source = structuredClone(item);
     let resume!: () => void;

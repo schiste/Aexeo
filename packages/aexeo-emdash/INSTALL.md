@@ -815,3 +815,28 @@ gates from running, even for an attested collection. The aggregate
 counts without routes, content, or collection names. Configure an appropriate
 preset on the worker separately; this setting does not activate a preset,
 assess historical revisions or authorize publication.
+
+### List structure for fragments and historical revisions
+
+The prose-only rhythm and list-count gates require a complete list projection.
+Attest it separately for current fragments, whole historical documents and
+historical fragments. For example:
+
+```ts
+contentPreset: {
+  name: "article",
+  fragmentFieldsByCollection: { posts: { intro: "prose-variance-review" } },
+  fragmentListStructureCompleteByCollection: { posts: ["intro"] },
+  revisionListStructureCompleteByCollection: ["posts"],
+  revisionFragmentListStructureCompleteByCollection: { posts: ["intro"] },
+}
+```
+
+These options are independent of `listStructureCompleteByCollection`, which
+only covers current whole documents. Enable each option only after verifying
+that the corresponding host projection preserves all list boundaries,
+including mapped custom components; historical attestations must cover older
+schemas too. An omitted or mismatched collection or field remains unassessed.
+An attestation does not override incomplete body capabilities caused by
+unknown components. These gates provide editorial prompts, not a factuality
+check or authorization to publish.
