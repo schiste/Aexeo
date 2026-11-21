@@ -255,6 +255,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `not_checked` and must not produce a passing blocking gate.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
+- For EmDash gate report tests, an empty `measurements` map may be omitted
+  entirely in serialized JSON. Assert the absence of individual measurements
+  with the containing map optional, and separately check observed values.
 - Test unknown fields inside every tagged enum variant, including unit variants:
   Serde may ignore extra fields on an internally tagged unit variant even with
   `deny_unknown_fields`; an empty struct variant can enforce rejection.
