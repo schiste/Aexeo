@@ -1640,9 +1640,12 @@ or list items omitted from paragraph projection remain `not_checked`. Configured
 plugins can use `listStructureCompleteByCollection` only for collections whose
 complete projection the host can establish.
 
-The CLI and content-change entry points do not yet pass this observation;
-incremental candidate evaluation does not support it yet. Existing
-sentence-variance configurations retain their behavior.
+The CLI and content-change entry points supply this observation for Markdown
+and HTML. Unsupported or incomplete structures, and plain-text inputs that do
+not establish list structure, remain `not_checked`. Opt-in CLI telemetry reports
+aggregate measured gates, excluded list paragraphs and checked windows without
+content or gate identifiers. Incremental candidate evaluation does not support
+this gate yet. Existing sentence-variance configurations retain their behavior.
 
 ### Possible inline triples
 
