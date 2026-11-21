@@ -206,13 +206,19 @@ pub(crate) fn numeric_reference_marker(href: &str, text: &str) -> bool {
 
 // Recognize explicit HTTP(S) URLs without changing their text or crossing an
 // adapter block. Bounded scanning avoids repeatedly parsing unbounded tokens.
-fn http_url_end(text: &str, start: usize, block_end: Option<usize>) -> Option<usize> {
+fn http_url_end(
+    text: &str,
+    start: usize,
+    block_end: Option<usize>,
+    starts_block: bool,
+) -> Option<usize> {
     const MAX_URL_BYTES: usize = 2048;
     let tail = text.get(start..)?;
     if !(tail.starts_with("https://") || tail.starts_with("http://")) {
         return None;
     }
     if start > 0
+        && !starts_block
         && !text[..start].chars().next_back().is_some_and(|c| {
             c.is_whitespace() || matches!(c, '(' | '[' | '{' | '«' | '“' | '\'' | '"')
         })
@@ -283,8 +289,11 @@ fn for_each_sentence(
             }
         }
         if ch == Some('h') && offset >= protected_url_end {
-            let following_block = block_ends.get(next_block + usize::from(block_end)).copied();
-            if let Some(end) = http_url_end(text, offset, following_block) {
+            let following_block = block_ends[next_block..]
+                .iter()
+                .copied()
+                .find(|&end| end > offset);
+            if let Some(end) = http_url_end(text, offset, following_block, block_end) {
                 protected_url_end = end;
             }
         }
@@ -5271,18 +5280,28 @@ mod tests {
             ]
         );
         let url = "https://example.org/page";
-        assert_eq!(http_url_end(url, 0, None), Some(url.len()));
-        assert_eq!(http_url_end(url, 0, Some(15)), Some(15));
-        assert_eq!(http_url_end("https://", 0, None), None);
-        assert_eq!(http_url_end("wordhttps://example.org", 4, None), None);
+        assert_eq!(http_url_end(url, 0, None, false), Some(url.len()));
+        assert_eq!(http_url_end(url, 0, Some(15), false), Some(15));
+        assert_eq!(http_url_end("https://", 0, None, false), None);
+        assert_eq!(
+            http_url_end("wordhttps://example.org", 4, None, false),
+            None
+        );
         assert_eq!(
             http_url_end(
                 &format!("https://example.org/{}", "x".repeat(2048)),
                 0,
-                None
+                None,
+                false
             ),
             None
         );
+        let joined = "Firsthttps://example.org/a.b?x=1. Next.";
+        let mut count = 0;
+        for_each_sentence(joined, 1, 1, &[5, 5], ".!?", &[], |sentence, _, _| {
+            count += usize::from(!sentence.trim().is_empty());
+        });
+        assert_eq!(count, 3);
     }
 
     #[test]
