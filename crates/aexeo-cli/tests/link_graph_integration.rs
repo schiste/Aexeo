@@ -380,10 +380,10 @@ fn audit_context_compares_inventory_without_claiming_crawl_completeness() {
     let context_path = temp.path().join("context.json");
     let identity = serde_json::json!({"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"});
     let audit = serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":[
-        {"path":"crawl/a/index.html", "relative_path":"a/index.html", "route":"a", "raw_html":"<main>A</main>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/a", "observed_url":"https://example.org/a", "status_code":200, "headers_observed":true}}
+        {"path":"crawl/a/index.html", "relative_path":"a/index.html", "route":"a", "raw_html":"<html lang='en-US-1901'><main>A</main></html>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/a", "observed_url":"https://example.org/a", "status_code":200, "headers_observed":true}}
     ]}});
     let context = serde_json::json!({"identity":identity, "snapshot_date":"2026-01-01", "inventory":{"identity":identity, "complete":true, "pages":[
-        {"url":"https://example.org/a", "disposition":"published", "target":null, "locale":"en"},
+        {"url":"https://example.org/a", "disposition":"published", "target":null, "locale":"en-US"},
         {"url":"https://example.org/b", "disposition":"published", "target":null, "locale":"en"}
     ]}});
     fs::write(&audit_path, serde_json::to_vec(&audit).unwrap()).unwrap();
@@ -394,6 +394,7 @@ fn audit_context_compares_inventory_without_claiming_crawl_completeness() {
         .arg("--audit")
         .arg("--context")
         .arg(context_path)
+        .arg("--telemetry")
         .output()
         .unwrap();
     assert!(
@@ -402,6 +403,9 @@ fn audit_context_compares_inventory_without_claiming_crawl_completeness() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["locale_unverified_issue_present"], true);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("en-US"));
     assert_eq!(report["reconciliation"]["comparable"], false);
     assert_eq!(
         report["reconciliation"]["inventory_only"],
@@ -454,6 +458,7 @@ fn emdash_export_as_audit_context_keeps_inventory_identity_and_unknown_coverage(
         );
         let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
         assert_eq!(telemetry["event"], "link_graph_analysis");
+        assert_eq!(telemetry["locale_unverified_issue_present"], false);
         assert!(!String::from_utf8_lossy(&output.stderr).contains("other.example"));
         let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(

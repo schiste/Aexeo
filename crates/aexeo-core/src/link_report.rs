@@ -164,10 +164,63 @@ struct LanguageParts<'a> {
     script: Option<&'a str>,
     region: Option<&'a str>,
     suffix_valid: bool,
+    suffix: Vec<&'a str>,
+}
+
+// Support variants, extensions and private-use subtags only when their
+// structure is unambiguous. This is deliberately not a full BCP 47 validator.
+fn supported_locale_suffix(parts: &[&str]) -> bool {
+    let (mut index, mut variants, mut singletons) = (0, Vec::<&str>::new(), Vec::<&str>::new());
+    while let Some(part) = parts.get(index) {
+        let valid_variant = ((5..=8).contains(&part.len())
+            || (part.len() == 4 && part.as_bytes()[0].is_ascii_digit()))
+            && part.bytes().all(|byte| byte.is_ascii_alphanumeric());
+        if !valid_variant {
+            break;
+        }
+        if variants.iter().any(|seen| seen.eq_ignore_ascii_case(part)) {
+            return false;
+        }
+        variants.push(part);
+        index += 1;
+    }
+    while let Some(singleton) = parts.get(index) {
+        if singleton.len() != 1 || !singleton.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            return false;
+        }
+        if singletons
+            .iter()
+            .any(|seen| seen.eq_ignore_ascii_case(singleton))
+        {
+            return false;
+        }
+        singletons.push(singleton);
+        let private_use = singleton.eq_ignore_ascii_case("x");
+        index += 1;
+        let start = index;
+        while let Some(part) = parts.get(index) {
+            let min = if private_use { 1 } else { 2 };
+            if !(min..=8).contains(&part.len())
+                || !part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            {
+                break;
+            }
+            index += 1;
+        }
+        if index == start || (private_use && index != parts.len()) {
+            return false;
+        }
+    }
+    true
 }
 
 fn language_parts(value: &str) -> Option<LanguageParts<'_>> {
-    let mut parts = value.trim().split(['-', '_']).peekable();
+    let value = value.trim();
+    // Bound allocations and parsing work on host-supplied metadata.
+    if value.len() > 255 {
+        return None;
+    }
+    let mut parts = value.split(['-', '_']).peekable();
     let primary = parts.next()?;
     if !(2..=8).contains(&primary.len())
         || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
@@ -183,16 +236,16 @@ fn language_parts(value: &str) -> Option<LanguageParts<'_>> {
         (part.len() == 2 && part.bytes().all(|byte| byte.is_ascii_alphabetic()))
             || (part.len() == 3 && part.bytes().all(|byte| byte.is_ascii_digit()))
     });
-    // Keep a valid primary language even when later subtags are malformed,
-    // but do not infer a script or region conflict from malformed suffixes.
-    if parts.any(|part| {
-        part.is_empty() || part.len() > 8 || !part.bytes().all(|byte| byte.is_ascii_alphanumeric())
-    }) {
+    let suffix: Vec<_> = parts.collect();
+    // A valid primary can still reveal a language mismatch, but malformed
+    // or unsupported suffixes cannot establish script or region conflicts.
+    if !supported_locale_suffix(&suffix) {
         return Some(LanguageParts {
             primary,
             script: None,
             region: None,
             suffix_valid: false,
+            suffix,
         });
     }
     Some(LanguageParts {
@@ -200,6 +253,7 @@ fn language_parts(value: &str) -> Option<LanguageParts<'_>> {
         script,
         region,
         suffix_valid: true,
+        suffix,
     })
 }
 
@@ -238,6 +292,12 @@ fn locale_evidence_issue(inventory: Option<&str>, document: Option<&str>) -> Opt
         || !document.suffix_valid
         || inventory.script.is_some() != document.script.is_some()
         || inventory.region.is_some() != document.region.is_some()
+        || inventory.suffix.len() != document.suffix.len()
+        || inventory
+            .suffix
+            .iter()
+            .zip(&document.suffix)
+            .any(|(left, right)| !left.eq_ignore_ascii_case(right))
     {
         return Some("inventory_document_locale_unverified");
     }
@@ -2003,6 +2063,12 @@ mod tests {
             (Some("fr"), Some("fr-FR")),
             (Some("sr-Latn"), Some("sr-RS")),
             (Some("fr-%%%"), Some("fr-CA")),
+            (Some("sl-rozaj"), Some("sl-biske")),
+            (Some("fr-FR"), Some("fr-FR-1901")),
+            (Some("en-US"), Some("en-US-u")),
+            (Some("en-US-u"), Some("en-US-u")),
+            (Some("en-US-1901"), Some("en-US-1996")),
+            (Some("en-US-u-nu-latn"), Some("en-US-u-nu-arab")),
             (Some("invalid!"), Some("en")),
             (None, Some("en")),
         ] {
@@ -2029,10 +2095,38 @@ mod tests {
     }
 
     #[test]
+    fn locale_suffix_structure_is_bounded_and_unsupported_forms_are_unverified() {
+        for (tag, valid) in [
+            ("en-US", true),
+            ("sl-rozaj-biske", true),
+            ("en-US-u-nu-latn", true),
+            ("en-US-x-example", true),
+            ("en-US-u", false),
+            ("en-US-x", false),
+            ("en-US-foo", false),
+            ("en-US-1901-1901", false),
+            ("en-US-u-ca-gregory-u-nu-latn", false),
+            ("en-US--1901", false),
+        ] {
+            assert_eq!(language_parts(tag).unwrap().suffix_valid, valid, "{tag}");
+        }
+        assert!(language_parts(&format!("en-{}", "x".repeat(256))).is_none());
+        assert_eq!(
+            locale_evidence_issue(Some("en-US-foo"), Some("en-GB")),
+            Some("inventory_document_locale_unverified")
+        );
+        assert_eq!(
+            locale_evidence_issue(Some("en-US-foo"), Some("fr-FR")),
+            Some("inventory_document_language_mismatch")
+        );
+    }
+
+    #[test]
     fn matching_locale_observations_do_not_prove_equivalence() {
         for (locale, language) in [
             ("en", "EN"),
-            ("EN-latn-us", "en-Latn-US-u-nu-latn"),
+            ("EN-latn-us-u-nu-latn", "en-Latn-US-u-nu-latn"),
+            ("sl-rozaj", "SL-ROZAJ"),
             ("fr-FR", "fr-FR"),
         ] {
             let (mut artifact, mut context) = attested_audit();

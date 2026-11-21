@@ -2221,6 +2221,16 @@ fn a_multilingual_seeded_crawl_requires_consistent_observed_languages() {
         ("fr-FR", true, None),
         ("en-US", false, Some("inventory_document_language_mismatch")),
         ("fr-CA", false, Some("inventory_document_locale_mismatch")),
+        (
+            "fr-FR-1901",
+            false,
+            Some("inventory_document_locale_unverified"),
+        ),
+        (
+            "fr-FR-u-ca-gregory",
+            false,
+            Some("inventory_document_locale_unverified"),
+        ),
         ("fr", false, Some("inventory_document_locale_unverified")),
         ("", false, Some("inventory_document_locale_unverified")),
     ] {
