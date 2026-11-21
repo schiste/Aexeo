@@ -1012,8 +1012,6 @@ fn extract_markdown_from_root(
         ContentContext {
             paragraphs: complete.then_some(paragraphs),
             block_ends: complete.then_some(block_ends),
-            input_limit: (!complete)
-                .then(|| "embedded HTML is not observed by the Markdown adapter".into()),
             ..Default::default()
         },
         link_count,
@@ -1033,13 +1031,6 @@ mod tests {
         assert!(input.headings.is_none());
         assert!(context.paragraphs.is_none());
         assert!(context.block_ends.is_none());
-        assert!(
-            context
-                .input_limit
-                .as_deref()
-                .unwrap()
-                .contains("embedded HTML")
-        );
         let (empty, empty_context) = markdown_input_with_context("x", "").unwrap();
         assert_eq!(empty.text.as_deref(), Some(""));
         assert_eq!(empty.headings, Some(vec![]));
