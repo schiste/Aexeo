@@ -1633,10 +1633,16 @@ classification are complete. Missing or mismatched classification is
 `not_checked`; it is never assumed to mean there are no lists. This API does
 not establish source completeness on the host's behalf.
 
-The CLI, content-change and EmDash/WASM entry points do not yet pass this
-observation. The new gate therefore remains `not_checked` through those paths
-until their adapters are integrated. Incremental candidate evaluation does not
-support it yet. Existing sentence-variance configurations retain their behavior.
+EmDash/WASM supplies this observation only when paragraph coverage is available
+and the host explicitly attests `list_structure_complete`; the host must account
+for omitted custom components before making that assertion. Invalid list nesting
+or list items omitted from paragraph projection remain `not_checked`. Configured
+plugins can use `listStructureCompleteByCollection` only for collections whose
+complete projection the host can establish.
+
+The CLI and content-change entry points do not yet pass this observation;
+incremental candidate evaluation does not support it yet. Existing
+sentence-variance configurations retain their behavior.
 
 ### Possible inline triples
 
