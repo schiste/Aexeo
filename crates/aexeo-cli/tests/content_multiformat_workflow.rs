@@ -393,6 +393,25 @@ fn numeric_citations_do_not_merge_sentences_across_markdown_and_html() {
 }
 
 #[test]
+fn multi_period_abbreviations_work_across_markdown_and_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, "version=1\nname='t'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=10\nabbreviations=['e.g.']\n").unwrap();
+    for (format, source) in [
+        ("html", "<p>First e.g. example. Next sentence.</p>"),
+        ("markdown", "First e.g. example. Next sentence."),
+    ] {
+        fs::write(&draft, source).unwrap();
+        let (report, _) = evaluate(&draft, &preset, format);
+        assert_eq!(
+            report["gates"][0]["measurements"]["sentence_count"], 2,
+            "{format}"
+        );
+    }
+}
+
+#[test]
 fn formatted_citations_preserve_sentence_count_in_both_formats() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/cross-adapter-citations.json")).unwrap();
