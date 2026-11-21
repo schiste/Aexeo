@@ -81,7 +81,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     let status: RevisionLocaleTelemetry["status"] = "error";
     try {
       const locale = observedLocale(await options.revisionLocale({ collection, id, revision }));
-      if (locale === null || locale.length > 128 || !/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/.test(locale)) {
+      if (locale === null || locale.length > 128 || locale.trim() !== locale || !/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/.test(locale)) {
         status = "unavailable";
         return { status: "not_checked", reason: "revision_locale_unavailable", revision } as const;
       }

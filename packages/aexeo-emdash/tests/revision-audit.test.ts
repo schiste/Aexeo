@@ -218,7 +218,7 @@ describe("revision audits", () => {
     expect(result).toMatchObject({ status: "evaluated", assurance: { runtime_providers: "revision_locale_and_link_observer_invoked", locale_source: "revision_provider" } });
   });
 
-  it.each([null, "", "private locale", "x".repeat(129), 42])("withholds an audit when the revision locale projection is unavailable: %s", async (value) => {
+  it.each([null, "", "private locale", "en\n", "x".repeat(129), 42])("withholds an audit when the revision locale projection is unavailable: %s", async (value) => {
     const { ctx } = host();
     const evaluate = vi.fn(async () => report);
     const telemetry = vi.fn();
