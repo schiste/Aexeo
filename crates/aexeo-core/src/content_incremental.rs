@@ -61,13 +61,14 @@ pub struct IncrementalBaseline {
 enum ProjectionMode {
     Plain,
     ParagraphText,
-    Adapted,
+    Adapted(crate::html_content_adapter::HtmlContentScope),
 }
 
 impl ProjectionMode {
     fn supports(self, media_type: &str) -> bool {
         media_type == "text/plain"
-            || (self == Self::Adapted && matches!(media_type, "text/markdown" | "text/html"))
+            || (matches!(self, Self::Adapted(_))
+                && matches!(media_type, "text/markdown" | "text/html"))
     }
 }
 
@@ -164,7 +165,7 @@ fn validate_preset(
                     | ContentGate::SentenceCharacterLength { .. }
                     | ContentGate::FinalNewline { .. }
             );
-        let structured_gate = mode == ProjectionMode::Adapted
+        let structured_gate = matches!(mode, ProjectionMode::Adapted(_))
             && matches!(
                 gate,
                 ContentGate::ProseSentenceLengthVariance { .. }
@@ -216,7 +217,7 @@ fn evaluate_item(
     let mut destinations = None;
     let mut heading_levels = None;
     let mut paragraph_list_items = None;
-    let mut structured_lists = if mode == ProjectionMode::Adapted
+    let mut structured_lists = if matches!(mode, ProjectionMode::Adapted(_))
         && item.media_type == "text/markdown"
         && preset
             .gates
@@ -229,7 +230,7 @@ fn evaluate_item(
         None
     };
     let (mut input, context, link_count) = match (mode, item.media_type.as_str()) {
-        (ProjectionMode::Adapted, "text/markdown") if wants_destinations => {
+        (ProjectionMode::Adapted(_), "text/markdown") if wants_destinations => {
             let adapted = crate::markdown_adapter::markdown_input_with_source_map_and_destinations(
                 &item.entity_id,
                 &item.source,
@@ -254,7 +255,7 @@ fn evaluate_item(
             destinations = adapted.destinations;
             (adapted.input, Some(adapted.context), count)
         }
-        (ProjectionMode::Adapted, "text/markdown")
+        (ProjectionMode::Adapted(_), "text/markdown")
             if classify_prose || wants_heading_levels || wants_literal =>
         {
             let (input, context, count, map) =
@@ -275,7 +276,7 @@ fn evaluate_item(
             let count = map.links_complete().then_some(count);
             (input, Some(context), count)
         }
-        (ProjectionMode::Adapted, "text/markdown") => {
+        (ProjectionMode::Adapted(_), "text/markdown") => {
             let (input, context, count) =
                 crate::markdown_adapter::markdown_input_with_observed_links(
                     &item.entity_id,
@@ -284,12 +285,12 @@ fn evaluate_item(
                 .map_err(|_| unavailable("Markdown projection failed"))?;
             (input, Some(context), count)
         }
-        (ProjectionMode::Adapted, "text/html") => {
+        (ProjectionMode::Adapted(html_scope), "text/html") => {
             let (adapted, levels, lists, literal_text) =
                 crate::html_content_adapter::html_content_with_literal_projection(
                     &item.entity_id,
                     &item.source,
-                    crate::html_content_adapter::HtmlContentScope::Document,
+                    html_scope,
                 )
                 .map_err(unavailable)?;
             if preset
@@ -301,7 +302,7 @@ fn evaluate_item(
                     crate::html_content_adapter::html_structured_lists(
                         &item.source,
                         projected,
-                        crate::html_content_adapter::HtmlContentScope::Document,
+                        html_scope,
                     )
                 });
             }
@@ -390,7 +391,11 @@ impl IncrementalBaseline {
         snapshot: CandidateSnapshot,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Adapted, None)
+        Self::prepare_adapted_with_html_scope(
+            snapshot,
+            preset,
+            crate::html_content_adapter::HtmlContentScope::Document,
+        )
     }
 
     /// Add explicit complete-or-unavailable metadata for every base identity.
@@ -401,7 +406,38 @@ impl IncrementalBaseline {
         metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Adapted, Some(metadata))
+        Self::prepare_adapted_with_metadata_and_html_scope(
+            snapshot,
+            metadata,
+            preset,
+            crate::html_content_adapter::HtmlContentScope::Document,
+        )
+    }
+
+    /// Select the HTML projection scope explicitly for this baseline and all
+    /// candidate evaluations. Markdown and plain text keep their adapted modes.
+    /// Missing or ambiguous main elements are not checked.
+    pub fn prepare_adapted_with_html_scope(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Adapted(html_scope), None)
+    }
+
+    /// Select an HTML scope together with host-provided per-item metadata.
+    pub fn prepare_adapted_with_metadata_and_html_scope(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode(
+            snapshot,
+            preset,
+            ProjectionMode::Adapted(html_scope),
+            Some(metadata),
+        )
     }
 
     fn prepare_with_mode(
@@ -864,7 +900,13 @@ mod tests {
         ] {
             let mut candidate = item("a", source, None);
             candidate.media_type = media.into();
-            let report = evaluate_item(&preset, &candidate, ProjectionMode::Adapted, None).unwrap();
+            let report = evaluate_item(
+                &preset,
+                &candidate,
+                ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+                None,
+            )
+            .unwrap();
             assert_eq!(report.gates[0].status, GateStatus::Passed, "{media}");
         }
     }
@@ -2377,6 +2419,109 @@ mod tests {
         html.items[0].source = "<ul hidden><li>unknown</li></ul>".into();
         html.items[0].sha256 = format!("{:x}", Sha256::digest(html.items[0].source.as_bytes()));
         assert!(IncrementalBaseline::prepare_adapted(html, preset).is_err());
+    }
+
+    #[test]
+    fn html_main_incremental_matches_full_and_rejects_missing_scope() {
+        use crate::html_content_adapter::{
+            HtmlContentScope, html_content_with_paragraph_list_items, html_structured_lists,
+        };
+        let (mut snapshot, _, mut change) = fixture();
+        for item in &mut snapshot.items {
+            item.media_type = "text/html".into();
+            item.source = "<nav><a href='/nav'>navigation ignored</a></nav><main><p>Before <a href='/article'>source</a>.</p><ul><li>one</li><li>two</li><li>three</li></ul></main><footer>footer ignored</footer>".into();
+            item.sha256 = format!("{:x}", Sha256::digest(item.source.as_bytes()));
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='main'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n").unwrap();
+        let markdown = snapshot.items.last_mut().unwrap();
+        markdown.media_type = "text/markdown".into();
+        markdown.source = "[source](/article)\n\n- one\n- two\n- three\n".into();
+        markdown.sha256 = format!("{:x}", Sha256::digest(markdown.source.as_bytes()));
+        let baseline = IncrementalBaseline::prepare_adapted_with_html_scope(
+            snapshot.clone(),
+            preset.clone(),
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        let mut next = snapshot.items[0].clone();
+        next.source = "<nav><a href='/nav'>ignored</a></nav><main><p>Après <a href='/article'>source</a>.</p><ul><li>one</li><li>two</li></ul></main><footer>ignored</footer>".into();
+        next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        );
+        update.media_type = next.media_type.clone();
+        change.entries.push(update);
+        let (adapted, _, _) = html_content_with_paragraph_list_items(
+            &next.entity_id,
+            &next.source,
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        let lists = html_structured_lists(
+            &next.source,
+            adapted.input.text.as_deref().unwrap(),
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        let caps = ContentEvaluationContext {
+            adapter: Some(&adapted.context),
+            link_count: Some(adapted.destinations.len()),
+            ..Default::default()
+        };
+        let expected = preset
+            .evaluate_with_structured_lists(
+                &adapted.input,
+                &caps,
+                None,
+                None,
+                true,
+                None,
+                Some(&lists),
+            )
+            .unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports, reused, ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("expected evaluated");
+        };
+        assert_eq!(
+            serde_json::to_value(&reports["a"]).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(reports["a"].gates[2].measurements["link_count"], 1);
+        assert!(reused > 0);
+
+        for invalid in [
+            "<p>No main</p>",
+            "<main>One</main><main>Two</main>",
+            "<main hidden>Hidden</main>",
+        ] {
+            next.source = invalid.into();
+            next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+            change.entries[0].after = Some(state(&next));
+            assert!(
+                matches!(
+                    baseline.evaluate(&change, std::slice::from_ref(&next)),
+                    IncrementalEvaluation::NotChecked { .. }
+                ),
+                "{invalid}"
+            );
+        }
+        snapshot.items[0].source = "<p>No main</p>".into();
+        snapshot.items[0].sha256 =
+            format!("{:x}", Sha256::digest(snapshot.items[0].source.as_bytes()));
+        assert!(
+            IncrementalBaseline::prepare_adapted_with_html_scope(
+                snapshot,
+                preset,
+                HtmlContentScope::Main,
+            )
+            .is_err()
+        );
     }
 
     #[test]
