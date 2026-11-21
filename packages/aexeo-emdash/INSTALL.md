@@ -795,3 +795,28 @@ absence were observed; `unavailable_fields` overrides it. Missing keys outside
 the observed set are unknown. Keep the entire input unchanged in each result:
 Aexeo marks the gate `not_checked` if the coverage or projected input changed.
 Providers must handle unknown values rather than treating them as absent.
+
+### List structure for fragments and historical revisions
+
+The prose-only rhythm and list-count gates require a complete list projection.
+Attest it separately for current fragments, whole historical documents and
+historical fragments. For example:
+
+```ts
+contentPreset: {
+  name: "article",
+  fragmentFieldsByCollection: { posts: { intro: "prose-variance-review" } },
+  fragmentListStructureCompleteByCollection: { posts: ["intro"] },
+  revisionListStructureCompleteByCollection: ["posts"],
+  revisionFragmentListStructureCompleteByCollection: { posts: ["intro"] },
+}
+```
+
+These options are independent of `listStructureCompleteByCollection`, which
+only covers current whole documents. Enable each option only after verifying
+that the corresponding host projection preserves all list boundaries,
+including mapped custom components; historical attestations must cover older
+schemas too. An omitted or mismatched collection or field remains unassessed.
+An attestation does not override incomplete body capabilities caused by
+unknown components. These gates provide editorial prompts, not a factuality
+check or authorization to publish.

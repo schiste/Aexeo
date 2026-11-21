@@ -67,7 +67,7 @@ export interface AexeoPluginOptions {
   /** Request historical revision access on a compatible EmDash host. */
   revisionAudits?: boolean;
   /** Add a portable content preset to configured-mode evaluation. */
-  contentPreset?: { name: string; autoAuditFragments?: boolean; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; fragmentFieldsByCollection?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[] };
+  contentPreset?: { name: string; autoAuditFragments?: boolean; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; fragmentFieldsByCollection?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[]; fragmentListStructureCompleteByCollection?: Record<string, readonly string[]>; revisionListStructureCompleteByCollection?: readonly string[]; revisionFragmentListStructureCompleteByCollection?: Record<string, readonly string[]> };
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
@@ -195,6 +195,9 @@ export function aexeoPlugin(
               ...options.contentPreset,
               ...(options.contentPreset.collections === undefined ? {} : { collections: [...options.contentPreset.collections] }),
               ...(options.contentPreset.listStructureCompleteByCollection === undefined ? {} : { listStructureCompleteByCollection: [...options.contentPreset.listStructureCompleteByCollection] }),
+              ...(options.contentPreset.fragmentListStructureCompleteByCollection === undefined ? {} : { fragmentListStructureCompleteByCollection: Object.fromEntries(Object.entries(options.contentPreset.fragmentListStructureCompleteByCollection).map(([collection, fields]) => [collection, Array.isArray(fields) ? [...fields] : []])) }),
+              ...(options.contentPreset.revisionListStructureCompleteByCollection === undefined ? {} : { revisionListStructureCompleteByCollection: [...options.contentPreset.revisionListStructureCompleteByCollection] }),
+              ...(options.contentPreset.revisionFragmentListStructureCompleteByCollection === undefined ? {} : { revisionFragmentListStructureCompleteByCollection: Object.fromEntries(Object.entries(options.contentPreset.revisionFragmentListStructureCompleteByCollection).map(([collection, fields]) => [collection, Array.isArray(fields) ? [...fields] : []])) }),
               ...(options.contentPreset.sources === undefined
                 ? {}
                 : { sources: { ...options.contentPreset.sources } }),

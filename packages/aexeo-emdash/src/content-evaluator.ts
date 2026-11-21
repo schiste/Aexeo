@@ -21,6 +21,12 @@ export interface ContentPresetOptions {
   collections?: readonly string[];
   /** Host attests complete list projection for these collections, including custom blocks. */
   listStructureCompleteByCollection?: readonly string[];
+  /** Host attests complete list projection for individual current fields. */
+  fragmentListStructureCompleteByCollection?: Record<string, readonly string[]>;
+  /** Host attests historical whole-document list projection, including old schemas. */
+  revisionListStructureCompleteByCollection?: readonly string[];
+  /** Host attests historical list projection for individual fields. */
+  revisionFragmentListStructureCompleteByCollection?: Record<string, readonly string[]>;
 }
 
 /** Trusted host code, installed explicitly at runtime; presets never load providers. */
