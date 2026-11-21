@@ -25,6 +25,18 @@ export type RevisionLinkObservationProvider = (request: {
   locale: string | undefined; preset: string; destinations: readonly string[];
 }) => Promise<BoundLinkObservations["observations"]>;
 
+/** Trusted host projection for the locale of the exact requested revision.
+ * The host must establish that the value belongs to that revision. */
+export type RevisionLocaleProvider = (request: {
+  collection: string; id: string; revision: string;
+}) => Promise<string | null>;
+
+/** Aggregate-only observation of the locale provider; no content or identifiers. */
+export interface RevisionLocaleTelemetry {
+  duration_ms: number;
+  status: "success" | "unavailable" | "error";
+}
+
 export interface RevisionAuditOptions {
   preset?: ContentPresetOptions | undefined;
   blockMappings?: CustomBlockMappings | undefined;
@@ -35,12 +47,13 @@ export interface RevisionAuditOptions {
   evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[], linkObservations?: BoundLinkObservations) => Promise<ContentReport>;
   projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>;
   revisionLinkObservations?: RevisionLinkObservationProvider | undefined;
+  revisionLocale?: RevisionLocaleProvider | undefined;
+  onRevisionLocaleTelemetry?: ((event: RevisionLocaleTelemetry) => void) | undefined;
   onLinkProviderTelemetry?: ((event: LinkProviderTelemetry) => void) | undefined;
   onContentEvaluationTelemetry?: ((event: ContentEvaluationTelemetry) => void) | undefined;
 }
 
 const reportKey = (id: string) => `revision-audit:${id}`;
-const LIMITATION = "Only local configured content checks run; runtime providers are not invoked. Rendered page metadata and source freshness are not verified; the preset locale is taken from the current record; passing does not establish factual accuracy or currentness and does not authorize publication.";
 
 /** Audit the exact host-provided historical data; never read or write article content. */
 export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRequest, options: RevisionAuditOptions) {
@@ -62,7 +75,24 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   if (snapshot.data === null || typeof snapshot.data !== "object" || Array.isArray(snapshot.data)) {
     return { status: "not_checked", reason: "revision_data_invalid", revision } as const;
   }
-  const localeAtAudit = observedLocale(current.locale);
+  let localeAtAudit = observedLocale(current.locale);
+  if (options.revisionLocale) {
+    const started = options.onRevisionLocaleTelemetry ? performance.now() : 0;
+    let status: RevisionLocaleTelemetry["status"] = "error";
+    try {
+      const locale = observedLocale(await options.revisionLocale({ collection, id, revision }));
+      if (locale === null || locale.length > 128 || locale.trim() !== locale || !/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*$/.test(locale)) {
+        status = "unavailable";
+        return { status: "not_checked", reason: "revision_locale_unavailable", revision } as const;
+      }
+      localeAtAudit = locale;
+      status = "success";
+    } catch {
+      return { status: "not_checked", reason: "revision_locale_read_failed", revision } as const;
+    } finally {
+      if (options.onRevisionLocaleTelemetry) emitTelemetry(options.onRevisionLocaleTelemetry, { duration_ms: performance.now() - started, status });
+    }
+  }
   const field = input.field;
   const fragmentPreset = field === undefined ? undefined : selectFragmentPreset(options.preset, collection, field);
   if (field !== undefined && !fragmentPreset) return { status: "not_checked", reason: "fragment_preset_not_configured", revision, field } as const;
@@ -120,15 +150,27 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   }
   const latest = await currentOrUnknown(ctx, collection, id);
   const auditId = crypto.randomUUID();
+  const localeProviderInvoked = options.revisionLocale !== undefined;
+  const runtimeProviders = localeProviderInvoked
+    ? revisionObserverInvoked ? "revision_locale_and_link_observer_invoked" as const : "revision_locale_provider_invoked" as const
+    : revisionObserverInvoked ? "revision_link_observer_invoked" as const : "not_invoked" as const;
+  const providerLimitation = {
+    not_invoked: "Only local configured content checks run; runtime providers are not invoked.",
+    revision_link_observer_invoked: "An explicitly configured revision link observer ran; other runtime providers were not invoked.",
+    revision_locale_provider_invoked: "An explicitly configured revision locale provider ran; other runtime providers were not invoked.",
+    revision_locale_and_link_observer_invoked: "Explicitly configured revision locale and link providers ran; other runtime providers were not invoked.",
+  }[runtimeProviders];
+  const localeLimitation = localeProviderInvoked ? "the preset locale is supplied by the host for the requested revision" : "the preset locale is taken from the current record";
+  const limitation = `${providerLimitation} Rendered page metadata and source freshness are not verified; ${localeLimitation}; passing does not establish factual accuracy or currentness and does not authorize publication.`;
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
-    preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation: revisionObserverInvoked ? LIMITATION.replace("Only local configured content checks run; runtime providers are not invoked.", "An explicitly configured revision link observer ran; other runtime providers were not invoked.") : LIMITATION,
+    preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation,
     assurance: {
       purpose: "editorial_review" as const,
       publication_authorization: "not_granted" as const,
       rendered_page: "not_checked" as const,
       source_freshness: "not_checked" as const,
-      runtime_providers: revisionObserverInvoked ? "revision_link_observer_invoked" as const : "not_invoked" as const,
-      locale_source: "current_record" as const,
+      runtime_providers: runtimeProviders,
+      locale_source: localeProviderInvoked ? "revision_provider" as const : "current_record" as const,
     },
     input_coverage: {
       body: {

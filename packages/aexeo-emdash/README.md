@@ -294,6 +294,18 @@ creating or retrieving the audit: `changed` calls for a new audit, and `unknown`
 means either locale was unavailable or the stored report predates this field.
 Even `unchanged` does not establish the historical revision's locale.
 
+Hosts with a trustworthy historical locale projection can pass the runtime-only
+`revisionLocale: async ({ collection, id, revision }) => locale` provider to
+`createPlugin`. It is called for the exact requested revision before preset
+selection. Its locale determines the language-specific preset and is reported
+with `assurance.locale_source: "revision_provider"`; the host remains responsible
+for its provenance and revision binding. A missing, malformed or failed result
+returns `not_checked` rather than silently using the current locale. The optional
+`onRevisionLocaleTelemetry` receives only a status and duration. `locale_status`
+continues to compare the chosen locale with the latest current record; a mismatch
+need not mean the historical projection is wrong. Without a provider, the existing
+current-record behavior remains unchanged.
+
 The findings page can create or retrieve an audit by revision and record a
 review against an individual finding. `set_review` and `get_review` expose the
 same operations to consented MCP clients. Saving requires `plugins:manage` and

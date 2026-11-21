@@ -787,6 +787,16 @@ pass covers only the configured checks and is not an overall quality score. A fa
 error; it must not be interpreted as a clean assessment. `aexeo.preset_coverage`
 logs aggregate counts without routes, gate identifiers, reasons or content.
 
+For language-specific historical checks, a trusted host can pass a runtime-only
+`revisionLocale: async ({ collection, id, revision }) => locale` provider as the
+second argument to `createPlugin`. The value selects the revision's locale-specific
+preset and is recorded as a host-provided projection, not independently verified.
+Unavailable, invalid or failed projections yield `not_checked`; no current-locale
+fallback is used when the provider is configured. Without it, the existing current
+record locale remains the fallback. The optional `onRevisionLocaleTelemetry`
+receives only a status and duration. `locale_status` compares the selected locale
+to the latest current record and does not prove historical correctness.
+
 If a historical revision has missing or malformed data instead of an object,
 the revision audit returns `not_checked` with reason `revision_data_invalid`. A failed initial CMS read returns `not_checked` with reason `revision_read_failed`, without exposing the host error. If a later current-record read fails, an evaluated report remains available but revision and locale status are `unknown` until a subsequent read succeeds.
 It does not evaluate or store a report for that revision.
