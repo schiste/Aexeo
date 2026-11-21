@@ -480,6 +480,11 @@ registry before considering the release delivered.
   establish evidence authenticity, freshness or publication authorization.
   The optional cross-process test checks that the native Aethyme comparator
   also rejects unsuccessful, timed-out and missing fresh process status.
+  The draft Python comparator validates offline host options and cross-checks
+  the HTML scope extension against them; the Rust candidate verifier also
+  compares that extension with its independently selected scope
+  ([PR #703](https://github.com/schiste/Aexeo/pull/703)). These checks do not
+  authenticate the options, evaluator, inputs or publication boundary.
   The independent draft Python comparator also requires an explicitly supplied
   successful fresh process exit and no timeout; these remain caller assertions,
   not authenticated execution or publication authorization.
