@@ -95,8 +95,6 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     if not isinstance(policy, dict) or 'name' not in policy:
         raise VerificationError('resolved policy name is unavailable')
     text(policy['name'], empty=False)
-    if not policy['name'].strip():
-        raise VerificationError('resolved policy name is empty')
     host_options = parse(artifacts['host_options'])
     html_scope = validate_host_options(host_options)
     change = parse(artifacts['change'])
