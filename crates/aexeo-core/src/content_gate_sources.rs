@@ -264,6 +264,90 @@ pub fn verify_declared_content<P: IndependentContent>(
     Ok(())
 }
 
+/// Check declared file-backed states against the corresponding candidate bytes.
+///
+/// The host selects a confined provider and must establish snapshot provenance,
+/// completeness, freshness and publication atomicity. URI sources are unavailable.
+/// This helper does not authorize publication or evaluate the content.
+pub fn verify_candidate_file_states<P: ConfinedContentFiles>(
+    change: &Change,
+    base: &crate::content_candidate::CandidateSnapshot,
+    after: &[crate::content_candidate::CandidateItem],
+    provider: &mut P,
+    max_state_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<(), SourceError> {
+    use aexeo_contracts::content_gate_protocol::Operation;
+    use std::collections::BTreeMap;
+
+    crate::content_candidate::overlay_candidate(base, change, after)
+        .map_err(|_| SourceError::InvalidChange)?;
+    let previous: BTreeMap<&str, _> = base
+        .items
+        .iter()
+        .map(|item| (item.entity_id.as_str(), item))
+        .collect();
+    let projected: BTreeMap<&str, _> = after
+        .iter()
+        .map(|item| (item.entity_id.as_str(), item))
+        .collect();
+    let mut remaining = max_total_bytes;
+    let mut buffer = [0u8; 8192];
+    for entry in &change.entries {
+        let old_id = if matches!(entry.operation, Operation::Rename) {
+            entry
+                .previous_entity_id
+                .as_deref()
+                .ok_or(SourceError::InvalidChange)?
+        } else {
+            &entry.entity_id
+        };
+        for (state, item) in [
+            (entry.before.as_ref(), previous.get(old_id)),
+            (
+                entry.after.as_ref(),
+                projected.get(entry.entity_id.as_str()),
+            ),
+        ] {
+            let Some(state) = state else { continue };
+            let expected = item.ok_or(SourceError::InvalidChange)?.source.as_bytes();
+            if expected.len() > max_state_bytes || expected.len() > remaining {
+                return Err(SourceError::TooLarge);
+            }
+            remaining -= expected.len();
+            if state.inline.is_some() {
+                continue;
+            }
+            let relative = state.file.as_deref().ok_or(SourceError::Unavailable)?;
+            let root = change
+                .content_root
+                .as_deref()
+                .ok_or(SourceError::InvalidChange)?;
+            let mut reader = provider
+                .open(Path::new(root), Path::new(relative))
+                .map_err(|_| SourceError::Unavailable)?;
+            let mut offset = 0usize;
+            loop {
+                let count = reader
+                    .read(&mut buffer)
+                    .map_err(|_| SourceError::Unavailable)?;
+                if count == 0 {
+                    break;
+                }
+                let end = offset.checked_add(count).ok_or(SourceError::TooLarge)?;
+                if expected.get(offset..end) != Some(&buffer[..count]) {
+                    return Err(SourceError::DigestMismatch);
+                }
+                offset = end;
+            }
+            if offset != expected.len() {
+                return Err(SourceError::DigestMismatch);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// An evaluated entry's proposed text; a deletion has no proposed text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedEntry {
@@ -359,6 +443,71 @@ mod tests {
                 {"entity_id": "deleted", "operation": "delete", "media_type": "text/plain"}
             ]
         })).unwrap()
+    }
+
+    #[test]
+    fn candidate_file_states_match_both_snapshots_with_confined_bounded_reads() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        let mut input = change();
+        input.entries.retain(|entry| entry.entity_id == "file");
+        input.entries[0].before = input.entries[0].after.clone();
+        let item = CandidateItem {
+            entity_id: "file".into(),
+            public_path: "/file".into(),
+            media_type: "text/markdown".into(),
+            revision: None,
+            sha256: input.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        };
+        let base = CandidateSnapshot {
+            scope: "published".into(),
+            site_id: "site".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![item.clone()],
+        };
+        let after = vec![item];
+        let mut files = Fixture {
+            bytes: b"abc".to_vec(),
+            opens: 0,
+        };
+        assert_eq!(
+            verify_candidate_file_states(&input, &base, &after, &mut files, 3, 6),
+            Ok(())
+        );
+        assert_eq!(files.opens, 2);
+        for bytes in [b"bad".as_slice(), b"ab".as_slice(), b"abcd".as_slice()] {
+            files.bytes = bytes.to_vec();
+            assert_eq!(
+                verify_candidate_file_states(&input, &base, &after, &mut files, 8, 16),
+                Err(SourceError::DigestMismatch)
+            );
+        }
+        files.bytes = b"abc".to_vec();
+        assert_eq!(
+            verify_candidate_file_states(&input, &base, &after, &mut files, 2, 6),
+            Err(SourceError::TooLarge)
+        );
+        assert_eq!(
+            verify_candidate_file_states(&input, &base, &after, &mut files, 3, 5),
+            Err(SourceError::TooLarge)
+        );
+        let mut uri = input.clone();
+        let state = uri.entries[0].before.as_mut().unwrap();
+        state.file = None;
+        state.uri = Some("https://example.invalid/old".into());
+        assert_eq!(
+            verify_candidate_file_states(&uri, &base, &after, &mut files, 3, 6),
+            Err(SourceError::Unavailable)
+        );
+        let mut altered = base.clone();
+        altered.items[0].source = "other".into();
+        assert_eq!(
+            verify_candidate_file_states(&input, &altered, &after, &mut files, 8, 16),
+            Err(SourceError::InvalidChange)
+        );
     }
 
     #[cfg(target_os = "linux")]
