@@ -346,9 +346,15 @@ host. Each fragment has its own gate statuses, findings and source locations in
 the document panel. A missing field, invalid mapping or evaluation error is
 shown as not checked; an empty observed field is evaluated as empty. The field
 snapshot is taken before asynchronous CMS lookups and results for an older
-save cannot overwrite a newer one. This feature evaluates local inputs only:
-external gate, evidence and link-observation providers are not called for
-fragments. Gates needing unavailable inputs are not checked. It adds one content
-evaluation per mapped field and does not establish factual accuracy, rendered
+save cannot overwrite a newer one. External gate and evidence providers are not called for fragments. An optional,
+separately installed `fragmentLinkObservations` runtime callback can observe
+links for a configured field when its preset requests reachability. It receives
+`field`, `collection`, `route`, `locale`, `preset`, and ordered `destinations`;
+this opt-in may disclose URLs to the host. The host controls consent, network
+policy, budgets and freshness. Without a complete projection or valid response,
+the gate remains not checked. The existing article and revision observers do not
+implicitly run for fragments. Aggregate link-provider telemetry contains only
+status and duration. This adds an evaluation per mapped field (and another for
+fields with successful link observations) and does not establish factual accuracy, rendered
 page quality or publication readiness. Coverage telemetry contains aggregate
 counts, without field names or content.
