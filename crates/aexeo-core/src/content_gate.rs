@@ -208,16 +208,49 @@ fn for_each_sentence(
                 let Some(word) = abbr.strip_suffix('.') else {
                     return false;
                 };
-                let Some(start) = offset.checked_sub(word.len()) else {
-                    return false;
-                };
-                start >= segment_start
-                    && text.get(start..offset) == Some(word)
-                    && (start == segment_start
-                        || text[..start]
-                            .chars()
-                            .next_back()
-                            .is_some_and(char::is_whitespace))
+                // Preserve the existing single-period behavior. Multi-period
+                // tokens need a complete look-ahead so an internal dot cannot
+                // split the abbreviation, including across adapter blocks.
+                if !word.contains('.') {
+                    let Some(start) = offset.checked_sub(word.len()) else {
+                        return false;
+                    };
+                    return start >= segment_start
+                        && text.get(start..offset) == Some(word)
+                        && (start == segment_start
+                            || text[..start]
+                                .chars()
+                                .next_back()
+                                .is_some_and(char::is_whitespace));
+                }
+                abbr.match_indices('.').any(|(position, _)| {
+                    let Some(start) = offset.checked_sub(position) else {
+                        return false;
+                    };
+                    let Some(end) = start.checked_add(abbr.len()) else {
+                        return false;
+                    };
+                    start >= segment_start
+                        && text.get(start..end) == Some(abbr.as_str())
+                        && (start == segment_start
+                            || text[..start]
+                                .chars()
+                                .next_back()
+                                .is_some_and(char::is_whitespace))
+                        && block_ends
+                            .get(next_block)
+                            .is_none_or(|&boundary| boundary >= end)
+                        && text
+                            .get(end..)
+                            .and_then(|suffix| suffix.chars().next())
+                            .is_none_or(|ch| {
+                                ch.is_whitespace()
+                                    || matches!(
+                                        ch,
+                                        ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '»' | '”'
+                                    )
+                            })
+                })
             });
         let delimiter =
             !decimal_point && !abbreviation && ch.is_none_or(|ch| delimiters.contains(ch));
@@ -1838,14 +1871,17 @@ impl ContentPreset {
                     if abbreviations.iter().any(|abbr| {
                         abbr.strip_suffix('.').is_none_or(|word| {
                             word.is_empty()
-                                || word.contains('.')
+                                || word.split('.').any(str::is_empty)
                                 || word.chars().any(char::is_whitespace)
+                                || (word.contains('.')
+                                    && (abbr.len() > 128
+                                        || word.bytes().filter(|&byte| byte == b'.').count() >= 16))
                         })
                     }) || abbreviations.iter().collect::<BTreeSet<_>>().len()
                         != abbreviations.len() =>
                 {
                     bail!(
-                        "sentence abbreviations must be unique single tokens ending in a period for {}",
+                        "sentence abbreviations must be unique single tokens ending in a period (multi-period: at most 128 bytes and 16 periods) for {}",
                         gate.id()
                     )
                 }
@@ -4971,6 +5007,76 @@ mod tests {
                 (1, 2),
                 "{kind}"
             );
+        }
+    }
+
+    #[test]
+    fn configured_multi_period_abbreviations_preserve_sentence_boundaries() {
+        for kind in ["sentence_length", "sentence_character_length"] {
+            let limit = if kind == "sentence_length" {
+                "max_words=2"
+            } else {
+                "max_chars=10"
+            };
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='{kind}'\n{limit}\nabbreviations=['e.g.', 'U.S.', 'é.g.']\n"
+            )).unwrap();
+            for text in [
+                "First e.g. example. Next.",
+                "First e.g., example. Next.",
+                "First U.S. example. Next.",
+                "First é.g. example. Next.",
+            ] {
+                let report = preset.evaluate(&literal_input(text)).unwrap();
+                assert_eq!(
+                    report.gates[0].measurements["sentence_count"], 2,
+                    "{kind}: {text}"
+                );
+                assert_eq!(
+                    (
+                        report.gates[0].findings[0].line,
+                        report.gates[0].findings[0].column
+                    ),
+                    (1, 1)
+                );
+            }
+            let unicode = preset.evaluate(&literal_input("é. Next.")).unwrap();
+            assert_eq!(unicode.gates[0].measurements["sentence_count"], 2);
+            let partial = preset
+                .evaluate(&literal_input("First e.g.fake. Next."))
+                .unwrap();
+            assert_eq!(partial.gates[0].measurements["sentence_count"], 4);
+            let context = ContentContext {
+                block_ends: Some(vec![8]),
+                ..Default::default()
+            };
+            let split = preset
+                .evaluate_with_context(
+                    &literal_input("First e.g. example. Next."),
+                    None,
+                    None,
+                    Some(&context),
+                )
+                .unwrap();
+            assert!(
+                split.gates[0].measurements["sentence_count"] > 2,
+                "a token spanning adapter blocks must not suppress boundaries"
+            );
+        }
+        let too_many_periods = "e.".repeat(17);
+        let too_many_bytes = format!("{}.x.", "a".repeat(126));
+        for invalid in [
+            "e..g.",
+            ".eg.",
+            "e.g",
+            "e. g.",
+            &too_many_periods,
+            &too_many_bytes,
+        ] {
+            let source = format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=2\nabbreviations=['{invalid}']\n"
+            );
+            assert!(ContentPreset::from_toml(&source).is_err(), "{invalid}");
         }
     }
 
