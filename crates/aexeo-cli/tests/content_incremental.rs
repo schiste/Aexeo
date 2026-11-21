@@ -325,3 +325,54 @@ fn metadata_only_update_reevaluates_the_unchanged_source() {
     assert_eq!(result["reused"], 0);
     assert_eq!(result["reports"]["b"]["gates"][0]["status"], "failed");
 }
+
+fn run_stdin(input: &[u8]) -> std::process::Output {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut process = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["content-incremental", "--input", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    process.stdin.take().unwrap().write_all(input).unwrap();
+    process.wait_with_output().unwrap()
+}
+
+#[test]
+fn documented_batch_matches_for_stdin_and_file_inputs() {
+    let fixture = include_bytes!("fixtures/incremental-batch.json");
+    let batch: Value = serde_json::from_slice(fixture).unwrap();
+    let via_file = run(&batch, &[]);
+    let via_stdin = run_stdin(fixture);
+    assert_eq!(
+        via_stdin.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&via_stdin.stderr)
+    );
+    assert_eq!(via_file.status.code(), via_stdin.status.code());
+    assert_eq!(lines(&via_file), lines(&via_stdin));
+    let result = &lines(&via_stdin)[0]["result"];
+    assert_eq!(result["status"], "composed");
+    assert_eq!(result["items"]["evaluated"], 1);
+    assert_eq!(result["items"]["reused"], 1);
+    assert_eq!(result["collection"]["report"]["summary"]["failed"], 0);
+}
+
+#[test]
+fn stdin_rejects_duplicate_keys_and_oversize_without_results() {
+    let fixture = include_str!("fixtures/incremental-batch.json");
+    let duplicate = fixture.replace(
+        "\"base_metadata\": {",
+        "\"base_metadata\": { \"existing\": {},",
+    );
+    let output = run_stdin(duplicate.as_bytes());
+    assert_ne!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    let output = run_stdin(&vec![b' '; 16 * 1024 * 1024 + 1]);
+    assert_ne!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("size limit"));
+}

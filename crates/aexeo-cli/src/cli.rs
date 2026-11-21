@@ -82,7 +82,7 @@ pub fn build_cli() -> Command {
         .subcommand(
             Command::new("content-incremental")
                 .about("Experimentally evaluate independent proposals against one reusable content baseline")
-                .arg(Arg::new("input").long("input").required(true).help("Versioned JSON batch containing private content"))
+                .arg(Arg::new("input").long("input").required(true).help("Versioned JSON batch file, or - for stdin; may contain private content"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timing and counts to stderr")),
         )
         .subcommand(
