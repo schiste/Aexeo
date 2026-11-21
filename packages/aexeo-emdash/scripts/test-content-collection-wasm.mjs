@@ -364,6 +364,27 @@ assert.equal(varianceReport.gates[0].measurements.windows_checked, 1);
 assert.equal(varianceReport.source_locations[0].utf16_offset, 0);
 console.log("Seeded variance is reproducible across CLI and WASM");
 
+const paragraphVariancePreset = `version=1
+name="paragraph-variance"
+[[gates]]
+id="variance"
+kind="sentence_length_variance"
+window_size=4
+min_stddev_words=2
+reset_at_paragraph=true
+`;
+const paragraphVarianceDocument = { route: "/paragraph-variance", title: "Variance", body: [
+  { children: [{ _type: "span", text: "One two three. Four five six. Seven eight nine. Ten eleven twelve." }] },
+  { children: [{ _type: "span", text: "Short paragraph." }] },
+] };
+const paragraphVariance = await evaluateContent(paragraphVarianceDocument, "paragraph-variance", { "paragraph-variance": paragraphVariancePreset });
+assert.equal(paragraphVariance.gates[0].status, "not_checked");
+assert.equal(paragraphVariance.gates[0].measurements.windows_checked, 1);
+assert.equal(paragraphVariance.gates[0].measurements.paragraphs_without_windows, 1);
+assert.equal(paragraphVariance.gates[0].findings.length, 1);
+assert.equal(paragraphVariance.source_locations[0].utf16_offset, 0);
+console.log("Paragraph-scoped variance retains findings and reports incomplete coverage in WASM");
+
 // Numeric reference markers following a year must not be parsed as decimals
 // joining adjacent sentences. The original Portable Text remains unchanged.
 const citationChildren = [];

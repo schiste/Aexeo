@@ -224,6 +224,10 @@ registry before considering the release delivered.
   two-parse baseline ([PR #47](https://github.com/schiste/Aexeo/pull/47)).
 - [x] Opt-in per-gate timing telemetry for local content and crawls in resolved preset
   order; the event excludes gate IDs and content.
+- [x] Opt-in paragraph-boundary reset for sentence variance windows, with
+  explicit partial coverage when paragraphs cannot form a window. Existing
+  cross-paragraph presets retain their behavior; adapter paragraphs do not
+  necessarily distinguish list items from prose.
 - [x] Configurable sentence-length heuristic and opt-in composed preset ([PR #29](https://github.com/schiste/Aexeo/pull/29)).
 - [x] Optional, exact case-sensitive abbreviation exceptions for sentence length
   ([PR #125](https://github.com/schiste/Aexeo/pull/125)); they do not provide
