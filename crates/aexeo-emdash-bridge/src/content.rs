@@ -835,6 +835,12 @@ pub fn evaluate_content_with_list_completeness(
     list_structure_complete: bool,
 ) -> anyhow::Result<ContentReport> {
     let lists = portable_text_structured_lists(document, list_structure_complete);
+    let paragraph_list_items = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::ProseSentenceLengthVariance { .. }))
+        .then(|| portable_text_paragraph_list_items(document, list_structure_complete))
+        .flatten();
     let [text, headings, paragraphs, links] = capabilities;
     let (mut input, mut context, link_count) = content_input_with_context(document);
     if text
@@ -870,7 +876,7 @@ pub fn evaluate_content_with_list_completeness(
             .filter_map(|block| heading_level(&block.style))
             .collect()
     });
-    preset.evaluate_with_structured_lists(
+    preset.evaluate_with_paragraph_list_items(
         &input,
         &ContentEvaluationContext {
             adapter: Some(&context),
@@ -884,6 +890,7 @@ pub fn evaluate_content_with_list_completeness(
         true,
         None,
         lists.as_deref(),
+        paragraph_list_items.as_deref(),
     )
 }
 
@@ -1008,6 +1015,41 @@ mod tests {
         assert_eq!(
             portable_text_paragraph_list_items(&empty, true),
             Some(vec![])
+        );
+    }
+
+    #[test]
+    fn prose_variance_requires_complete_portable_text_list_observation() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"children":[{"_type":"span","text":"One two. Three four. Five six."}]},{"listItem":"bullet","level":1,"children":[{"_type":"span","text":"List one. List two. List three."}]},{"children":[{"_type":"span","text":"Seven eight. Nine ten. Eleven twelve."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='v'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+        let run = |complete, capabilities| {
+            evaluate_content_with_list_completeness(
+                &document,
+                &preset,
+                None,
+                capabilities,
+                None,
+                None,
+                complete,
+            )
+            .unwrap()
+        };
+        let unknown = run(false, [true; 4]);
+        assert_eq!(unknown.gates[0].status, GateStatus::NotChecked);
+        assert!(unknown.gates[0].findings.is_empty());
+        let missing_paragraphs = run(true, [true, true, false, true]);
+        assert_eq!(missing_paragraphs.gates[0].status, GateStatus::NotChecked);
+        let report = run(true, [true; 4]);
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["list_paragraphs_excluded"], 1);
+        assert_eq!(report.gates[0].measurements["windows_checked"], 2);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(
+            locations
+                .iter()
+                .map(|item| item.block_index)
+                .collect::<Vec<_>>(),
+            vec![0, 2]
         );
     }
 
