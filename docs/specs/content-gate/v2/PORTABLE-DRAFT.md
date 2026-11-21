@@ -125,6 +125,17 @@ inline bytes as well as SHA-256. It does not fetch URIs or require an undeclared
 before state. Hosts must obtain and bind the streams to the intended snapshot;
 these reads do not authenticate provenance or guarantee atomic publication.
 
+The experimental Rust helper `verify_draft_passing_candidate_with_content`
+reconstructs the candidate revision digests and Aexeo decision artifacts from
+an independently supplied candidate context, then verifies the required passing
+checks and independently supplied content streams. An incomplete declared base,
+changed candidate, policy, scope, evidence or content fails the comparison. It
+inherits the candidate implementation's inline-state restriction and Aexeo's
+non-portable artifact encodings. The caller must acquire and trust the context,
+bytes and optional evidence independently, establish snapshot completeness and
+freshness, and protect the publication boundary. The helper does not establish
+those properties or grant publication authorization.
+
 ## Independent experimental comparator
 
 `verify_portable_verdict.py` compares a previous envelope to an independently
