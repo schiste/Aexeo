@@ -105,7 +105,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   no-space scripts with every configured opening length, including one word,
   on both consecutive and windowed paths. Assert unsupported boundaries yield
   `not_checked` rather than a pass or finding; exercise the shared CLI and
-  EmDash projections where applicable.
+  EmDash projections where applicable. For token recognition, also test tokens
+  beginning immediately after adjacent or duplicate block boundaries and tokens
+  split across Portable Text spans; check punctuation and mapped positions in
+  Markdown, HTML and rebuilt WASM where those adapters apply.
 - For structural adapter classifications, test source blocks that yield no
   projected paragraph (such as an empty list item), not just classifications of
   visible paragraphs. An omitted block can hide a boundary; withhold completeness
