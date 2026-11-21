@@ -526,6 +526,12 @@ registry before considering the release delivered.
   resolved policy name ([PR #709](https://github.com/schiste/Aexeo/pull/709)).
   This detects inconsistent labels; it does not validate the whole policy
   or authenticate the supplied artifacts.
+  An experimental Python runner observes the direct evaluator process and
+  timeout itself, uses a new protected output path, and compares independently
+  supplied input bytes before and after evaluation. It uses the existing Python
+  comparator and emits aggregate-only telemetry. It does not authenticate the
+  evaluator, prove snapshot freshness, eliminate ABA races, sandbox descendants
+  or authorize publication; the portable v2 host contract remains open.
   The independent draft Python comparator also requires an explicitly supplied
   successful fresh process exit and no timeout; these remain caller assertions,
   not authenticated execution or publication authorization.
