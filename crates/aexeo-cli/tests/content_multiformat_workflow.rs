@@ -434,7 +434,9 @@ fn embedded_html_links_are_not_misreported_as_absent_in_markdown() {
         "Read <a href=\"https://example.org\">the source</a>.\n",
     )
     .unwrap();
-    let (report, _) = evaluate(&draft, &preset, "markdown");
+    let (report, telemetry) = evaluate(&draft, &preset, "markdown");
     assert_eq!(report["gates"][0]["status"], "not_checked");
     assert_eq!(report["gates"][1]["status"], "not_checked");
+    assert_eq!(telemetry["summary"]["not_checked"], 2);
+    assert!(!telemetry.to_string().contains("example.org"));
 }
