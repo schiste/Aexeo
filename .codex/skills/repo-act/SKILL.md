@@ -67,6 +67,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 
 ## Validation Checklist
 
+- For JavaScript arrays received from runtime providers, test sparse arrays as
+  well as wrong lengths and values: `Array.prototype.every` skips holes, so
+  validating only with `every` can accept an observation that is missing. Keep
+  unavailable observations unchecked rather than treating them as complete.
 - When adding or changing CLI commands or options, regenerate the reference with
   `cargo run -p aexeo-cli -- docs generate .`, then run `cargo run -p aexeo-cli -- docs check .`.
   After integrating another CLI change, regenerate and check the combined tree.
