@@ -76,6 +76,11 @@ blocked.
    `.venv/` from the main checkout; preparation is explicit. Put temporary
    test environments in this session's scratch directory: another session's
    scratch can be removed as soon as that session is cleaned.
+   When Rust checks on the session worktree and the broker's merge-candidate
+   checkout run in parallel, use separate `CARGO_TARGET_DIR` subdirectories
+   under this session's scratch, or run them sequentially. If an artifact is
+   missing during overlapping checks, rerun the affected check in isolation
+   before attributing the failure to the product.
    Repeat `--path` for every file or trailing-slash directory known up front.
    The broker validates the whole set first, then creates the session plus
    explicit leases atomically. Omit `--path` only when no target is known yet.
