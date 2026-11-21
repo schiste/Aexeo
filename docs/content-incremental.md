@@ -165,3 +165,13 @@ Treat the serialized snapshot as potentially private data. Reconstruct and
 independently verify current inputs at revalidation: this helper does not
 establish provenance, prevent changes between verification and publication, or
 make the experimental candidate verdict a publication authorization.
+
+## Measuring incremental evaluation
+
+Run `cargo run --release -p aexeo-core --example incremental_content_bench -- 20`
+to compare a reused in-process baseline with full item evaluation on the same
+synthetic 500-item plain-text snapshot and ten updates. Both timings include
+candidate overlay construction; the one-time baseline preparation is reported
+separately. The benchmark checks report equality and reuse counts before timing.
+It is a synthetic diagnostic, not a production latency target or a substitute
+for measurement on a host's own content and gates.
