@@ -59,6 +59,24 @@ def validate_integer_fields(verdict):
         raise VerificationError('invalid verdict integer field')
 
 
+def validate_host_options(options):
+    """Validate the current Aexeo offline artifact without trusting its digest."""
+    required = {'engine_version', 'max_entry_bytes', 'max_total_bytes',
+                'mode', 'plain_text_paragraphs'}
+    if (not isinstance(options, dict) or not required.issubset(options)
+            or set(options) - required - {'html_scope'}):
+        raise VerificationError('invalid host options fields')
+    text(options['engine_version'], empty=False)
+    if options['mode'] != 'offline' or type(options['plain_text_paragraphs']) is not bool:
+        raise VerificationError('invalid host options mode or paragraph setting')
+    for field in ('max_entry_bytes', 'max_total_bytes'):
+        if type(options[field]) is not int or not 0 <= options[field] <= MAX_U64:
+            raise VerificationError('invalid host options byte limit')
+    if 'html_scope' in options and options['html_scope'] != 'main':
+        raise VerificationError('invalid HTML scope')
+    return options.get('html_scope')
+
+
 def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
             required_checks, expected_validator, fresh_exit_code, fresh_timed_out):
     """Check both outputs against current inputs; never authorize publication."""
@@ -73,6 +91,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         raise VerificationError('bound verdict exceeds size limit')
     previous, fresh = parse(previous_bytes), parse(fresh_bytes)
     validate_schemas((previous, fresh), HERE / 'bound-verdict.schema.json')
+    html_scope = validate_host_options(parse(artifacts['host_options']))
     change = parse(artifacts['change'])
     validate_change_semantics(change)
     # V1 has open objects. The draft cannot understand extra change inputs or
@@ -100,7 +119,10 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if not hmac.compare_digest(envelope['binding_sha256'], current_binding):
             raise VerificationError('candidate input binding differs')
         verdict = envelope['verdict']
-        observed = 'aexeo.observed-link-binding.v1' in verdict.get('extensions', {})
+        extensions = verdict.get('extensions', {})
+        if extensions.get('aexeo.html-content-scope.v1') != html_scope:
+            raise VerificationError('HTML scope does not match host options')
+        observed = 'aexeo.observed-link-binding.v1' in extensions
         if observed != (evidence is not None):
             raise VerificationError('link evidence does not match the verdict profile')
         validate_verdict(verdict)

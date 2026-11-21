@@ -219,6 +219,48 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             self.check()
 
+    def test_rebound_host_options_require_valid_shape_and_matching_html_scope(self):
+        self.assertFalse(self.check()['publication_authorized'])
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        original = json.loads(self.artifacts['host_options'])
+
+        def rebind():
+            inputs = dict(self.artifacts, collection=self.artifacts.get('collection'),
+                          external_evidence=self.artifacts.get('external_evidence'),
+                          candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                          candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                          candidate_revision_sha256=revision_digest(candidate))
+            self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+
+        for field, value in (('engine_version', ''), ('mode', 'online'),
+                             ('plain_text_paragraphs', 1), ('max_entry_bytes', True),
+                             ('max_total_bytes', -1), ('max_total_bytes', 1 << 64),
+                             ('html_scope', None), ('extra', True)):
+            options = dict(original, **{field: value})
+            self.artifacts['host_options'] = self.encoded(options)
+            rebind()
+            with self.subTest(field=field, value=value), self.assertRaises(VerificationError):
+                self.check()
+        missing = dict(original)
+        del missing['max_entry_bytes']
+        self.artifacts['host_options'] = self.encoded(missing)
+        rebind()
+        with self.assertRaises(VerificationError):
+            self.check()
+
+        self.artifacts['host_options'] = self.encoded(dict(original, html_scope='main'))
+        rebind()
+        with self.assertRaises(VerificationError):
+            self.check()
+        for envelope in (self.previous, self.fresh):
+            envelope['verdict']['extensions']['aexeo.html-content-scope.v1'] = 'main'
+        self.assertFalse(self.check()['publication_authorized'])
+        self.artifacts['host_options'] = self.encoded(original)
+        rebind()
+        with self.assertRaises(VerificationError):
+            self.check()
+
     def test_changed_inputs_or_incomplete_inventory_fail_closed(self):
         for key in self.artifacts:
             with self.subTest(key=key):

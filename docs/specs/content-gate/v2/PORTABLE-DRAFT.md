@@ -141,7 +141,8 @@ reconstructs the candidate revision digests and Aexeo decision artifacts from
 an independently supplied candidate context, then verifies the required passing
 checks and independently supplied content streams. An incomplete declared base,
 changed candidate, policy, scope, evidence or content fails the comparison. It
-inherits the candidate implementation's inline-state restriction and Aexeo's
+also rejects a verdict whose declared HTML scope differs from the independently
+selected scope. It inherits the candidate implementation's inline-state restriction and Aexeo's
 non-portable artifact encodings. The caller must acquire and trust the context,
 bytes and optional evidence independently, establish snapshot completeness and
 freshness, and protect the publication boundary. The helper does not establish
@@ -159,6 +160,9 @@ optional `--external-evidence`, repeatable `--require-check`, and
 by the caller for the fresh evaluator; a missing value, nonzero exit or timeout
 prevents a match even when a passing verdict file exists. These are caller
 assertions, not proof of execution.
+The comparator strictly validates Aexeo offline host-option fields and rejects a
+verdict whose declared HTML scope differs from those options. It still cannot
+establish that the independently supplied options were used by the evaluator.
 The producer's artifact encodings are still Aexeo-specific; the host must
 obtain them independently rather than trust a bundle from the previous result.
 The comparator accepts no evidence for the offline profile, or exact snapshot

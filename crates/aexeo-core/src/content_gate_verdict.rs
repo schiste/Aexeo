@@ -430,6 +430,22 @@ pub enum ScopedBindingKind {
     External,
 }
 
+fn verify_html_scope_declaration(verdict: &Verdict, html_scope: HtmlContentScope) -> Result<()> {
+    let declared_scope = verdict
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get("aexeo.html-content-scope.v1"));
+    match html_scope {
+        HtmlContentScope::Main if declared_scope != Some(&serde_json::json!("main")) => {
+            bail!("main HTML scope declaration is missing or invalid")
+        }
+        HtmlContentScope::Document if declared_scope.is_some() => {
+            bail!("unexpected HTML scope declaration")
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Verify scoped input binding before performing host callbacks. This does not
 /// establish evaluator authenticity, observation freshness, or verdict status.
 #[allow(clippy::too_many_arguments)]
@@ -444,19 +460,7 @@ pub fn verify_scoped_change_input_binding(
     html_scope: HtmlContentScope,
     kind: ScopedBindingKind,
 ) -> Result<()> {
-    let declared_scope = verdict
-        .extensions
-        .as_ref()
-        .and_then(|extensions| extensions.get("aexeo.html-content-scope.v1"));
-    match html_scope {
-        HtmlContentScope::Main if declared_scope != Some(&serde_json::json!("main")) => {
-            bail!("main HTML scope declaration is missing or invalid")
-        }
-        HtmlContentScope::Document if declared_scope.is_some() => {
-            bail!("unexpected HTML scope declaration")
-        }
-        _ => {}
-    }
+    verify_html_scope_declaration(verdict, html_scope)?;
     let base = scoped_binding_digest(
         offline_binding_digest(
             change,
@@ -1046,6 +1050,7 @@ pub fn verify_draft_passing_candidate_with_content<
     max_state_bytes: usize,
     max_total_bytes: usize,
 ) -> Result<()> {
+    verify_html_scope_declaration(&envelope.verdict, scope)?;
     let (base_digest, candidate_digest) = candidate_revisions(context)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let mut inputs = artifacts.as_inputs();
@@ -2775,6 +2780,68 @@ mod tests {
                 3
             )
             .is_ok()
+        );
+        // Matching input hashes do not bind the verdict's scope declaration.
+        let mut mismatched_scope = portable.clone();
+        mismatched_scope
+            .verdict
+            .extensions
+            .get_or_insert_default()
+            .insert(
+                "aexeo.html-content-scope.v1".into(),
+                serde_json::json!("main"),
+            );
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &mismatched_scope,
+                &ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3,
+            )
+            .is_err()
+        );
+        let mut main_scope = evaluate_draft_portable_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &main_scope,
+                &ctx,
+                HtmlContentScope::Main,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3,
+            )
+            .is_ok()
+        );
+        main_scope
+            .verdict
+            .extensions
+            .as_mut()
+            .unwrap()
+            .remove("aexeo.html-content-scope.v1");
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &main_scope,
+                &ctx,
+                HtmlContentScope::Main,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3,
+            )
+            .is_err()
         );
         let incomplete_base = CandidateSnapshot {
             complete: false,
