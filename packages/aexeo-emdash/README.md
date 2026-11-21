@@ -232,14 +232,45 @@ stores a report in plugin KV; the second retrieves it and checks whether the
 revision is still the current draft or publication. A stale or unknown status
 is not evidence of current content. Source paths refer only to the revision
 snapshot. Historical rendered HTML and SEO-panel fields are unavailable, and
-runtime evidence, link and external-gate providers are not invoked. Inspect
-each gate's `not_checked` status. These checks do not establish factual accuracy
+runtime evidence and external-gate providers are not invoked. The ordinary
+current-content link observer is not used for historical revisions. An optional
+revision-specific link observer is described below. Inspect each gate's
+`not_checked` status. These checks do not establish factual accuracy
 or currency. New reports include `assurance.publication_authorization` set to
 `not_granted` and structured coverage limitations; an absent `assurance` on an
 older stored report is not permission to publish. These indicators do not
 independently enforce a publication gate or prevent a change after an audit.
 Reports contain editorial findings and require the same access controls and
 retention care as the source content.
+
+A trusted configured-mode host can separately opt in to link observations for
+revision audits by passing `revisionLinkObservations` as a runtime dependency
+to `createPlugin`. It is never enabled by serializable presets:
+
+```ts
+import { createPlugin } from "@aeptus/aexeo-emdash/configured";
+
+const plugin = createPlugin(
+  { revisionAudits: true, contentPreset: { name: "my-link-preset", sources: myPresetSources } },
+  { revisionLinkObservations: observeRevisionLinks }, // trusted host implementation
+);
+```
+
+The callback
+receives `{ collection, id, revision, field?, locale, preset, destinations }`;
+locale still comes from the current record. It must return one observation per
+destination in order: `reachable`, `not_found`, `not_checked`, or
+`not_applicable`. The host must scope its observations to the requested
+revision, including resolving relative destinations using a route appropriate
+for that historical revision. The host is responsible for timeouts, network
+policy, privacy and freshness. Destinations and identifiers can contain private information.
+Aexeo binds the returned observations to the projected snapshot; it does not
+authenticate the observer or prove the source is current. An unavailable
+projection, provider error or invalid response leaves the gate `not_checked`.
+Opt-in `onLinkProviderTelemetry` receives only a duration and aggregate status,
+not URLs, revision identifiers or provider errors. When called, the report sets
+`assurance.runtime_providers` to `revision_link_observer_invoked`; this does not
+authorize publication or imply other runtime providers ran.
 
 New revision reports include `input_coverage`: body coverage and capabilities,
 field-selection mode and configured fields, and whether a description source

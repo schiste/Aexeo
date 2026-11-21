@@ -324,6 +324,10 @@ registry before considering the release delivered.
   The single-content CLI accepts source- and destination-bound host link
   observations for Markdown and HTML, with partial results and aggregate telemetry.
   Observation authenticity and freshness remain host responsibilities.
+  Configured revision audits can separately opt in to a revision-specific link
+  observer; results are projected from the historical snapshot, and provider
+  errors and incomplete projections remain unchecked. The host is responsible
+  for observer authorization, network policy, privacy, and freshness.
   Content-change hosts can also bind per-entry snapshots and revalidate their
   complete input fingerprint; omitted entries remain unchecked. EmDash observers
   receive route and locale context, and unchecked assessments distinguish a failed
