@@ -100,6 +100,9 @@ pub fn html_content_with_scope_and_heading_levels(
         .map(|(content, levels, _)| (content, levels))
 }
 
+/// Content, heading levels and an optional complete list-membership observation.
+pub type HtmlParagraphProjection = (HtmlContent, Vec<u8>, Option<Vec<bool>>);
+
 /// Project the selected scope with optional ordered paragraph list membership.
 /// This observes static markup only; lists missing projected paragraphs are unknown.
 /// A main element inside a list item withholds classification because the list
@@ -108,7 +111,7 @@ pub fn html_content_with_paragraph_list_items(
     id: impl Into<String>,
     source: &str,
     scope: HtmlContentScope,
-) -> Result<(HtmlContent, Vec<u8>, Option<Vec<bool>>), &'static str> {
+) -> Result<HtmlParagraphProjection, &'static str> {
     if source.len() > MAX_CONTENT_INPUT_BYTES {
         return Err("HTML exceeds the content input byte limit");
     }
