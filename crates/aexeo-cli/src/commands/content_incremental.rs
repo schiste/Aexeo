@@ -74,7 +74,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     // change validation used by content-impact before evaluating any proposal.
     for proposal in value["proposals"]
         .as_array()
-        .expect("typed batch has proposals")
+        .ok_or_else(|| anyhow::anyhow!("missing proposals array"))?
     {
         parse_strict_validated_change(&serde_json::to_vec(&proposal["change"])?)?;
     }
