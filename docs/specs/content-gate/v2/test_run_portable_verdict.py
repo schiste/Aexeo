@@ -1,4 +1,5 @@
 """Test fresh-process observation without treating it as publication authority."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,7 +32,7 @@ class PortableRunner(unittest.TestCase):
 
     def execute(self, code, extra=()):
         return subprocess.run([sys.executable, str(HERE / 'run_portable_verdict.py'),
-                               *self.flags, '--', sys.executable, '-c', code,
+                               *self.flags, '--', str(Path(sys.executable).resolve()), '-c', code,
                                str(self.root / 'previous'), *extra],
                               capture_output=True, text=True, check=False)
 
@@ -117,6 +118,65 @@ class PortableRunner(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('content files changed during evaluation', result.stderr)
         self.assertNotIn(str(content), result.stderr)
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+
+    def test_optional_executable_pin_matches_and_rejects_before_execution(self):
+        executable = Path(sys.executable).resolve()
+        expected = hashlib.sha256(executable.read_bytes()).hexdigest()
+        self.flags += ['--executable-sha256', expected]
+        code = "import os,sys; from pathlib import Path; Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes())"
+        result = self.execute(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stderr)['executable_pin_supplied'])
+        marker = self.root / 'executed'
+        self.flags[-1] = '0' * 64
+        result = self.execute("from pathlib import Path; Path(__import__('sys').argv[2]).touch()", [str(marker)])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('digest differs', result.stderr)
+        self.assertFalse(marker.exists())
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+        self.flags[-1] = 'A' * 64
+        self.assertEqual(self.execute(code).returncode, 2)
+
+    def test_executable_pin_rejects_symlink_relative_path_and_changed_script(self):
+        script = self.root / 'evaluator'
+        script.write_text('#!' + str(Path(sys.executable).resolve()) + "\n"
+            "import os,sys\nfrom pathlib import Path\n"
+            "Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes())\n"
+            "with open(sys.argv[0], 'a') as f: f.write('# changed\\n')\n")
+        script.chmod(0o700)
+        pin = hashlib.sha256(script.read_bytes()).hexdigest()
+        flags = self.flags + ['--executable-sha256', pin]
+        base = [sys.executable, str(HERE / 'run_portable_verdict.py'), *flags, '--']
+        link = self.root / 'evaluator-link'
+        link.symlink_to(script)
+        for executable in (str(link), 'relative-evaluator'):
+            with self.subTest(executable=executable):
+                result = subprocess.run([*base, executable, str(self.root / 'previous')],
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+        result = subprocess.run([*base, str(script), str(self.root / 'previous')],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('digest differs', result.stderr)
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+
+    def test_executable_pin_rejects_identical_replacement_during_execution(self):
+        script = self.root / 'evaluator'
+        script.write_text('#!' + str(Path(sys.executable).resolve()) + "\n"
+            "import os,sys\nfrom pathlib import Path\n"
+            "Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes())\n"
+            "p=Path(sys.argv[0]); replacement=p.with_suffix('.new'); "
+            "replacement.write_bytes(p.read_bytes()); replacement.chmod(0o700); os.replace(replacement,p)\n")
+        script.chmod(0o700)
+        pin = hashlib.sha256(script.read_bytes()).hexdigest()
+        flags = self.flags + ['--executable-sha256', pin]
+        result = subprocess.run([sys.executable, str(HERE / 'run_portable_verdict.py'),
+                                 *flags, '--', str(script), str(self.root / 'previous')],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('pinned executable changed during evaluation', result.stderr)
         self.assertFalse(json.loads(result.stdout)['publication_authorized'])
 
     def test_rejects_missing_command_and_invalid_timeout(self):

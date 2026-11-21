@@ -874,6 +874,12 @@ missing fields retain observed prose but make body capabilities unavailable.
 
 ### Experimental referenced-content verification
 
+- [x] Optionally compare the host-pinned executable SHA-256 before and after the
+  draft Python runner invokes it. An absolute regular-file path and bounded reads
+  are required; private paths and hashes stay out of telemetry. This detects
+  observed changes, but does not authenticate the executed bytes, dependencies
+  or publication boundary, and cannot rule out a change-and-restore race.
+
 - [x] Independently bind host-provided local content bytes to referenced change
   states and candidate projections in the draft Python comparator and runner.
 - [x] Support confined local file states in the Aexeo candidate-bound producer;

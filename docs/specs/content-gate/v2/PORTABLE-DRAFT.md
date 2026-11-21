@@ -154,8 +154,8 @@ must match the change and candidate snapshot; no reference or URI is fetched.
 This uses Aexeo's non-portable artifact encodings. The candidate-bound producer
 accepts local file states only through its host-selected confined provider; it
 compares each file against the corresponding snapshot and applies the per-state
-and aggregate byte limits across both before and after states. URI states remain
-unavailable to the producer. The caller must acquire and trust the
+and aggregate byte limits across both before and after states. A host can explicitly
+provide URI-state bytes as described below; the engine never fetches them. The caller must acquire and trust the
 context, bytes and optional evidence independently, establish snapshot completeness
 and freshness, and protect the publication boundary. The helper does not establish
 those properties or grant publication authorization.
@@ -193,6 +193,19 @@ prevent ABA changes, prove an atomic multi-file snapshot, or protect the period
 between verification and publication. Matching still returns
 `publication_authorized: false`. The experimental profile remains unsuitable as
 a publication gate until the host enforces the full protocol and boundary.
+
+A host may supply `--executable-sha256` with a lowercase SHA-256 digest acquired
+independently from its trusted deployment. In this mode the command must start
+with an absolute regular-file path; the final path component cannot be a symlink.
+The runner streams and checks the file, with a 1 GiB limit, immediately before
+preparing inputs and again after the direct child exits successfully. An invalid
+pin, an observed replacement or a digest mismatch fails closed. Telemetry records
+only whether a pin was supplied, never its value or path. This is an optional
+consistency check: the pathname can still change between checking and execution,
+including an ABA change; parent directories, script interpreters, shared libraries,
+configuration and environment are not authenticated. A matching hash therefore
+does not prove which bytes ran or establish dependency closure. The host must
+protect the executable and all dependencies throughout the operation.
 
 ### Referenced content in the independent Python verifier
 
