@@ -129,7 +129,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For shared fixtures used by Rust crate tests, place them inside the crate
   and verify `cargo package --list` includes them. A repository-relative
   `include_str!` can work locally while referring outside the published crate.
-- For report performance changes, compare release builds on the same reproducible synthetic input before and after, verify the full output stays equivalent, and report workload and timing variability rather than generalizing one measurement.
+- For report performance changes, compare release builds on the same reproducible synthetic input before and after, verify the full output stays equivalent, and report workload and timing variability rather than generalizing one measurement. Use separate fresh `CARGO_TARGET_DIR` paths for each source tree: a shared target can reuse a binary from the other tree, invalidating the comparison. Run the resulting binaries after builds finish and retain their distinct paths.
 - Python test scripts with hyphens in their filenames are not discovered by
   `unittest discover`; run the relevant files directly, or use the repository
   check script that invokes them explicitly. Confirm the reported test count.
