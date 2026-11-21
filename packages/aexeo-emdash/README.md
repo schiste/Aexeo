@@ -261,8 +261,9 @@ receives `{ collection, id, revision, field?, locale, preset, destinations }`;
 locale still comes from the current record. It must return one observation per
 destination in order: `reachable`, `not_found`, `not_checked`, or
 `not_applicable`. The host must scope its observations to the requested
-revision, and is responsible for timeouts, network policy, privacy and
-freshness. Destinations and identifiers can contain private information.
+revision, including resolving relative destinations using a route appropriate
+for that historical revision. The host is responsible for timeouts, network
+policy, privacy and freshness. Destinations and identifiers can contain private information.
 Aexeo binds the returned observations to the projected snapshot; it does not
 authenticate the observer or prove the source is current. An unavailable
 projection, provider error or invalid response leaves the gate `not_checked`.

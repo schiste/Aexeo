@@ -33,6 +33,21 @@ describe("revision audits", () => {
     expect(JSON.stringify(telemetry.mock.calls)).not.toContain("example.org");
   });
 
+  it("passes the selected fragment identity to the revision observer", async () => {
+    const { ctx, revision } = host();
+    (revision.data as Record<string, unknown>).intro = "Historical introduction.";
+    const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    const observer = vi.fn(async () => ["not_checked" as const]);
+    const projectLinks = vi.fn(async (document: any) => ({ document, destinations: ["/relative"] }));
+    await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "intro" }, {
+      preset: { name: "article", fragmentFieldsByCollection: { posts: { intro: "fragment" } } },
+      evaluate: async () => initial, projectLinks, revisionLinkObservations: observer,
+    });
+    expect(observer).toHaveBeenCalledWith(expect.objectContaining({ collection: "posts", id: "one", revision: "rev1", field: "intro", preset: "fragment" }));
+    expect(JSON.stringify(projectLinks.mock.calls)).toContain("Historical introduction.");
+    expect(JSON.stringify(projectLinks.mock.calls)).not.toContain("Historical sentence.");
+  });
+
   it("keeps revision link gates unchecked on missing projections and observer failures", async () => {
     const { ctx } = host();
     const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
