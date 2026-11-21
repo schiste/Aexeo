@@ -313,6 +313,7 @@ pub struct HtmlSourceMap {
     spans: Vec<(usize, usize, usize, bool)>,
     heading_starts: Vec<usize>,
     link_starts: Vec<usize>,
+    list_shapes: Option<Vec<(usize, usize, usize)>>,
     source_index: crate::text_index::LineIndex,
     projected_index: crate::text_index::LineIndex,
 }
@@ -477,6 +478,15 @@ pub fn html_source_map_with_scope(
     projected: &str,
     scope: HtmlContentScope,
 ) -> Option<HtmlSourceMap> {
+    html_source_map_inner(source, projected, scope, false)
+}
+
+fn html_source_map_inner(
+    source: &str,
+    projected: &str,
+    scope: HtmlContentScope,
+    collect_lists: bool,
+) -> Option<HtmlSourceMap> {
     use crate::site::markup::{open_tag_end, tag_breaks_text};
     if source.len() > MAX_CONTENT_INPUT_BYTES
         || source.contains(['\0', '\x0b'])
@@ -498,6 +508,9 @@ pub fn html_source_map_with_scope(
     let mut spans = Vec::new();
     let mut heading_starts = Vec::new();
     let mut link_starts = Vec::new();
+    // Source offset, nesting depth, and direct item count in document order.
+    let mut list_shapes: Vec<(usize, usize, usize)> = Vec::new();
+    let mut active_lists: Vec<usize> = Vec::new();
     let mut output = String::new();
     let mut cursor = 0;
     while cursor < source.len() {
@@ -802,6 +815,12 @@ pub fn html_source_map_with_scope(
             }
         }
         if closing {
+            if collect_lists
+                && matches!(tag.as_str(), "ul" | "ol")
+                && (scope == HtmlContentScope::Document || selected_depth.is_some())
+            {
+                active_lists.pop()?;
+            }
             if !rest.trim().is_empty() || stack.pop().as_deref() != Some(&tag) {
                 return None;
             }
@@ -825,6 +844,19 @@ pub fn html_source_map_with_scope(
                 selected_depth = Some(stack.len());
             }
             let selected = scope == HtmlContentScope::Document || selected_depth.is_some();
+            if collect_lists && selected {
+                if matches!(tag.as_str(), "ul" | "ol") {
+                    if list_shapes.len() >= MAX_HTML_CONTENT_NODES || active_lists.len() >= 100 {
+                        return None;
+                    }
+                    let index = list_shapes.len();
+                    list_shapes.push((cursor, active_lists.len() + 1, 0));
+                    active_lists.push(index);
+                } else if tag == "li" {
+                    let index = *active_lists.last()?;
+                    list_shapes[index].2 += 1;
+                }
+            }
             // Restrict attributes to a form that cannot affect projection or
             // hide a subtree. Other valid HTML is still evaluated without a map.
             let image_alt = mapping_attributes(
@@ -932,9 +964,80 @@ pub fn html_source_map_with_scope(
         spans,
         heading_starts,
         link_starts,
+        list_shapes: collect_lists.then_some(list_shapes),
         source_index: crate::text_index::LineIndex::new(source),
         projected_index: crate::text_index::LineIndex::new(projected),
     })
+}
+
+/// Observe complete static HTML lists only when both the conservative lexical
+/// mapping and parsed DOM agree on their ordered structure. `projected` must be
+/// the text produced from this source and scope by the HTML content adapter.
+/// This opt-in check parses the HTML again and returns `None` for ambiguous,
+/// unsupported, empty or over-limit lists. It does not establish browser
+/// visibility or rendered-page completeness.
+pub fn html_structured_lists(
+    source: &str,
+    projected: &str,
+    scope: HtmlContentScope,
+) -> Option<Vec<crate::markdown_adapter::StructuredList>> {
+    use crate::markdown_adapter::StructuredList;
+    let map = html_source_map_inner(source, projected, scope, true)?;
+    let shapes = map.list_shapes.as_ref()?;
+    let dom = parse_document(RcDom::default(), Default::default()).one(source);
+    let mut pending = vec![(dom.document.clone(), false, 0usize)];
+    let mut observed = Vec::new();
+    let mut visited = 0usize;
+    while let Some((node, selected, depth)) = pending.pop() {
+        visited += 1;
+        if visited > MAX_HTML_CONTENT_NODES || excluded_element(&node) {
+            if visited > MAX_HTML_CONTENT_NODES {
+                return None;
+            }
+            continue;
+        }
+        let mut selected = selected || scope == HtmlContentScope::Document;
+        let mut child_depth = depth;
+        if let NodeData::Element { name, .. } = &node.data {
+            if scope == HtmlContentScope::Main && name.local.as_ref() == "main" {
+                selected = true;
+            }
+            if selected && matches!(name.local.as_ref(), "ul" | "ol") {
+                let count = node.children.borrow().iter().filter(|child| {
+                    !excluded_element(child) && matches!(&child.data, NodeData::Element { name, .. } if name.local.as_ref() == "li")
+                }).count();
+                child_depth += 1;
+                observed.push((child_depth, count));
+            }
+        }
+        pending.extend(
+            node.children
+                .borrow()
+                .iter()
+                .rev()
+                .cloned()
+                .map(|child| (child, selected, child_depth)),
+        );
+    }
+    if observed.len() != shapes.len() {
+        return None;
+    }
+    shapes
+        .iter()
+        .zip(observed)
+        .map(|(&(offset, depth, count), actual)| {
+            if actual != (depth, count) || count == 0 || depth > 100 {
+                return None;
+            }
+            let (line, column) = map.source_index.position(source, offset)?;
+            Some(StructuredList {
+                item_count: count,
+                depth,
+                line,
+                column,
+            })
+        })
+        .collect()
 }
 
 impl crate::source_mapping::ContentSourceMap for HtmlSourceMap {
@@ -1016,6 +1119,83 @@ pub fn gate_source_positions_with_links(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn structured_lists_require_matching_explicit_html_and_dom() {
+        use crate::markdown_adapter::StructuredList;
+        let observe = |source: &str, scope| {
+            let projected = html_content_with_scope("x", source, scope).unwrap();
+            html_structured_lists(source, projected.input.text.as_deref().unwrap(), scope)
+        };
+        let source =
+            "<main>\n<ul>\n<li>One<ol><li>A</li><li>B</li></ol></li>\n<li>Two</li>\n</ul>\n</main>";
+        assert_eq!(
+            observe(source, HtmlContentScope::Document),
+            Some(vec![
+                StructuredList {
+                    item_count: 2,
+                    depth: 1,
+                    line: 2,
+                    column: 1
+                },
+                StructuredList {
+                    item_count: 2,
+                    depth: 2,
+                    line: 3,
+                    column: 8
+                },
+            ])
+        );
+        let adapted = html_content_with_scope("x", source, HtmlContentScope::Document).unwrap();
+        let lists = observe(source, HtmlContentScope::Document).unwrap();
+        let preset = crate::content_gate::ContentPreset::from_toml("version=1\nname='lists'\n[[gates]]\nid='list'\nkind='list_item_count'\nflagged_counts=[2]\n").unwrap();
+        let capabilities = crate::content_gate::ContentEvaluationContext {
+            adapter: Some(&adapted.context),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_structured_lists(
+                &adapted.input,
+                &capabilities,
+                None,
+                None,
+                true,
+                None,
+                Some(&lists),
+            )
+            .unwrap();
+        assert_eq!(
+            report.gates[0].status,
+            crate::content_gate::GateStatus::Failed
+        );
+        assert_eq!(report.gates[0].findings.len(), 2);
+        assert_eq!(
+            observe("<main><p>Text</p></main>", HtmlContentScope::Main),
+            Some(vec![])
+        );
+        let scoped = "<nav><ul><li>Menu</li></ul></nav><main><ul><li>Body</li></ul></main>";
+        assert_eq!(
+            observe(scoped, HtmlContentScope::Main),
+            Some(vec![StructuredList {
+                item_count: 1,
+                depth: 1,
+                line: 1,
+                column: 40
+            }])
+        );
+        for source in [
+            "<main><ul><li>One<li>Two</ul></main>",
+            "<main><ul><li hidden>Invisible</li><li>Visible</li></ul></main>",
+            "<main><ul><div>Invalid</div></ul></main>",
+            "<main><ul></ul></main>",
+        ] {
+            assert_eq!(observe(source, HtmlContentScope::Main), None, "{source}");
+        }
+        let source = "<main><ul><li>A</li></ul></main>";
+        assert!(
+            html_structured_lists(source, "different projection", HtmlContentScope::Main).is_none()
+        );
+    }
+
     #[test]
     fn paragraph_list_membership_withholds_unrepresented_html_items() {
         use super::*;
