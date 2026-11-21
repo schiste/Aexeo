@@ -1921,7 +1921,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
         }
         let mut heading_levels = None;
         let mut paragraph_list_items = None;
-        let structured_lists = if entry.media_type == "text/markdown"
+        let mut structured_lists = if entry.media_type == "text/markdown"
             && item_preset
                 .gates
                 .iter()
@@ -1962,6 +1962,16 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                     html_scope,
                 ) {
                     Ok((adapted, levels, list_items)) => {
+                        if item_preset.gates.iter().any(|gate| {
+                            matches!(gate, crate::content_gate::ContentGate::ListItemCount { .. })
+                        }) {
+                            structured_lists =
+                                adapted.input.text.as_deref().and_then(|projected| {
+                                    crate::html_content_adapter::html_structured_lists(
+                                        &text, projected, html_scope,
+                                    )
+                                });
+                        }
                         heading_levels = Some(levels);
                         paragraph_list_items = list_items;
                         let count = adapted.destinations.len();
@@ -5684,7 +5694,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_list_verdict_reports_source_and_withholds_unknown_structure() {
+    fn structured_list_verdict_reports_source_and_withholds_unknown_structure() {
         use sha2::{Digest, Sha256};
         let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='list'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=true\n").unwrap();
         for (media, source, status, location) in [
@@ -5704,6 +5714,18 @@ mod tests {
             (
                 "text/html",
                 "<ul><li>one</li></ul>",
+                CheckStatus::Passed,
+                None,
+            ),
+            (
+                "text/html",
+                "<p>Intro</p>\n<ul><li>one</li><li>two</li><li>three</li></ul>",
+                CheckStatus::Failed,
+                Some(protocol::Location { line: 2, column: 1 }),
+            ),
+            (
+                "text/html",
+                "<ul hidden><li>unknown</li></ul>",
                 CheckStatus::NotChecked,
                 None,
             ),
