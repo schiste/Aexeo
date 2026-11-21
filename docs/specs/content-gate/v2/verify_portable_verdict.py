@@ -10,6 +10,7 @@ import hmac
 import json
 from pathlib import Path
 import sys
+import time
 
 from compare_offline_receipts import (_typed_equal, require_passed_checks,
     require_validator_identity, validate_change_semantics, validate_verdict,
@@ -205,7 +206,23 @@ def main():
     parser.add_argument('--validator-version', required=True)
     parser.add_argument('--fresh-exit-code', type=int, required=True, help='exit code observed by the caller for the fresh evaluation')
     parser.add_argument('--fresh-timed-out', choices=('true', 'false'), required=True, help='whether the fresh evaluation timed out')
+    parser.add_argument('--telemetry', action='store_true', help='emit aggregate-only telemetry on stderr')
     args = parser.parse_args()
+    started = time.perf_counter() if args.telemetry else 0
+
+    def telemetry(status):
+        if not args.telemetry:
+            return
+        event = {'event': 'portable_verdict_comparison', 'status': status,
+                 'duration_ms': round((time.perf_counter() - started) * 1000, 3),
+                 'required_check_count': len(args.require_check),
+                 'collection_supplied': args.collection is not None,
+                 'external_evidence_supplied': args.external_evidence is not None}
+        try:
+            print(json.dumps(event, separators=(',', ':')), file=sys.stderr)
+        except (OSError, ValueError):
+            pass
+
     try:
         artifacts = {name: read_stable(getattr(args, name)) for name in REQUIRED}
         if args.collection is not None:
@@ -219,7 +236,9 @@ def main():
     except (VerificationError, OSError, ValueError, TypeError, KeyError) as error:
         print(json.dumps({'matched': False, 'publication_authorized': False}), file=sys.stdout)
         print(str(error), file=sys.stderr)
+        telemetry('error')
         return 2
+    telemetry('matched')
     print(json.dumps(result, separators=(',', ':')))
     return 0
 
