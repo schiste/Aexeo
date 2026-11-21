@@ -11,7 +11,10 @@ use crate::{
     content_candidate::{
         CandidateItem, CandidateOverlay, CandidateSnapshot, overlay_candidate, validate_inventory,
     },
-    content_gate::{ContentGate, ContentInput, ContentPreset, ContentReport, GateStatus},
+    content_gate::{
+        ContentEvaluationContext, ContentGate, ContentInput, ContentPreset, ContentReport,
+        GateStatus,
+    },
 };
 
 /// An unavailable guarantee; this is not a passing result.
@@ -149,7 +152,8 @@ fn validate_preset(preset: &ContentPreset, mode: ProjectionMode) -> Result<(), N
         let structured_gate = mode == ProjectionMode::Adapted
             && matches!(
                 gate,
-                ContentGate::LinkCount { .. }
+                ContentGate::ProseSentenceLengthVariance { .. }
+                    | ContentGate::LinkCount { .. }
                     | ContentGate::RequiredHeadings { .. }
                     | ContentGate::HeadingLength { .. }
                     | ContentGate::DuplicateHeadings { .. }
@@ -168,7 +172,23 @@ fn evaluate_item(
     item: &CandidateItem,
     mode: ProjectionMode,
 ) -> Result<ContentReport, NotChecked> {
+    let classify_prose = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::ProseSentenceLengthVariance { .. }));
+    let mut paragraph_list_items = None;
     let (input, context, link_count) = match (mode, item.media_type.as_str()) {
+        (ProjectionMode::Adapted, "text/markdown") if classify_prose => {
+            let (input, context, count, map) =
+                crate::markdown_adapter::markdown_input_with_source_map(
+                    &item.entity_id,
+                    &item.source,
+                )
+                .map_err(|_| unavailable("Markdown projection failed"))?;
+            paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);
+            let count = map.links_complete().then_some(count);
+            (input, Some(context), count)
+        }
         (ProjectionMode::Adapted, "text/markdown") => {
             let (input, context, count) =
                 crate::markdown_adapter::markdown_input_with_observed_links(
@@ -177,6 +197,18 @@ fn evaluate_item(
                 )
                 .map_err(|_| unavailable("Markdown projection failed"))?;
             (input, Some(context), count)
+        }
+        (ProjectionMode::Adapted, "text/html") if classify_prose => {
+            let (adapted, _, lists) =
+                crate::html_content_adapter::html_content_with_paragraph_list_items(
+                    &item.entity_id,
+                    &item.source,
+                    crate::html_content_adapter::HtmlContentScope::Document,
+                )
+                .map_err(unavailable)?;
+            paragraph_list_items = lists;
+            let count = adapted.destinations.len();
+            (adapted.input, Some(adapted.context), Some(count))
         }
         (ProjectionMode::Adapted, "text/html") => {
             let adapted = crate::html_content_adapter::html_content(&item.entity_id, &item.source)
@@ -208,8 +240,22 @@ fn evaluate_item(
             ));
         }
     };
+    let capabilities = ContentEvaluationContext {
+        adapter: context.as_ref(),
+        link_count,
+        ..Default::default()
+    };
     let report = preset
-        .evaluate_with_links(&input, None, None, context.as_ref(), link_count)
+        .evaluate_with_paragraph_list_items(
+            &input,
+            &capabilities,
+            None,
+            None,
+            true,
+            None,
+            None,
+            paragraph_list_items.as_deref(),
+        )
         .map_err(|_| unavailable("content evaluation failed"))?;
     if report
         .gates
@@ -2028,5 +2074,122 @@ mod tests {
             baseline.evaluate(&change, &[next]),
             IncrementalEvaluation::NotChecked { .. }
         ));
+    }
+    #[test]
+    fn adapted_prose_variance_reuses_only_complete_structured_observations() {
+        let (mut snapshot, _, mut change) = fixture();
+        let markdown = "One two. Three four. Five six.\n\n- List one. List two. List three.\n\nSeven eight. Nine ten. Eleven twelve.\n";
+        let html = "<p>One two. Three four. Five six.</p><ul><li><p>List one. List two. List three.</p></li></ul><p>Seven eight. Nine ten. Eleven twelve.</p>";
+        for (index, item) in snapshot.items.iter_mut().enumerate() {
+            let (media, source) = if index % 2 == 0 {
+                ("text/markdown", markdown)
+            } else {
+                ("text/html", html)
+            };
+            item.media_type = media.into();
+            item.source = source.into();
+            item.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='prose'\n[[gates]]\nid='v'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+        let mut next = snapshot.items[0].clone();
+        next.source = format!(
+            "{}\nAnother sentence. Another short sentence. Another last sentence.\n",
+            markdown
+        );
+        next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        ));
+        change.entries.last_mut().unwrap().media_type = next.media_type.clone();
+        let candidate = overlay_candidate(&snapshot, &change, std::slice::from_ref(&next))
+            .unwrap()
+            .candidate;
+        let expected: BTreeMap<_, _> = candidate
+            .items
+            .iter()
+            .map(|item| {
+                let (input, context, lists) = if item.media_type == "text/markdown" {
+                    let (input, context, _, map) =
+                        crate::markdown_adapter::markdown_input_with_source_map(
+                            &item.entity_id,
+                            &item.source,
+                        )
+                        .unwrap();
+                    (input, context, map.paragraph_list_items().unwrap().to_vec())
+                } else {
+                    let (adapted, _, lists) =
+                        crate::html_content_adapter::html_content_with_paragraph_list_items(
+                            &item.entity_id,
+                            &item.source,
+                            crate::html_content_adapter::HtmlContentScope::Document,
+                        )
+                        .unwrap();
+                    (adapted.input, adapted.context, lists.unwrap())
+                };
+                let caps = ContentEvaluationContext {
+                    adapter: Some(&context),
+                    ..Default::default()
+                };
+                let report = preset
+                    .evaluate_with_paragraph_list_items(
+                        &input,
+                        &caps,
+                        None,
+                        None,
+                        false,
+                        None,
+                        None,
+                        Some(&lists),
+                    )
+                    .unwrap();
+                (item.entity_id.clone(), report)
+            })
+            .collect();
+        let baseline =
+            IncrementalBaseline::prepare_adapted(snapshot.clone(), preset.clone()).unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("expected evaluation")
+        };
+        assert_eq!(
+            serde_json::to_value(reports).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert!(evaluated > 0 && reused > 0);
+        let mut uncertain = next.clone();
+        uncertain.source = "Prose. Another. Third.\n\n- \n".into();
+        uncertain.sha256 = format!("{:x}", Sha256::digest(uncertain.source.as_bytes()));
+        let mut uncertain_change = change.clone();
+        uncertain_change.entries[0].after = Some(state(&uncertain));
+        assert!(matches!(
+            baseline.evaluate(&uncertain_change, &[uncertain]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        for (media, source) in [
+            ("text/markdown", "Prose. Another. Third.\n\n- \n"),
+            (
+                "text/html",
+                "<p>Prose. Another. Third.</p><ul><li>unrepresented</li></ul>",
+            ),
+            ("text/plain", "Prose. Another. Third."),
+        ] {
+            let mut incomplete = snapshot.clone();
+            incomplete.items[0].media_type = media.into();
+            incomplete.items[0].source = source.into();
+            incomplete.items[0].sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            assert!(
+                IncrementalBaseline::prepare_adapted(incomplete, preset.clone()).is_err(),
+                "{media}"
+            );
+        }
+        assert!(IncrementalBaseline::prepare_paragraph_text(snapshot, preset).is_err());
     }
 }
