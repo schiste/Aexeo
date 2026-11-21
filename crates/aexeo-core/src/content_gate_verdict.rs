@@ -1022,7 +1022,16 @@ pub fn verify_draft_passing_candidate_with_content<
         provider,
         max_state_bytes,
         max_total_bytes,
-    )
+    )?;
+    // The binding check above limits total artifact bytes. A matching hash can
+    // still cover malformed or unrelated observations, so validate their
+    // declared source identities independently after the size check.
+    if let Some(evidence) = external_evidence {
+        let snapshots: ChangeLinkSnapshots =
+            aexeo_contracts::content_gate_change_validation::parse_lossless_json(evidence)?;
+        snapshots.observer(context.decision.change, context.decision.preset)?;
+    }
+    Ok(())
 }
 
 /// Produce a draft portable envelope for an offline candidate evaluation.
@@ -4925,6 +4934,58 @@ mod tests {
             )
             .is_err()
         );
+        // Matching a binding must not make malformed evidence valid.
+        let (base_digest, candidate_digest) = candidate_revisions(&candidate).unwrap();
+        let decision_artifacts = decision.artifacts_with_html_scope(scope).unwrap();
+        let mut invalid = serde_json::to_value(&snapshots).unwrap();
+        invalid["change_id"] = "another-change".into();
+        let wrong_change = serde_json::to_vec(&invalid).unwrap();
+        invalid["change_id"] = change.change_id.clone().into();
+        invalid["entries"]["article"]["source_sha256"] = "0".repeat(64).into();
+        let wrong_source = serde_json::to_vec(&invalid).unwrap();
+        invalid["entries"]["article"]["source_sha256"] = state_sha(&change).into();
+        invalid["entries"]["article"]["observations"] = serde_json::json!([]);
+        let wrong_count = serde_json::to_vec(&invalid).unwrap();
+        invalid["entries"]["article"]["observations"] =
+            serde_json::to_value(&snapshots.entries["article"].observations).unwrap();
+        invalid["unexpected"] = true.into();
+        let unknown_field = serde_json::to_vec(&invalid).unwrap();
+        let duplicate =
+            b"{\"version\":1,\"version\":1,\"change_id\":\"x\",\"entries\":{}}".to_vec();
+        for invalid_evidence in [
+            wrong_change,
+            wrong_source,
+            wrong_count,
+            unknown_field,
+            duplicate,
+        ] {
+            let mut artifacts = decision_artifacts.as_inputs();
+            artifacts.external_evidence = Some(&invalid_evidence);
+            let inputs = aexeo_contracts::content_gate_portable_v2::CurrentInputs {
+                artifacts,
+                base_revision_sha256: &base_digest,
+                candidate_revision_sha256: &candidate_digest,
+            };
+            let forged = aexeo_contracts::content_gate_portable_v2::BoundVerdict::new(
+                portable.verdict.clone(),
+                &inputs,
+            )
+            .unwrap();
+            assert!(forged.verify_passing(&inputs, &requirements).is_ok());
+            assert!(
+                verify_draft_passing_candidate_with_content(
+                    &forged,
+                    &candidate,
+                    scope,
+                    Some(&invalid_evidence),
+                    &requirements,
+                    &mut bytes,
+                    1024,
+                    1024,
+                )
+                .is_err()
+            );
+        }
         snapshots.entries.get_mut("article").unwrap().observations[0] = Observation::NotFound;
         let changed = CandidateLinkDecisionContext {
             candidate: &candidate,
