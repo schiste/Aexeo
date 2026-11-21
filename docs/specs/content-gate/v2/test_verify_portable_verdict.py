@@ -155,6 +155,59 @@ class PortableComparison(unittest.TestCase):
             with self.subTest(mutation=mutate), self.assertRaises(VerificationError):
                 validate_link_evidence(candidate, change)
 
+    def test_rebound_link_evidence_still_requires_valid_shape_and_profile(self):
+        self.assertFalse(self.check()['publication_authorized'])
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {'article': {
+            'version': 1, 'source_sha256': change['entries'][0]['after']['sha256'],
+            'destinations': ['https://example.org/'], 'observations': ['reachable']}}}
+        extension = {'aexeo.observed-link-binding.v1': {
+            'inputs_sha256': 'a' * 64, 'observations_sha256': 'b' * 64}}
+
+        def rebind():
+            inputs = dict(self.artifacts, collection=self.artifacts.get('collection'),
+                          external_evidence=self.artifacts.get('external_evidence'),
+                          candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                          candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                          candidate_revision_sha256=revision_digest(candidate))
+            self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+
+        self.previous['verdict']['extensions'] = copy.deepcopy(extension)
+        self.fresh['verdict']['extensions'] = copy.deepcopy(extension)
+        self.artifacts['external_evidence'] = self.encoded(snapshot)
+        rebind()
+        self.assertFalse(self.check()['publication_authorized'])
+
+        mutations = [
+            lambda s: s.update(change_id='another-change'),
+            lambda s: s['entries']['article'].update(source_sha256='0' * 64),
+            lambda s: s['entries']['article'].update(observations=[]),
+            lambda s: s['entries']['article'].update(observations=['unknown']),
+            lambda s: s['entries']['article'].update(extra='secret-marker'),
+        ]
+        for mutation in mutations:
+            malformed = copy.deepcopy(snapshot)
+            mutation(malformed)
+            self.artifacts['external_evidence'] = self.encoded(malformed)
+            rebind()
+            with self.subTest(mutation=mutation), self.assertRaises(VerificationError):
+                self.check()
+
+        self.artifacts['external_evidence'] = self.encoded(snapshot)
+        offline = {'aexeo.offline-input-binding.v1': 'a' * 64}
+        self.previous['verdict']['extensions'] = copy.deepcopy(offline)
+        self.fresh['verdict']['extensions'] = copy.deepcopy(offline)
+        rebind()
+        with self.assertRaises(VerificationError):
+            self.check()
+        self.previous['verdict']['extensions'] = copy.deepcopy(extension)
+        self.fresh['verdict']['extensions'] = copy.deepcopy(extension)
+        del self.artifacts['external_evidence']
+        rebind()
+        with self.assertRaises(VerificationError):
+            self.check()
+
     def test_changed_inputs_or_incomplete_inventory_fail_closed(self):
         for key in self.artifacts:
             with self.subTest(key=key):
