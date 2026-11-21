@@ -405,6 +405,9 @@ registry before considering the release delivered.
   [#688](https://github.com/schiste/Aexeo/pull/688)). Only requested list gates
   incur the extra projection; hidden, malformed or ambiguous structures remain
   `not_checked`. Static HTML is not proof of browser-rendered visibility.
+- [x] Add a separately opted-in, field-scoped host link observer to EmDash automatic
+  fragment audits. Only reachability presets invoke it; incomplete projections or
+  invalid responses remain not checked. Aggregate telemetry contains no content.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
   The single-content CLI accepts source- and destination-bound host link

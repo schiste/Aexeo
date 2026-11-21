@@ -64,6 +64,9 @@ export type LinkObservationProvider = (request: {
   collection: string | undefined;
 }) => Promise<BoundLinkObservations["observations"]>;
 
+/** Separately installed observer for current, explicitly configured fragment fields. */
+export type FragmentLinkObservationProvider = (request: Parameters<LinkObservationProvider>[0] & { field: string }) => ReturnType<LinkObservationProvider>;
+
 /** Reject malformed or misaligned provider responses before they reach the evaluator. */
 const VALID_LINK_OBSERVATIONS = new Set(["reachable", "not_found", "not_checked", "not_applicable"]);
 export function validLinkObservations(value: unknown, count: number): value is BoundLinkObservations["observations"] {
@@ -98,6 +101,7 @@ export function withContentPreset(
   onPresetSelectionTelemetry?: (event: PresetSelectionTelemetry) => void,
   fragmentBlockMappings?: CustomBlockMappings,
   onContentEvaluationTelemetry?: (event: ContentEvaluationTelemetry) => void,
+  fragmentLinkProvider?: FragmentLinkObservationProvider,
 ): EvaluatorFn {
   if (!preset) return async (documents, context) => {
     const result = await base(documents, context);
@@ -238,10 +242,31 @@ export function withContentPreset(
             ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
         };
         if (preset.autoAuditFragments === true && collection !== undefined) {
-          const evaluateFragment = onContentEvaluationTelemetry
-            ? (fragment: EmdashDocument, fragmentPreset: string, sources?: Record<string, string>) =>
-                evaluate(fragment, fragmentPreset, sources, undefined, onContentEvaluationTelemetry)
-            : evaluate;
+          const evaluateFragment = async (fragment: EmdashDocument, fragmentPreset: string, sources?: Record<string, string>, field?: string) => {
+            let fragmentReport = await evaluate(fragment, fragmentPreset, sources, undefined, onContentEvaluationTelemetry);
+            if (!fragmentLinkProvider || field === undefined || !fragmentReport.gates.some((gate) => gate.required_capability === "link_reachability")) return fragmentReport;
+            const started = onLinkProviderTelemetry ? performance.now() : 0;
+            let status: LinkProviderTelemetry["status"] = "error";
+            let reason = "fragment link observation failed";
+            try {
+              const projection = projectLinks ? await projectLinks(fragment) : null;
+              if (projection === null) {
+                status = "unavailable";
+                reason = "fragment link projection unavailable from adapter";
+              } else {
+                const observations = await fragmentLinkProvider({ destinations: [...projection.destinations], route: fragment.route, locale: fragment.lang, preset: fragmentPreset, collection, field });
+                if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
+                fragmentReport = await evaluate(fragment, fragmentPreset, sources, undefined, onContentEvaluationTelemetry, undefined, { ...projection, observations });
+                status = "success";
+              }
+            } catch {
+              // Keep local findings and avoid exposing private provider errors.
+            } finally {
+              if (onLinkProviderTelemetry) emitTelemetry(onLinkProviderTelemetry, { duration_ms: performance.now() - started, status });
+            }
+            return status === "success" ? fragmentReport : { ...fragmentReport, gates: fragmentReport.gates.map((gate) =>
+              gate.required_capability === "link_reachability" && gate.status === "not_checked" ? { ...gate, reason } : gate) };
+          };
           fragments[document.route] = await evaluateFragments(document, collection, sourceSnapshots?.[index], preset, evaluateFragment, fragmentBlockMappings);
         }
         const locations = new Map((report.source_locations ?? []).map((location) => [

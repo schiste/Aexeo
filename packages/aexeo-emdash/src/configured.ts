@@ -44,8 +44,8 @@ import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import { evaluateContent, projectContentInput, projectLinkDestinations } from "./content.js";
 import { withContentPreset } from "./content-evaluator.js";
 import type { ContentEvaluationTelemetry } from "./content.js";
-import type { ContentPresetOptions, ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
-export type { ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
+import type { ContentPresetOptions, ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, FragmentLinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
+export type { ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, FragmentLinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
 import type { CustomBlockMappings, DescriptionField, MetadataFields, EmdashContentItem } from "./adapter.js";
 import { validateMetadataFieldsByCollection } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
@@ -220,6 +220,8 @@ export interface ConfiguredPluginRuntime {
   externalGates?: ExternalGateProvider;
   onExternalGateTelemetry?: (event: ExternalGateTelemetry) => void;
   linkObservations?: LinkObservationProvider;
+  /** Independent opt-in observer for automatic current-field audits. */
+  fragmentLinkObservations?: FragmentLinkObservationProvider;
   /** Separate opt-in observer for historical revision audits. */
   revisionLinkObservations?: RevisionLinkObservationProvider;
   /** Trusted host projection for the locale of the exact historical revision. */
@@ -255,7 +257,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
   // throws on empty rules ({} with neither routePattern nor ruleIds);
   // that error surfaces clearly in the host's startup logs.
   const suppressionFilter = compileSuppressions(options.suppressions);
-  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry, runtime.evidenceSources, runtime.onEvidenceSourceTelemetry, runtime.onPresetSelectionTelemetry, options.blockMappings, runtime.onContentEvaluationTelemetry);
+  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry, runtime.evidenceSources, runtime.onEvidenceSourceTelemetry, runtime.onPresetSelectionTelemetry, options.blockMappings, runtime.onContentEvaluationTelemetry, runtime.fragmentLinkObservations);
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need

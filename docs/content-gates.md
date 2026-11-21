@@ -463,6 +463,13 @@ const plugin = createPlugin(
 );
 ```
 
+For automatic current-field audits, install `fragmentLinkObservations` separately
+in the runtime and configure `autoAuditFragments` and the field presets. The
+callback receives the field name as well as the collection, route, locale, preset,
+and a copy of the fragment's ordered destinations. It runs only for fragment
+presets requiring reachability; article and historical revision observers are
+independent. Missing projections and invalid or failed responses remain not checked.
+
 The callback receives a copy of the ordered destinations. Aexeo makes no network
 requests itself; the trusted host must apply its own egress restrictions, timeouts,
 request budget and consent policy. The observer runs only when the resolved preset

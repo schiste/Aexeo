@@ -11,10 +11,10 @@ export type FragmentAssessment =
   | { field: string; preset: string; status: "not_checked"; reason: "fragment_source_unavailable" | "fragment_field_unavailable" | "fragment_evaluation_failed" | "fragment_preset_invalid" | "fragment_configuration_invalid" }
   | { field: string; preset: string; status: "evaluated"; report: ContentReport; findings: Finding[] };
 
-/** Project each configured field independently. Providers are never invoked here. */
+/** Project each configured field independently. */
 export async function evaluateFragments(
   document: EmdashDocument, collection: string, item: EmdashContentItem | undefined,
-  preset: ContentPresetOptions, evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>) => Promise<ContentReport>,
+  preset: ContentPresetOptions, evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, field?: string) => Promise<ContentReport>,
   blockMappings?: CustomBlockMappings,
 ): Promise<FragmentAssessment[]> {
   const configured = preset.fragmentFieldsByCollection;
@@ -44,7 +44,7 @@ export async function evaluateFragments(
       // A fragment is not an observed rendered page or a page metadata source.
       adapted.document.observed_metadata_fields = [];
       delete adapted.document.description_source_observed;
-      const report = await evaluate(adapted.document, name, preset.sources);
+      const report = await evaluate(adapted.document, name, preset.sources, field);
       const locations = new Map((report.source_locations ?? []).map((location) => [`${location.gate_id}:${location.finding_index}`, location]));
       const stored: StoredDocument = { document: adapted.document, meta: adapted.meta };
       const findings = report.gates.flatMap((gate) => gate.findings.map((finding, index) => {

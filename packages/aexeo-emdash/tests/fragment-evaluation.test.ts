@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { withContentPreset } from "../src/content-evaluator.js";
 import type { EmdashContentItem } from "../src/adapter.js";
 import type { EmdashDocument } from "../src/types.js";
+import type { BoundLinkObservations } from "../src/content.js";
 
 const item: EmdashContentItem = { id: "one", type: "posts", slug: "one", status: "draft", locale: "en", data: {
   intro: "A brief introduction.", body: "The much longer article.", empty: "",
@@ -79,4 +80,40 @@ describe("automatic fragment evaluation", () => {
     expect(result).toMatchObject({ ok: true, fragments: { "/one": [{ field: "intro", status: "not_checked", reason: "fragment_source_unavailable" }] } });
     expect(evaluate).toHaveBeenCalledTimes(2);
   });
+  it("observes only opted-in fragment gates and binds observations to their field snapshot", async () => {
+    const gate = { gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const,
+      required_capability: "link_reachability" as const, findings: [], reason: "unavailable" };
+    const evaluate = vi.fn(async (_doc: EmdashDocument, name: string, _sources?: Record<string, string>, _evidence?: Record<string, string>, _telemetry?: unknown, _external?: unknown, observations?: BoundLinkObservations) => ({
+      ...report, preset: name, gates: name === "fragment" ? [{ ...gate, status: observations ? "passed" as const : "not_checked" as const }] : [],
+    }));
+    const provider = vi.fn(async (_request: { destinations: readonly string[]; route: string; locale: string | undefined; preset: string; collection: string | undefined; field: string }) => ["reachable" as const]);
+    const project = vi.fn(async (fragment: EmdashDocument) => ({ document: structuredClone(fragment), destinations: ["https://example.test/link"] }));
+    const telemetry = vi.fn();
+    const preset = { name: "article", autoAuditFragments: true, fragmentFieldsByCollection: { posts: { intro: "fragment", body: "local" } } };
+    const run = withContentPreset(base, preset, evaluate, undefined, undefined, undefined, undefined, project, telemetry,
+      undefined, undefined, undefined, undefined, undefined, provider);
+    const result = await run([document], { collections: ["posts"], sourceItems: [item] });
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(provider.mock.calls[0]?.[0]).toMatchObject({ field: "intro", collection: "posts", route: "/one", preset: "fragment", destinations: ["https://example.test/link"] });
+    expect(result).toMatchObject({ ok: true, fragments: { "/one": [{ field: "intro", report: { gates: [{ status: "passed" }] } }, { field: "body", status: "evaluated" }] } });
+    expect(evaluate.mock.calls[2]?.[6]).toMatchObject({ document: project.mock.calls[0]?.[0], observations: ["reachable"] });
+    expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: "success" }));
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain("example.test");
+  });
+
+  it.each(["missing", "invalid", "throws"] as const)("keeps fragment link checks unchecked for %s observations", async (mode) => {
+    const gate = { gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const,
+      required_capability: "link_reachability" as const, findings: [], reason: "unavailable" };
+    const evaluate = vi.fn(async (_doc: EmdashDocument, name: string) => ({ ...report, gates: name === "fragment" ? [gate] : [] }));
+    const project = vi.fn(async (doc: EmdashDocument) => mode === "missing" ? null : { document: doc, destinations: ["https://private.test"] });
+    const provider = vi.fn(async () => { if (mode === "throws") throw new Error("private error"); return []; });
+    const telemetry = vi.fn();
+    const result = await withContentPreset(base, { name: "article", autoAuditFragments: true, fragmentFieldsByCollection: { posts: { intro: "fragment" } } }, evaluate,
+      undefined, undefined, undefined, undefined, project, telemetry, undefined, undefined, undefined, undefined, undefined, provider)([document], { collections: ["posts"], sourceItems: [item] });
+    expect(result).toMatchObject({ ok: true, fragments: { "/one": [{ status: "evaluated", report: { gates: [{ status: "not_checked", reason: mode === "missing" ? "fragment link projection unavailable from adapter" : "fragment link observation failed" }] } }] } });
+    expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: mode === "missing" ? "unavailable" : "error" }));
+    expect(JSON.stringify(result)).not.toContain("private error");
+    expect(provider).toHaveBeenCalledTimes(mode === "missing" ? 0 : 1);
+  });
+
 });

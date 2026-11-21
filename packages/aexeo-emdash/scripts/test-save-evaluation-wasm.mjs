@@ -1162,3 +1162,29 @@ max=1
   assert.deepEqual(host.logged, []);
   console.log("WASM configured fragment audits persist separately on save and refresh");
 }
+
+// Current fragment observations are separately opted in and bound to the field.
+{
+  const policy = `version=1
+name="fragment-links"
+[[gates]]
+id="links"
+kind="link_reachability"
+`;
+  const page = item("fragment-links", { data: { body: [block("body", "Other content")], intro: [block("intro", "A source", "normal", "https://example.org/fragment")] } });
+  const host = fakeHost([page]);
+  const calls = [];
+  const events = [];
+  const configured = createPlugin({ contentFieldsByCollection: { pages: ["body"] }, contentPreset: {
+    name: "article", autoAuditFragments: true, sources: { "fragment-links": policy },
+    fragmentFieldsByCollection: { pages: { intro: "fragment-links" } },
+  } }, { fragmentLinkObservations: async request => { calls.push(request); return ["not_found"]; }, onLinkProviderTelemetry: event => events.push(event) });
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const fragment = host.store.get("findings:/fragment-links")?.fragments?.[0];
+  assert.equal(fragment?.report.gates[0].status, "failed");
+  assert.deepEqual(fragment.findings[0].aexeo_cms_location?.path.slice(0, 2), ["data", "intro"]);
+  assert.deepEqual(calls[0].destinations, ["https://example.org/fragment"]);
+  assert.equal(calls[0].field, "intro");
+  assert.equal(events[0].status, "success");
+  assert.ok(!JSON.stringify(events).includes("example.org"));
+}
