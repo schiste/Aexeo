@@ -535,6 +535,17 @@ fn html_source_map_inner(
                 .find('<')
                 .map_or(source.len(), |n| cursor + n);
             let literal = &source[cursor..end];
+            // HTML's initial insertion mode discards leading ASCII whitespace
+            // before the first tag; keep its source bytes outside the projection.
+            if cursor == 0
+                && end < source.len()
+                && literal
+                    .bytes()
+                    .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c'))
+            {
+                cursor = end;
+                continue;
+            }
             // Definition-list text outside an explicitly closed term or
             // description is not part of the supported mapping subset.
             if matches!(
@@ -2268,6 +2279,38 @@ mod tests {
                 .is_none()
             );
         }
+    }
+
+    #[test]
+    fn maps_leading_ascii_whitespace_without_shifting_source_positions() {
+        for prefix in ["\n", " \t\r\n", "\x0c"] {
+            let html = format!(
+                "{prefix}<p>Élan <a href=\"/x\">link</a></p><ul><li>one</li><li>two</li><li>three</li></ul>"
+            );
+            let adapted = html_content("x", &html).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map(&html, projected).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(&html);
+            let (line, column) = projected_index
+                .position(projected, projected.find("Élan").unwrap())
+                .unwrap();
+            assert_eq!(
+                map.source_position(&html, projected, line, column),
+                source_index.position(&html, html.find("Élan").unwrap())
+            );
+            let lists =
+                html_structured_lists(&html, projected, HtmlContentScope::Document).unwrap();
+            assert_eq!(
+                (lists[0].line, lists[0].column),
+                source_index
+                    .position(&html, html.find("<ul>").unwrap())
+                    .unwrap()
+            );
+        }
+        let hidden = " \n<ul hidden><li>one</li></ul>";
+        let projected = html_content("x", hidden).unwrap().input.text.unwrap();
+        assert!(html_structured_lists(hidden, &projected, HtmlContentScope::Document).is_none());
     }
 
     #[test]

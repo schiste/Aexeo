@@ -11,7 +11,11 @@
         "list_structure_complete": true,
         "body": []
       },
-      "expected": "passed"
+      "expected": "passed",
+      "finding_count": 0,
+      "markdown_positions": [],
+      "html_positions": [],
+      "emdash_positions": []
     },
     {
       "name": "2 items",
@@ -44,7 +48,11 @@
           }
         ]
       },
-      "expected": "passed"
+      "expected": "passed",
+      "finding_count": 0,
+      "markdown_positions": [],
+      "html_positions": [],
+      "emdash_positions": []
     },
     {
       "name": "3 items",
@@ -87,7 +95,180 @@
           }
         ]
       },
-      "expected": "failed"
+      "expected": "failed",
+      "finding_count": 1,
+      "markdown_positions": [
+        [
+          1,
+          1
+        ]
+      ],
+      "html_positions": [
+        [
+          1,
+          1
+        ]
+      ],
+      "emdash_positions": [
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "nested and separate lists",
+      "markdown": "- α\n  - one\n  - two\n  - three\n- β\n- γ\n\nEnd.\n\n- four\n- five\n- six\n",
+      "html": "\n<ul><li>α<ul><li>one</li><li>two</li><li>three</li></ul></li><li>β</li><li>γ</li></ul><p>End.</p><ul><li>four</li><li>five</li><li>six</li></ul>",
+      "document": {
+        "route": "/lists",
+        "title": "Lists",
+        "list_structure_complete": true,
+        "body": [
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "α"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 2,
+            "children": [
+              {
+                "_type": "span",
+                "text": "one"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 2,
+            "children": [
+              {
+                "_type": "span",
+                "text": "two"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 2,
+            "children": [
+              {
+                "_type": "span",
+                "text": "three"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "β"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "γ"
+              }
+            ]
+          },
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "End."
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "four"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "five"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "six"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "failed",
+      "finding_count": 3,
+      "markdown_positions": [
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          10,
+          1
+        ]
+      ],
+      "html_positions": [
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          10
+        ],
+        [
+          2,
+          98
+        ]
+      ],
+      "emdash_positions": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          7,
+          0
+        ]
+      ]
     }
   ]
 }

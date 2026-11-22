@@ -868,6 +868,8 @@ positions within `main`, including conservative comments, linked head resources
 and raw-text head elements with literal `<` when no ambiguous HTML escape or
 unrecognized end tag occurs. Ambiguous or unsupported markup remains unmapped.
 
+A shared nested-list fixture checks finding order, source positions and coverage in Markdown, static HTML and EmDash/WASM. The HTML mapper also supports discarded initial ASCII whitespace while retaining original coordinates.
+
 ### EmDash source mapping coverage
 
 Portable Text list-count findings map to the first nonempty span of the list-opening block; a list starting with an empty block remains unmapped. Locations identify the evaluated snapshot.

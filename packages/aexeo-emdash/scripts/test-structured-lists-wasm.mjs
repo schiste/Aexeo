@@ -60,6 +60,9 @@ const parity = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/test
 for (const scenario of parity.cases) {
   const report = await evaluateContent(scenario.document, "lists", { lists: parity.preset });
   assert.equal(report.gates[0].status, scenario.expected, scenario.name);
+  assert.equal(report.gates[0].findings.length, scenario.finding_count, scenario.name);
+  assert.deepEqual(report.source_locations.map(location => [location.block_index, location.span_index]), scenario.emdash_positions, scenario.name);
+  assert.deepEqual(report.source_mapping, { eligible: scenario.finding_count, mapped: scenario.finding_count, unmapped: 0 }, scenario.name);
   const unavailable = await evaluateContent({ ...scenario.document, list_structure_complete: false }, "lists", { lists: parity.preset });
   assert.equal(unavailable.gates[0].status, "not_checked", scenario.name);
 }
