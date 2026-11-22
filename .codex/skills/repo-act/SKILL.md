@@ -124,6 +124,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For whole-word literal gates, test decomposed combining marks and lowercase
   expansions, both whole-word and substring modes, and confirm later match
   positions across CLI adapters and the rebuilt EmDash WASM bridge.
+- For masked citation markers, test multibyte digits and segmented labels across
+  Markdown, HTML and rebuilt EmDash WASM. Check the literal text, sentence
+  measurements, following source coordinates and CMS UTF-16 offsets: equal
+  byte lengths alone do not preserve character positions.
 - For sentence segmentation and opening gates, test whitespace-delimited and
   no-space scripts with every configured opening length, including one word,
   on both consecutive and windowed paths. Assert unsupported boundaries yield
