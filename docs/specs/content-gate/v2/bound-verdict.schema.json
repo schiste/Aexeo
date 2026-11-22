@@ -301,6 +301,12 @@
               "minLength": 64,
               "maxLength": 64
             },
+            "aexeo.change-evidence-input-binding.v1": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "minLength": 64,
+              "maxLength": 64
+            },
             "aexeo.html-content-scope.v1": {
               "const": "main"
             },
@@ -335,8 +341,9 @@
               ]
             },
             {
-              "required": [
-                "aexeo.observed-link-binding.v1"
+              "anyOf": [
+                {"required": ["aexeo.observed-link-binding.v1"]},
+                {"required": ["aexeo.change-evidence-input-binding.v1"]}
               ]
             }
           ]

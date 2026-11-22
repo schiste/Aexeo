@@ -97,7 +97,7 @@ _ITEM_GATE_KINDS = frozenset({
 })
 
 
-def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False):
+def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None):
     """Reject a verdict omitting a configured gate instance or its blocking flag."""
     if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
             or type(policy['version']) is not int or policy['version'] != 1
@@ -133,17 +133,21 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
     for gate in policy['gates']:
         gate_id, kind, blocking = gate['id'], gate['kind'], gate['blocking']
         if kind == 'unique_collection_metadata' and has_collection:
-            expected = [f'collection:0::{gate_id}']
+            expected = [(f'collection:0::{gate_id}', None)]
         else:
-            expected = (f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate_id}' for entity in entries)
-        for check_id in expected:
+            expected = ((f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate_id}', entity) for entity in entries)
+        for check_id, entity in expected:
             check = checks.get(check_id)
             if check is None or check['blocking'] is not blocking:
                 raise VerificationError('resolved policy check is missing or has inconsistent blocking')
-            # Link observations do not provide the per-item evidence sources.
-            if kind in {'custom', 'site_group', 'site_audit', 'evidence_anchors',
-                        'structured_fact', 'evidence_review', 'evidence_review_age'} and check.get('status') != 'not_checked':
-                raise VerificationError('candidate evaluator cannot execute site, custom or evidence gates')
+            if kind in {'custom', 'site_group', 'site_audit'} and check.get('status') != 'not_checked':
+                raise VerificationError('candidate evaluator cannot execute site or custom gates')
+            if kind in {'evidence_anchors', 'structured_fact', 'evidence_review', 'evidence_review_age'}:
+                required = ['source'] + (['review'] if kind in {'evidence_review', 'evidence_review_age'} else [])
+                item_sources = sources.get(entity, {}) if sources is not None else {}
+                if any(not isinstance(gate.get(key), str) or gate[key] not in item_sources for key in required):
+                    if check.get('status') != 'not_checked':
+                        raise VerificationError('candidate evaluator cannot execute evidence gate without its sources')
             if kind == 'link_reachability' and not has_link_observations and check.get('status') != 'not_checked':
                 raise VerificationError('candidate evaluator cannot execute link reachability without observations')
     return len(policy['gates']), expected_count
@@ -187,8 +191,15 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     if collection is not None:
         validate_collection_projection(parse(collection), candidate, change)
     evidence = artifacts.get('external_evidence')
+    sources, links = None, None
     if evidence is not None:
-        validate_link_evidence(parse(evidence), change)
+        external = parse(evidence)
+        if isinstance(external, dict) and external.get('schema') == 'aexeo.candidate-external-evidence/v1':
+            sources, links = validate_candidate_evidence(external, change, host_options)
+        else:
+            links = external
+        if links is not None:
+            validate_link_evidence(links, change)
     current_binding = binding(dict(artifacts, collection=collection,
         external_evidence=evidence, candidate_base_revision_sha256=revision_digest(base),
         candidate_revision_profile=b'content-gate.candidate-revision/v1',
@@ -206,12 +217,13 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if extensions.get('aexeo.html-content-scope.v1') != html_scope:
             raise VerificationError('HTML scope does not match host options')
         observed = 'aexeo.observed-link-binding.v1' in extensions
-        if observed != (evidence is not None):
-            raise VerificationError('link evidence does not match the verdict profile')
+        source_bound = 'aexeo.change-evidence-input-binding.v1' in extensions
+        if observed != (links is not None) or source_bound != (sources is not None):
+            raise VerificationError('external evidence does not match the verdict profile')
         validate_verdict(verdict)
-        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, evidence is not None)
-        if evidence is not None:
-            verify_link_observation_statuses(parse(evidence), policy, verdict)
+        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources)
+        if links is not None:
+            verify_link_observation_statuses(links, policy, verdict)
         if verdict['validator']['version'] != host_options['engine_version']:
             raise VerificationError('validator version does not match host options')
         if verdict['validator'].get('profile') != policy['name']:
@@ -245,6 +257,31 @@ def verify_link_observation_statuses(snapshot, policy, verdict):
                 raise VerificationError('link reachability check is missing')
             if (incomplete and check['status'] != 'not_checked') or (not_found and check['status'] == 'passed'):
                 raise VerificationError('link reachability status contradicts its observations')
+
+
+def validate_candidate_evidence(value, change, options):
+    """Validate bounded source inventory; the host establishes provenance."""
+    if set(value) != {'schema', 'sources', 'links'} or not isinstance(value['sources'], dict):
+        raise VerificationError('invalid candidate evidence artifact')
+    sources = value['sources']
+    entities = {entry['entity_id'] for entry in change['entries'] if entry.get('after') is not None}
+    if set(sources) != entities:
+        raise VerificationError('evidence inventory must match proposed entity identities')
+    total = 0
+    for entity, items in sources.items():
+        if not isinstance(items, dict):
+            raise VerificationError('invalid evidence source map')
+        total += len(entity.encode('utf-8'))
+        for name, content in items.items():
+            if not isinstance(name, str) or not name or not isinstance(content, str):
+                raise VerificationError('invalid evidence source')
+            content_size = len(content.encode('utf-8'))
+            if content_size > options['max_entry_bytes']:
+                raise VerificationError('evidence source exceeds byte limit')
+            total += len(name.encode('utf-8')) + content_size
+        if total > options['max_total_bytes']:
+            raise VerificationError('evidence inventory exceeds byte limit')
+    return sources, value['links']
 
 
 def validate_link_evidence(snapshot, change):

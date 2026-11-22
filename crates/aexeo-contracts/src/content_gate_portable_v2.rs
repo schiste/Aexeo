@@ -14,9 +14,9 @@ pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
 pub const PROFILE: &str = "content-gate.candidate-binding/v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
-/// This draft profile permits the informational Aexeo offline-binding or
-/// observed-link-binding and
-/// explicit HTML main-scope extensions; other extensions are rejected.
+/// This draft profile permits the informational Aexeo offline binding, or
+/// source-evidence and optional observed-link bindings, plus an explicit HTML
+/// main-scope extension. Other extensions are rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoundVerdict {
@@ -120,6 +120,10 @@ impl BoundVerdict {
                 .ok_or("missing verdict binding profile")?;
             let offline = extensions.get("aexeo.offline-input-binding.v1");
             let observed = extensions.get("aexeo.observed-link-binding.v1");
+            let evidence = extensions.get("aexeo.change-evidence-input-binding.v1");
+            let valid_evidence = evidence
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(is_sha256);
             let valid_offline = offline
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(is_sha256);
@@ -135,12 +139,14 @@ impl BoundVerdict {
                                     .is_some_and(is_sha256)
                             })
                     });
-            if (valid_offline as u8 + valid_observed as u8) != 1
+            if (valid_offline as u8 + (valid_observed || valid_evidence) as u8) != 1
+                || (evidence.is_some() && !valid_evidence)
                 || (offline.is_some() && !valid_offline)
                 || (observed.is_some() && !valid_observed)
                 || extensions.keys().any(|key| {
                     key != "aexeo.offline-input-binding.v1"
                         && key != "aexeo.observed-link-binding.v1"
+                        && key != "aexeo.change-evidence-input-binding.v1"
                         && key != "aexeo.html-content-scope.v1"
                 })
                 || extensions
@@ -313,12 +319,12 @@ impl BoundVerdict {
     }
 
     fn validate_evidence_profile(&self, inputs: &CurrentInputs<'_>) -> Result<(), &'static str> {
-        let observed =
-            self.verdict.extensions.as_ref().is_some_and(|extensions| {
-                extensions.contains_key("aexeo.observed-link-binding.v1")
-            });
+        let observed = self.verdict.extensions.as_ref().is_some_and(|extensions| {
+            extensions.contains_key("aexeo.observed-link-binding.v1")
+                || extensions.contains_key("aexeo.change-evidence-input-binding.v1")
+        });
         if observed != inputs.artifacts.external_evidence.is_some() {
-            return Err("link evidence does not match the verdict profile");
+            return Err("external evidence does not match the verdict profile");
         }
         Ok(())
     }
@@ -471,6 +477,43 @@ mod tests {
             serde_json::json!("a".repeat(64)),
         );
         assert!(BoundVerdict::new(both, &current).is_err());
+    }
+
+    #[test]
+    fn source_evidence_requires_an_explicit_matching_profile() {
+        let mut source = verdict();
+        source.extensions = Some(BTreeMap::from([(
+            "aexeo.change-evidence-input-binding.v1".into(),
+            serde_json::json!("a".repeat(64)),
+        )]));
+        let mut current = inputs();
+        current.artifacts.external_evidence = Some(b"candidate evidence");
+        let envelope = BoundVerdict::new(source.clone(), &current).unwrap();
+        assert!(envelope.verify_inputs(&current).is_ok());
+        assert!(envelope.verify_inputs(&inputs()).is_err());
+        let mut changed = inputs();
+        changed.artifacts.external_evidence = Some(b"changed evidence");
+        assert!(envelope.verify_inputs(&changed).is_err());
+        source.extensions.as_mut().unwrap().insert(
+            "aexeo.observed-link-binding.v1".into(),
+            serde_json::json!({"inputs_sha256": "a".repeat(64), "observations_sha256": "b".repeat(64)}),
+        );
+        assert!(BoundVerdict::new(source.clone(), &current).is_ok());
+        source.extensions.as_mut().unwrap().insert(
+            "aexeo.offline-input-binding.v1".into(),
+            serde_json::json!("a".repeat(64)),
+        );
+        assert!(BoundVerdict::new(source.clone(), &current).is_err());
+        source
+            .extensions
+            .as_mut()
+            .unwrap()
+            .remove("aexeo.offline-input-binding.v1");
+        source.extensions.as_mut().unwrap().insert(
+            "aexeo.change-evidence-input-binding.v1".into(),
+            serde_json::json!("INVALID"),
+        );
+        assert!(BoundVerdict::new(source, &current).is_err());
     }
 
     #[test]

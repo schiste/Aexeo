@@ -1148,8 +1148,9 @@ evaluation; it rejects changed inventory before making link requests. The host
 must independently establish the source's origin, freshness and relevance. A
 matching anchor does not prove that a source supports a claim, and this is not
 publication authorization. The option composes with collection snapshots, custom
-extensions and link observations, but is not available with experimental offline
-receipts or portable candidate verdicts.
+extensions and link observations. It is also available with the experimental
+portable candidate verdict described in [the draft protocol](specs/content-gate/v2/PORTABLE-DRAFT.md).
+Other experimental offline receipts do not support source inventories.
 
 The verdict output path must differ from every input file, including preset
 sources, external results, collection snapshots, previous verdicts and confined

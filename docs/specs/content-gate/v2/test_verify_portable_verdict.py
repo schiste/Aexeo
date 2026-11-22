@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses
+from verify_portable_verdict import compare, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -289,6 +289,33 @@ class PortableComparison(unittest.TestCase):
                     with self.subTest(kind=kind, status=status, blocking=blocking):
                         with self.assertRaises(VerificationError):
                             require_policy_coverage(policy, change, False, verdict)
+
+    def test_candidate_source_inventory_and_gate_capabilities(self):
+        change = json.loads(self.artifacts['change'])
+        options = json.loads(self.artifacts['host_options'])
+        artifact = {'schema': 'aexeo.candidate-external-evidence/v1',
+                    'sources': {'article': {'source': 'evidence', 'review': 'review'}}, 'links': None}
+        sources, links = validate_candidate_evidence(artifact, change, options)
+        self.assertIsNone(links)
+        policy = json.loads(self.artifacts['resolved_policy'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        gate = policy['gates'][0]
+        gate.update(kind='evidence_review', source='source', review='review')
+        require_policy_coverage(policy, change, False, verdict, False, sources)
+        for missing in ('source', 'review'):
+            incomplete = copy.deepcopy(sources)
+            del incomplete['article'][missing]
+            with self.assertRaisesRegex(VerificationError, 'without its sources'):
+                require_policy_coverage(policy, change, False, verdict, False, incomplete)
+        for invalid in ({'other': {}}, {}, {'article': {'': 'x'}}, {'article': {'source': 1}}):
+            bad = dict(artifact, sources=invalid)
+            with self.assertRaises(VerificationError):
+                validate_candidate_evidence(bad, change, options)
+        with self.assertRaises(VerificationError):
+            validate_candidate_evidence(dict(artifact, unexpected=True), change, options)
+        tiny = dict(options, max_entry_bytes=1)
+        with self.assertRaises(VerificationError):
+            validate_candidate_evidence(artifact, change, tiny)
 
     def test_link_observations_allow_claimed_link_evaluation(self):
         policy = json.loads(self.artifacts['resolved_policy'])

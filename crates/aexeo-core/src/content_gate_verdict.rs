@@ -1129,12 +1129,31 @@ pub fn verify_draft_passing_with_content<P: crate::content_gate_sources::Indepen
 
 // Require every configured gate instance, including advisory checks. This
 // checks coverage and blocking flags; it does not prove evaluator authenticity.
+#[cfg(test)]
 fn verify_candidate_policy_coverage(
     verdict: &Verdict,
     change: &Change,
     preset: &ContentPreset,
     has_collection: bool,
     has_link_observations: bool,
+) -> Result<()> {
+    verify_candidate_policy_coverage_with_evidence(
+        verdict,
+        change,
+        preset,
+        has_collection,
+        has_link_observations,
+        None,
+    )
+}
+
+fn verify_candidate_policy_coverage_with_evidence(
+    verdict: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    has_collection: bool,
+    has_link_observations: bool,
+    sources: Option<&ChangeEvidenceInventory>,
 ) -> Result<()> {
     preset.validate()?;
     let checks: std::collections::BTreeMap<_, _> = verdict
@@ -1187,27 +1206,36 @@ fn verify_candidate_policy_coverage(
                 gate,
                 crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
             );
-        let verify = |id: String| -> Result<()> {
+        let verify = |id: String, entity: &str| -> Result<()> {
             let check = checks
                 .get(id.as_str())
                 .filter(|check| check.blocking == gate.blocking())
                 .ok_or_else(|| {
                     anyhow::anyhow!("resolved policy check is missing or has inconsistent blocking")
                 })?;
-            // This candidate evaluator supplies neither a site, custom extensions,
-            // nor per-item evidence sources. Link observations are a distinct input.
+            // Site and custom providers are never supplied by this evaluator.
             if matches!(
                 gate,
                 crate::content_gate::ContentGate::Custom { .. }
                     | crate::content_gate::ContentGate::SiteGroup { .. }
                     | crate::content_gate::ContentGate::SiteAudit { .. }
-                    | crate::content_gate::ContentGate::EvidenceAnchors { .. }
-                    | crate::content_gate::ContentGate::StructuredFact { .. }
-                    | crate::content_gate::ContentGate::EvidenceReview { .. }
-                    | crate::content_gate::ContentGate::EvidenceReviewAge { .. }
             ) && check.status != CheckStatus::NotChecked
             {
-                bail!("candidate evaluator cannot execute site, custom or evidence gates");
+                bail!("candidate evaluator cannot execute site or custom gates");
+            }
+            let available = sources.and_then(|items| items.get(entity));
+            let has = |key: &str| available.is_some_and(|items| items.contains_key(key));
+            let missing_evidence = match gate {
+                crate::content_gate::ContentGate::EvidenceAnchors { source, .. }
+                | crate::content_gate::ContentGate::StructuredFact { source, .. } => !has(source),
+                crate::content_gate::ContentGate::EvidenceReview { source, review, .. }
+                | crate::content_gate::ContentGate::EvidenceReviewAge { source, review, .. } => {
+                    !has(source) || !has(review)
+                }
+                _ => false,
+            };
+            if missing_evidence && check.status != CheckStatus::NotChecked {
+                bail!("candidate evaluator cannot execute evidence gate without its sources");
             }
             if matches!(
                 gate,
@@ -1220,10 +1248,13 @@ fn verify_candidate_policy_coverage(
             Ok(())
         };
         if collection_gate {
-            verify(scoped_id("collection", "", gate.id()))?;
+            verify(scoped_id("collection", "", gate.id()), "")?;
         } else {
             for entry in &entries {
-                verify(scoped_id("gate", &entry.entity_id, gate.id()))?;
+                verify(
+                    scoped_id("gate", &entry.entity_id, gate.id()),
+                    &entry.entity_id,
+                )?;
             }
         }
     }
@@ -1287,27 +1318,63 @@ pub fn verify_draft_passing_candidate_with_content<
         max_state_bytes,
         max_total_bytes,
     )?;
-    verify_candidate_policy_coverage(
+    let extensions = envelope
+        .verdict
+        .extensions
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("missing verdict extensions"))?;
+    let has_sources = extensions.contains_key(EVIDENCE_BINDING_EXTENSION);
+    let has_links = extensions.contains_key(OBSERVED_LINK_BINDING_EXTENSION);
+    let mut composite: Option<OwnedCandidateExternalEvidence> = None;
+    let mut legacy_links: Option<ChangeLinkSnapshots> = None;
+    if let Some(bytes) = external_evidence {
+        if has_sources {
+            let parsed: OwnedCandidateExternalEvidence =
+                aexeo_contracts::content_gate_change_validation::parse_lossless_json(bytes)?;
+            if parsed.schema != "aexeo.candidate-external-evidence/v1"
+                || parsed.links.is_some() != has_links
+            {
+                bail!("candidate evidence does not match the verdict profile");
+            }
+            verify_change_evidence_input_binding(
+                &envelope.verdict,
+                context.decision.change,
+                context.decision.preset,
+                context.decision.max_entry_bytes,
+                context.decision.max_total_bytes,
+                context.decision.plain_text_paragraphs,
+                context.decision.collection.as_ref(),
+                scope,
+                &parsed.sources,
+            )?;
+            composite = Some(parsed);
+        } else {
+            legacy_links =
+                Some(aexeo_contracts::content_gate_change_validation::parse_lossless_json(bytes)?);
+        }
+    }
+    let sources = composite.as_ref().map(|value| &value.sources);
+    let snapshots = composite
+        .as_ref()
+        .and_then(|value| value.links.as_ref())
+        .or(legacy_links.as_ref());
+    verify_candidate_policy_coverage_with_evidence(
         &envelope.verdict,
         context.decision.change,
         context.decision.preset,
         context.decision.collection.is_some(),
-        external_evidence.is_some(),
+        snapshots.is_some(),
+        sources,
     )?;
-    // The binding check above limits total artifact bytes. A matching hash can
-    // still cover malformed or unrelated observations, so validate their
-    // declared source identities independently after the size check.
-    if let Some(evidence) = external_evidence {
-        let snapshots: ChangeLinkSnapshots =
-            aexeo_contracts::content_gate_change_validation::parse_lossless_json(evidence)?;
+    if let Some(snapshots) = snapshots {
         verify_candidate_link_destinations(
-            &snapshots,
+            snapshots,
             context.decision.change,
             context.decision.preset,
             scope,
             Some(context.after),
         )?;
-        verify_link_observation_statuses(&snapshots, context.decision.preset, &envelope.verdict)?;
+        verify_link_observation_statuses(snapshots, context.decision.preset, &envelope.verdict)?;
     }
     Ok(())
 }
@@ -1359,6 +1426,106 @@ pub fn evaluate_draft_portable_candidate_link_verdict<P: ConfinedContentFiles>(
     BoundVerdict::new(verdict, &inputs).map_err(anyhow::Error::msg)
 }
 
+/// Host-provided source inventory and optional link observations for a candidate.
+/// The bytes are bound to the verdict; provenance and freshness remain the host's
+/// responsibility. This framing is experimental and does not authorize publication.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OwnedCandidateExternalEvidence {
+    schema: String,
+    sources: ChangeEvidenceInventory,
+    links: Option<ChangeLinkSnapshots>,
+}
+
+#[derive(serde::Serialize)]
+struct CandidateExternalEvidence<'a> {
+    schema: &'static str,
+    sources: &'a ChangeEvidenceInventory,
+    links: Option<&'a ChangeLinkSnapshots>,
+}
+
+/// Serialize the exact external evidence artifact used by candidate verification.
+pub fn candidate_evidence_artifact(
+    sources: &ChangeEvidenceInventory,
+    links: Option<&ChangeLinkSnapshots>,
+) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(&CandidateExternalEvidence {
+        schema: "aexeo.candidate-external-evidence/v1",
+        sources,
+        links,
+    })?)
+}
+
+/// Evaluate a candidate against explicitly supplied source and link observations.
+/// The host must establish authenticity, freshness and publication atomicity.
+pub fn evaluate_draft_portable_candidate_evidence_verdict<P: ConfinedContentFiles>(
+    context: &CandidateDecisionContext<'_>,
+    sources: &ChangeEvidenceInventory,
+    links: Option<&ChangeLinkSnapshots>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
+    use aexeo_contracts::content_gate_portable_v2::{BoundVerdict, CurrentInputs};
+    let decision = context.decision;
+    validate_change_evidence(
+        decision.change,
+        sources,
+        decision.max_entry_bytes,
+        decision.max_total_bytes,
+    )?;
+    let (base, candidate) = candidate_revisions_with_references(context, provider)?;
+    let artifacts = decision.artifacts_with_html_scope(scope)?;
+    let evidence = candidate_evidence_artifact(sources, links)?;
+    let mut input_artifacts = artifacts.as_inputs();
+    input_artifacts.external_evidence = Some(&evidence);
+    let inputs = CurrentInputs {
+        artifacts: input_artifacts,
+        base_revision_sha256: &base,
+        candidate_revision_sha256: &candidate,
+    };
+    let mut observer = links
+        .map(|value| value.observer(decision.change, decision.preset))
+        .transpose()?;
+    let mut observe = |entity: &str, destinations: &[String]| {
+        observer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("link observer is unavailable"))?
+            .observe(entity, destinations)
+    };
+    let link_observer: Option<&mut LinkObserver<'_>> = if links.is_some() {
+        Some(&mut observe)
+    } else {
+        None
+    };
+    let verdict = evaluate_change_with_evidence(
+        decision.change,
+        provider,
+        decision.preset,
+        evaluated_at,
+        decision.max_entry_bytes,
+        decision.max_total_bytes,
+        ChangeEvaluationHost {
+            options: ChangeEvaluationOptions {
+                link_observer,
+                plain_text_paragraphs: decision.plain_text_paragraphs,
+            },
+            extensions: None,
+        },
+        decision.collection.as_ref().map(|c| ChangeCollection {
+            change_id: c.change_id,
+            items: c.items,
+            complete: c.complete,
+        }),
+        scope,
+        sources,
+    )?;
+    if let Some(observer) = observer {
+        observer.finish()?;
+    }
+    BoundVerdict::new(verdict, &inputs).map_err(anyhow::Error::msg)
+}
+
 /// Reconstruct current inputs, rerun the evaluator and compare the complete
 /// prior draft verdict except its evaluation timestamp. The supplied candidate
 /// and observations are host assertions; this does not authorize publication.
@@ -1402,6 +1569,46 @@ pub fn revalidate_draft_portable_candidate<P: ConfinedContentFiles>(
     } else {
         evaluate_draft_portable_candidate_verdict(context, provider, evaluated_at, scope)?
     };
+    let mut old = previous.verdict.clone();
+    old.evaluated_at = fresh.verdict.evaluated_at.clone();
+    if old != fresh.verdict || previous.binding_sha256 != fresh.binding_sha256 {
+        bail!("draft portable verdict differs from fresh evaluation");
+    }
+    Ok(fresh)
+}
+
+/// Revalidate a candidate with independently supplied source and link evidence.
+/// This compares every decision input and reruns evaluation; it does not
+/// authenticate the supplied evidence or authorize publication.
+pub fn revalidate_draft_portable_candidate_evidence<P: ConfinedContentFiles>(
+    previous: &aexeo_contracts::content_gate_portable_v2::BoundVerdict,
+    context: &CandidateDecisionContext<'_>,
+    sources: &ChangeEvidenceInventory,
+    links: Option<&ChangeLinkSnapshots>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
+    previous.validate_verdict().map_err(anyhow::Error::msg)?;
+    validate_change_evidence(
+        context.decision.change,
+        sources,
+        context.decision.max_entry_bytes,
+        context.decision.max_total_bytes,
+    )?;
+    let evidence = candidate_evidence_artifact(sources, links)?;
+    let binding = candidate_binding(context, scope, Some(&evidence), provider)?;
+    if previous.binding_sha256 != binding {
+        bail!("draft portable decision inputs differ");
+    }
+    let fresh = evaluate_draft_portable_candidate_evidence_verdict(
+        context,
+        sources,
+        links,
+        provider,
+        evaluated_at,
+        scope,
+    )?;
     let mut old = previous.verdict.clone();
     old.evaluated_at = fresh.verdict.evaluated_at.clone();
     if old != fresh.verdict || previous.binding_sha256 != fresh.binding_sha256 {
@@ -6550,6 +6757,71 @@ mod tests {
             after: &after,
         };
         let scope = HtmlContentScope::Document;
+        let mut sources: ChangeEvidenceInventory = [("article".into(), Default::default())].into();
+        let combined = evaluate_draft_portable_candidate_evidence_verdict(
+            &candidate,
+            &sources,
+            Some(&snapshots),
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            scope,
+        )
+        .unwrap();
+        assert_eq!(combined.verdict.status, VerdictStatus::Pass);
+        let extensions = combined.verdict.extensions.as_ref().unwrap();
+        assert!(extensions.contains_key(EVIDENCE_BINDING_EXTENSION));
+        assert!(extensions.contains_key(OBSERVED_LINK_BINDING_EXTENSION));
+        assert!(
+            revalidate_draft_portable_candidate_evidence(
+                &combined,
+                &candidate,
+                &sources,
+                Some(&snapshots),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                scope,
+            )
+            .is_ok()
+        );
+        sources
+            .get_mut("article")
+            .unwrap()
+            .insert("snapshot".into(), "changed".into());
+        let changed = evaluate_draft_portable_candidate_evidence_verdict(
+            &candidate,
+            &sources,
+            Some(&snapshots),
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            scope,
+        )
+        .unwrap();
+        assert_ne!(combined.binding_sha256, changed.binding_sha256);
+        assert!(
+            revalidate_draft_portable_candidate_evidence(
+                &combined,
+                &candidate,
+                &sources,
+                Some(&snapshots),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                scope,
+            )
+            .is_err()
+        );
+
+        sources.clear();
+        assert!(
+            evaluate_draft_portable_candidate_evidence_verdict(
+                &candidate,
+                &sources,
+                Some(&snapshots),
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                scope,
+            )
+            .is_err()
+        );
         let context = CandidateLinkDecisionContext {
             candidate: &candidate,
             snapshots: &snapshots,
@@ -6624,6 +6896,38 @@ mod tests {
                 Ok(std::io::Cursor::new(self.0.clone()))
             }
         }
+        let empty_sources: ChangeEvidenceInventory =
+            [("article".into(), Default::default())].into();
+        let composite_evidence =
+            candidate_evidence_artifact(&empty_sources, Some(&snapshots)).unwrap();
+        let mut bytes = IndependentBytes(source.as_bytes().to_vec());
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &combined,
+                &candidate,
+                scope,
+                Some(&composite_evidence),
+                &requirements,
+                &mut bytes,
+                1024,
+                1024,
+            )
+            .is_ok()
+        );
+        let modified_evidence = candidate_evidence_artifact(&empty_sources, None).unwrap();
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &combined,
+                &candidate,
+                scope,
+                Some(&modified_evidence),
+                &requirements,
+                &mut bytes,
+                1024,
+                1024,
+            )
+            .is_err()
+        );
         let mut bytes = IndependentBytes(source.as_bytes().to_vec());
         assert!(
             verify_draft_passing_candidate_with_content(
