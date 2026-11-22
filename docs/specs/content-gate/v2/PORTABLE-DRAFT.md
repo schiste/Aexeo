@@ -142,7 +142,10 @@ these reads do not authenticate provenance or guarantee atomic publication.
 The experimental Rust helper `verify_draft_passing_candidate_with_content`
 reconstructs the candidate revision digests and Aexeo decision artifacts from
 an independently supplied candidate context, then verifies the required passing
-checks and independently supplied content streams. An incomplete declared base,
+checks and independently supplied content streams. It validates the resolved
+preset and requires every configured item or collection check, including
+advisory checks, with its configured blocking flag. Advisory failures remain
+nonblocking. This verifies coverage, not evaluator authenticity. An incomplete declared base,
 changed candidate, policy, scope, evidence or content fails the comparison. It
 also rejects a verdict whose declared HTML scope differs from the independently
 selected scope, whose validator profile differs from the resolved policy name,

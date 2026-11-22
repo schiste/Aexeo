@@ -1089,6 +1089,65 @@ pub fn verify_draft_passing_with_content<P: crate::content_gate_sources::Indepen
     Ok(())
 }
 
+// Require every configured gate instance, including advisory checks. This
+// checks coverage and blocking flags; it does not prove evaluator authenticity.
+fn verify_candidate_policy_coverage(
+    verdict: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    has_collection: bool,
+) -> Result<()> {
+    preset.validate()?;
+    let checks: std::collections::BTreeMap<_, _> = verdict
+        .checks
+        .iter()
+        .map(|check| (check.id.as_str(), check))
+        .collect();
+    let entries: Vec<_> = change
+        .entries
+        .iter()
+        .filter(|entry| entry.after.is_some())
+        .collect();
+    let mut expected = 0usize;
+    for gate in &preset.gates {
+        let collection_gate = has_collection
+            && matches!(
+                gate,
+                crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
+            );
+        expected = expected
+            .checked_add(if collection_gate { 1 } else { entries.len() })
+            .ok_or_else(|| anyhow::anyhow!("resolved policy coverage exceeds check count"))?;
+        if expected > checks.len() {
+            bail!("resolved policy check is missing");
+        }
+    }
+    for gate in &preset.gates {
+        let collection_gate = has_collection
+            && matches!(
+                gate,
+                crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
+            );
+        let verify = |id: String| -> Result<()> {
+            if !checks
+                .get(id.as_str())
+                .is_some_and(|check| check.blocking == gate.blocking())
+            {
+                bail!("resolved policy check is missing or has inconsistent blocking");
+            }
+            Ok(())
+        };
+        if collection_gate {
+            verify(scoped_id("collection", "", gate.id()))?;
+        } else {
+            for entry in &entries {
+                verify(scoped_id("gate", &entry.entity_id, gate.id()))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reconstruct the candidate and decision artifacts before verifying an experimental
 /// passing verdict and independently supplied content streams. The caller must
 /// independently obtain the context, evidence and streams, and establish their
@@ -1145,6 +1204,12 @@ pub fn verify_draft_passing_candidate_with_content<
         provider,
         max_state_bytes,
         max_total_bytes,
+    )?;
+    verify_candidate_policy_coverage(
+        &envelope.verdict,
+        context.decision.change,
+        context.decision.preset,
+        context.decision.collection.is_some(),
     )?;
     // The binding check above limits total artifact bytes. A matching hash can
     // still cover malformed or unrelated observations, so validate their
@@ -2861,6 +2926,140 @@ mod tests {
                 "{operation:?}"
             );
         }
+    }
+
+    #[test]
+    fn draft_candidate_passing_requires_every_resolved_policy_gate() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate_sources::{ContentPhase, IndependentContent};
+        struct Bytes;
+        impl IndependentContent for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, _: ContentPhase) -> io::Result<Self::Reader> {
+                Ok(Cursor::new(b"abc".to_vec()))
+            }
+        }
+        let change = change();
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='advisory'\nkind='word_count'\nmin=1\nblocking=false\n").unwrap();
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: change.base.clone(),
+            complete: true,
+            items: vec![],
+        };
+        let after = vec![CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        }];
+        let decision = OfflineDecisionContext {
+            change: &change,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let context = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let mut envelope = evaluate_draft_portable_candidate_verdict(
+            &context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+            validator_name: "aexeo",
+            validator_version: env!("CARGO_PKG_VERSION"),
+            required_checks: &["gate:7:article:words"],
+            exit_code: 0,
+            timed_out: false,
+        };
+        let verify = |envelope: &_| {
+            verify_draft_passing_candidate_with_content(
+                envelope,
+                &context,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Bytes,
+                1024,
+                1024,
+            )
+        };
+        assert!(verify(&envelope).is_ok());
+        let mut failed_advisory = envelope.clone();
+        failed_advisory
+            .verdict
+            .checks
+            .iter_mut()
+            .find(|check| check.id == "gate:7:article:advisory")
+            .unwrap()
+            .status = CheckStatus::Failed;
+        failed_advisory.verdict.summary.passed -= 1;
+        failed_advisory.verdict.summary.failed += 1;
+        assert!(
+            verify(&failed_advisory).is_ok(),
+            "advisory failures remain nonblocking"
+        );
+        let mut changed_blocking = envelope.clone();
+        changed_blocking
+            .verdict
+            .checks
+            .iter_mut()
+            .find(|check| check.id == "gate:7:article:advisory")
+            .unwrap()
+            .blocking = true;
+        assert!(
+            verify(&changed_blocking).is_err(),
+            "inconsistent blocking was accepted"
+        );
+        envelope
+            .verdict
+            .checks
+            .retain(|check| check.id != "gate:7:article:advisory");
+        envelope.verdict.summary.checks -= 1;
+        envelope.verdict.summary.passed -= 1;
+        assert!(
+            verify(&envelope).is_err(),
+            "omitted advisory gate was accepted"
+        );
+    }
+
+    #[test]
+    fn candidate_policy_coverage_handles_collection_and_utf8_entity_ids() {
+        let mut change = change();
+        let mut other = change.entries[0].clone();
+        other.entity_id = "été".into();
+        change.entries.push(other);
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='title'\n").unwrap();
+        let mut verdict = evaluate(&change, 1).unwrap();
+        verdict.checks.push(Check {
+            id: "collection:0::unique".into(),
+            status: CheckStatus::Passed,
+            blocking: true,
+            reason: None,
+        });
+        assert!(verify_candidate_policy_coverage(&verdict, &change, &policy, true).is_ok());
+        assert!(verify_candidate_policy_coverage(&verdict, &change, &policy, false).is_err());
+        verdict
+            .checks
+            .iter_mut()
+            .find(|check| check.id == "gate:5:été:words")
+            .unwrap()
+            .id = "gate:3:été:words".into();
+        assert!(verify_candidate_policy_coverage(&verdict, &change, &policy, true).is_err());
     }
 
     #[test]
