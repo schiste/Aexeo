@@ -98,6 +98,12 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   workspace (currently 2024 here). Invoking `rustfmt` with a different edition
   can change import ordering; check the focused file with the same edition or
   use `cargo fmt` so it reads the manifest.
+- Before portable content-gate Python interoperability tests, create a venv in
+  the session scratch directory and install `docs/specs/content-gate/v2/requirements-test.txt`.
+  Run the tests with that venv's Python: missing schema validators fail closed
+  and do not establish an interoperability defect. When testing the native
+  comparator, set `AETHYME_CLI_BIN` to the intended executable and record its
+  version; without it, those native checks are skipped.
 - For filtered tests, verify the intended test names and nonzero executed test
   count. Rust `--exact` requires the full module-qualified test name; a zero-test
   run can exit successfully without exercising the change.
