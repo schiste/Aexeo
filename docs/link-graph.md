@@ -174,7 +174,14 @@ same breakdown. Evidence includes `conditional_markup`; its absence in an older
 report means unknown, not false; the new counts are also absent in old reports,
 not zero. Reports generated before closed-dialog detection may incorrectly count
 those links as nonconditional; regenerate them. Scripts and CSS can change the
-dialog state or appearance. A link with an HTML `hidden` attribute on itself or an ancestor is
+dialog state or appearance. An HTML `inert` attribute on a link or an HTML
+ancestor also marks the link conditional in `conditional_markup`, while retaining
+its body or component context. This is a static source observation, not proof
+of actual interactivity: scripts, modal dialogs, shadow trees and other runtime
+behavior can change the result. The boolean attribute is present even when its
+value is `false`. Regenerate reports produced before inert detection; their
+`conditional_markup: false` did not account for this attribute. Aggregate
+`conditional_link_count` telemetry includes these links. A link with an HTML `hidden` attribute on itself or an ancestor is
 also counted as conditional, including `hidden="until-found"`. Evidence records
 `hidden_attribute`; its absence in older reports means unobserved. Historical
 aggregate counts were calculated before this field existed and are not revised:

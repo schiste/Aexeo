@@ -1413,3 +1413,39 @@ fn graph_exposes_anchor_labels_and_aggregate_only_telemetry() {
     assert!(!telemetry.contains("Private label"));
     assert!(!telemetry.contains("example.org"));
 }
+
+#[test]
+fn inert_links_are_retained_as_conditional_body_evidence() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.json");
+    let input = serde_json::json!({
+        "version":1,
+        "identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},
+        "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":false,
+        "pages":[
+            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<main><div inert><p><a href='/b'>private anchor</a></p></div></main>"},
+            {"url":"https://example.org/b", "status_code":200, "response_headers":{}, "html":"<main>B</main>"}
+        ]
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(path)
+        .arg("--telemetry")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let destination = &report["links"]["destinations"][0];
+    assert_eq!(destination["source_pages_by_context"]["body"], 1);
+    assert_eq!(destination["conditional_source_pages"], 1);
+    assert_eq!(destination["nonconditional_source_pages"], 0);
+    assert_eq!(destination["evidence"][0]["conditional_markup"], true);
+    let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(event["conditional_link_count"], 1);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("private anchor"));
+}
