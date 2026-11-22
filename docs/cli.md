@@ -258,6 +258,9 @@ Options:
       --input <input>
           Versioned JSON batch file, or - for stdin; may contain private content
 
+      --export-link-observations
+          Export complete source-bound link observation templates as JSON; output may contain private URLs
+
       --content-root <content-root>
           Authorize an absolute content root for referenced file states
 
