@@ -137,6 +137,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   visible paragraphs. An omitted block can hide a boundary; withhold completeness
   unless the consumer can preserve that boundary, and distinguish unknown from
   an observed empty structure.
+- For Markdown source scans over parser text-node slices, test escapes and
+  image prefixes at node boundaries against the original source: the parser can
+  split away the preceding character. Include code-marked text and verify the
+  original source positions of both included and excluded candidates.
 - For Markdown footnote projection tests, include a matching footnote definition: unresolved markers follow a different parser path. Check adjacent words, punctuation and original source coordinates separately.
 - For rules with overlapping triggers, isolate the trigger under test in the
   regression fixture and confirm the test fails before the fix; another
