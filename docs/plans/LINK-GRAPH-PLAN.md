@@ -32,6 +32,14 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- Index observed response paths when reconciling inventory aliases, and group
+  observations by page. This preserves first-observation precedence and report
+  ordering while avoiding repeated scans. The standalone release-mode example
+  `cargo run --release -p aexeo-core --example link_alias_bench -- 2000 3`
+  exercises the complete report; on one local run its mean fell from 24.8 ms to
+  10.7 ms. This synthetic measurement is not a CI budget or a guarantee for
+  other sites; inventory uncertainty and orphan qualification are unchanged.
+
 - Restrict document base, canonical and robots metadata to HTML-namespace
   elements. Homonymous SVG elements cannot redirect relative-link resolution
   or introduce a false canonical; report tests cover incoming body-link counts.
