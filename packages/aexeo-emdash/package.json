@@ -55,6 +55,7 @@
   "files": [
     "dist",
     "wasm",
+    "scripts/benchmark-wasm-startup.mjs",
     "INSTALL.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -69,6 +70,7 @@
     "typecheck:src": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "node scripts/check-native-families.mjs && vitest run",
+    "bench:wasm-startup": "node scripts/benchmark-wasm-startup.mjs",
     "test:wasm": "node scripts/test-content-collection-wasm.mjs && node scripts/test-save-evaluation-wasm.mjs && node scripts/test-structured-lists-wasm.mjs && node scripts/test-literal-links-wasm.mjs && node scripts/test-fragment-revision-wasm.mjs && node scripts/test-list-attestation-wasm.mjs && node scripts/test-sandbox-list-wasm.mjs",
     "prepublishOnly": "npm run build"
   },
