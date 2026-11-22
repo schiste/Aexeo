@@ -1049,7 +1049,12 @@ mod tests {
             "version=1\nname='links'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\n",
         )
         .unwrap();
-        for target in ["https://example.org", "/guide"] {
+        for target in [
+            "https://example.org",
+            "HTTP://example.org",
+            "HtTpS://example.org",
+            "/guide",
+        ] {
             let document: EmdashDocument = serde_json::from_value(serde_json::json!({
                 "route": "/x", "title": "T", "body": [
                     {"children": [{"_type": "span", "text": "é "},

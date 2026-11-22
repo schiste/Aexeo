@@ -316,6 +316,18 @@ pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
 // one pass. These are review candidates, not evidence of host rendering.
 // Parsed links and Markdown code are excluded by the caller. The parser can
 // split text nodes, so this does not find every malformed link.
+fn is_literal_link_start(source: &str, offset: usize) -> bool {
+    let prefix = &source.as_bytes()[..offset];
+    prefix.last() != Some(&b'!')
+        && prefix
+            .iter()
+            .rev()
+            .take_while(|&&byte| byte == b'\\')
+            .count()
+            % 2
+            == 0
+}
+
 fn literal_link_candidates(raw: &str, base: usize, source: &str, offsets: &mut Vec<usize>) {
     let bytes = raw.as_bytes();
     let mut index = 0;
@@ -328,7 +340,7 @@ fn literal_link_candidates(raw: &str, base: usize, source: &str, offsets: &mut V
             continue;
         }
         match (state, byte) {
-            (0, b'[') if index == 0 || bytes[index - 1] != b'!' => {
+            (0, b'[') if is_literal_link_start(source, base + index) => {
                 start = Some(index);
                 state = 1;
             }
@@ -343,8 +355,12 @@ fn literal_link_candidates(raw: &str, base: usize, source: &str, offsets: &mut V
                 // the adjacent source token rather than treating that split as
                 // the end of the candidate; do not cross whitespace.
                 let tail = &source.as_bytes()[base + index + 1..];
-                if tail.starts_with(b"http://")
-                    || tail.starts_with(b"https://")
+                if tail
+                    .get(..7)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"http://"))
+                    || tail
+                        .get(..8)
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"https://"))
                     || tail.starts_with(b"/")
                     || tail.starts_with(b"./")
                     || tail.starts_with(b"../")
@@ -2316,6 +2332,20 @@ mod explicit_reference_candidate_tests {
         );
         let safe = r"[ok](/guide) \[escaped](/guide ![image](/guide `[code](/guide` [12]";
         assert_eq!(literal_markdown_link_offsets(safe).unwrap(), vec![0]);
+    }
+
+    #[test]
+    fn unfinished_http_schemes_are_case_insensitive() {
+        let source = "é [one](HTTP://example.org\n[two](HtTpS://example.net";
+        assert_eq!(
+            literal_markdown_link_offsets(source).unwrap(),
+            vec![source.find("[one]").unwrap(), source.find("[two]").unwrap()]
+        );
+        let ignored = r"\[escaped](HTTPS://example.org ![image](HTTP://example.org `[code](HtTpS://example.org`";
+        assert_eq!(
+            literal_markdown_link_offsets(ignored).unwrap(),
+            Vec::<usize>::new()
+        );
     }
 
     #[test]
