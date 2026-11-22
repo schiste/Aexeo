@@ -502,8 +502,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             &graph,
             Some(path),
         ));
-        let bytes = serde_json::to_vec_pretty(&graph)?;
-        fs::write(path, bytes)
+        super::link_graph::write_link_graph_file(path, &graph)
             .with_context(|| format!("cannot write link graph report: {path}"))?;
         if submatches.get_flag("link-graph-telemetry") {
             super::link_graph::emit_link_graph_telemetry(&graph, started);

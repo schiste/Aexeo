@@ -74,7 +74,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
     }
     let stdout = io::stdout();
     let writer = io::BufWriter::new(stdout.lock());
-    write_graph_json(writer, &report, matches.get_flag("compact"))?;
+    write_graph_json(writer, &report, matches.get_flag("compact"), true)?;
     Ok(0)
 }
 
@@ -84,15 +84,26 @@ fn write_graph_json<W: Write, T: serde::Serialize>(
     mut writer: W,
     value: &T,
     compact: bool,
+    trailing_newline: bool,
 ) -> Result<()> {
     if compact {
         serde_json::to_writer(&mut writer, value)?;
     } else {
         serde_json::to_writer_pretty(&mut writer, value)?;
     }
-    writer.write_all(b"\n")?;
+    if trailing_newline {
+        writer.write_all(b"\n")?;
+    }
     writer.flush()?;
     Ok(())
+}
+
+/// Write the same pretty JSON bytes as before, without building a second
+/// report-sized buffer. Like the previous direct file write, a failed write can
+/// leave a partial destination; caller path checks are unchanged.
+pub(super) fn write_link_graph_file(path: &str, report: &LinkReport) -> Result<()> {
+    let file = fs::File::create(path)?;
+    write_graph_json(io::BufWriter::new(file), report, false, false)
 }
 
 /// Read an audit link context file, for `link-graph --audit --context` and
@@ -211,7 +222,7 @@ mod output_tests {
         let value = serde_json::json!({"pages": [{"name": "café", "values": [1, 2]}]});
         for compact in [false, true] {
             let mut output = Vec::new();
-            write_graph_json(&mut output, &value, compact).unwrap();
+            write_graph_json(&mut output, &value, compact, true).unwrap();
             let expected = if compact {
                 serde_json::to_string(&value).unwrap()
             } else {
@@ -238,7 +249,7 @@ mod output_tests {
         }
         let value = vec!["link evidence"; 20_000];
         let mut output = BoundedWrites(0);
-        write_graph_json(&mut output, &value, false).unwrap();
+        write_graph_json(&mut output, &value, false, true).unwrap();
         assert!(output.0 > 200_000);
     }
 
@@ -253,8 +264,16 @@ mod output_tests {
                 Ok(())
             }
         }
-        let error = write_graph_json(WriteFailure, &serde_json::json!({}), true).unwrap_err();
+        let error = write_graph_json(WriteFailure, &serde_json::json!({}), true, true).unwrap_err();
         assert!(error.to_string().contains("write failed"));
+    }
+
+    #[test]
+    fn file_output_matches_legacy_pretty_bytes_without_newline() {
+        let value = serde_json::json!({"evidence": [{"label":"café", "count": 2}]});
+        let mut output = Vec::new();
+        write_graph_json(&mut output, &value, false, false).unwrap();
+        assert_eq!(output, serde_json::to_vec_pretty(&value).unwrap());
     }
 
     struct FlushFailure;
@@ -269,7 +288,8 @@ mod output_tests {
 
     #[test]
     fn output_flush_failure_is_reported() {
-        let error = write_graph_json(FlushFailure, &serde_json::json!({}), false).unwrap_err();
+        let error =
+            write_graph_json(FlushFailure, &serde_json::json!({}), false, true).unwrap_err();
         assert!(error.to_string().contains("flush failed"));
     }
 }

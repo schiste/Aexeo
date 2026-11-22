@@ -914,8 +914,14 @@ fn crawl_can_write_observational_link_graph_with_private_telemetry() {
         .unwrap();
     let payload = parse_json(&output.stdout);
     assert_eq!(payload["command"], "crawl");
-    let report: serde_json::Value =
-        serde_json::from_slice(&fs::read(&graph_path).unwrap()).unwrap();
+    let graph_bytes = fs::read(&graph_path).unwrap();
+    let typed_report: aexeo_core::link_report::LinkReport =
+        serde_json::from_slice(&graph_bytes).unwrap();
+    assert_eq!(
+        graph_bytes,
+        serde_json::to_vec_pretty(&typed_report).unwrap()
+    );
+    let report: serde_json::Value = serde_json::from_slice(&graph_bytes).unwrap();
     assert_eq!(payload["link_graph_summary"]["crawl_complete"], false);
     assert_eq!(
         payload["link_graph_summary"]["page_count"],

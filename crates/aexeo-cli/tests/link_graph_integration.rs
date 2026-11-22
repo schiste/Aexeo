@@ -1239,7 +1239,14 @@ fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
         .unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&output.stdout)
         .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
-    let report: serde_json::Value = serde_json::from_slice(&fs::read(&graph).unwrap()).unwrap();
+    let graph_bytes = fs::read(&graph).unwrap();
+    let typed_report: aexeo_core::link_report::LinkReport =
+        serde_json::from_slice(&graph_bytes).unwrap();
+    assert_eq!(
+        graph_bytes,
+        serde_json::to_vec_pretty(&typed_report).unwrap()
+    );
+    let report: serde_json::Value = serde_json::from_slice(&graph_bytes).unwrap();
     assert_eq!(report["crawl_complete"], false);
     assert_eq!(payload["link_graph_summary"]["crawl_complete"], false);
     assert_eq!(

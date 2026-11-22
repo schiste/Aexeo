@@ -682,6 +682,11 @@ outputs, including the stored audit. Incomplete or unmapped observations never
 confirm an orphan. Use `report render <audit> --link-graph graph.json` to
 reproduce qualifications later.
 
+Graph files from `check` and `crawl` are written progressively as the same
+pretty JSON, without a separate report-sized serialized buffer. Like the
+previous direct file write, an I/O error can leave a partial file. The existing
+path validation and file permissions behavior are unchanged.
+
 The stored audit now contains the parsed site's HTML when graph output is
 requested, and the graph includes source context and file paths: treat both as
 potentially sensitive. Opt-in telemetry on stderr contains only aggregate
