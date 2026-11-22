@@ -297,7 +297,7 @@ impl CompositionProfile {
         if !self.assess(input)?.is_empty() {
             bail!("composition does not satisfy the profile");
         }
-        self.assemble_snapshot(input)
+        self.assemble_assessed(input)
     }
 
     /// Reconstruct a well-formed snapshot even when advisory bounds fail.
@@ -309,6 +309,11 @@ impl CompositionProfile {
         {
             bail!("composition has invalid structure");
         }
+        self.assemble_assessed(input)
+    }
+
+    // Both callers have already assessed the same immutable input.
+    fn assemble_assessed(&self, input: &Value) -> Result<String> {
         let object = input
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("composition must be a JSON object"))?;
@@ -318,13 +323,12 @@ impl CompositionProfile {
                 .get(&field.name)
                 .ok_or_else(|| anyhow::anyhow!("composition field is missing"))?;
             if let Some(text) = value.as_str() {
-                parts.push(text.to_owned());
+                parts.push(text);
             } else if let Some(array) = value.as_array() {
                 for item in array {
                     parts.push(
                         item.as_str()
-                            .ok_or_else(|| anyhow::anyhow!("composition item is not a string"))?
-                            .to_owned(),
+                            .ok_or_else(|| anyhow::anyhow!("composition item is not a string"))?,
                     );
                 }
             }
@@ -434,6 +438,13 @@ mod tests {
         let input = json!({"items": vec![""; 1000]});
         assert!(profile.assess(&input).is_ok());
         assert!(profile.assemble(&input).is_err());
+        assert!(profile.assemble_snapshot(&input).is_err());
+        let boundary = json!({"items": ["a".repeat(MAX_TEXT_BYTES - 1024), ""]});
+        assert_eq!(profile.assemble(&boundary).unwrap().len(), MAX_TEXT_BYTES);
+        assert_eq!(
+            profile.assemble_snapshot(&boundary).unwrap().len(),
+            MAX_TEXT_BYTES
+        );
     }
 
     #[test]
