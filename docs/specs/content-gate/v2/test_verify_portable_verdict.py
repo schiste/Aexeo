@@ -201,6 +201,17 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaisesRegex(VerificationError, 'media'):
             require_policy_coverage(policy, change, False, verdict)
 
+    def test_extra_passing_check_cannot_satisfy_host_requirement(self):
+        self.assertFalse(self.check()['publication_authorized'])
+        extra = {'id': 'gate:7:article:unconfigured', 'status': 'passed', 'blocking': True}
+        for envelope in (self.previous, self.fresh):
+            envelope['verdict']['checks'].append(copy.deepcopy(extra))
+            envelope['verdict']['summary']['checks'] += 1
+            envelope['verdict']['summary']['passed'] += 1
+        self.required.append(extra['id'])
+        with self.assertRaisesRegex(VerificationError, 'unexpected'):
+            self.check()
+
     def test_rebound_empty_policy_is_rejected(self):
         # Both outputs and their binding agree, but Rust cannot evaluate an
         # empty preset. Existing checks must not make the policy valid.
@@ -248,6 +259,7 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             require_policy_coverage(policy, change, True, verdict)
         policy['gates'].pop()
+        verdict['checks'].pop()
         second = copy.deepcopy(change['entries'][0])
         second['entity_id'] = 'second'
         change['entries'].append(second)

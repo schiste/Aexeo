@@ -1122,6 +1122,9 @@ fn verify_candidate_policy_coverage(
             bail!("resolved policy check is missing");
         }
     }
+    if expected != checks.len() {
+        bail!("unexpected check outside resolved policy");
+    }
     let needs_item_checks = preset.gates.iter().any(|gate| {
         !(has_collection
             && matches!(
@@ -3027,6 +3030,19 @@ mod tests {
             )
         };
         assert!(verify(&envelope).is_ok());
+        let mut extra_check = envelope.clone();
+        extra_check.verdict.checks.push(Check {
+            id: "gate:7:article:unconfigured".into(),
+            status: CheckStatus::Passed,
+            blocking: true,
+            reason: None,
+        });
+        extra_check.verdict.summary.checks += 1;
+        extra_check.verdict.summary.passed += 1;
+        assert!(
+            verify(&extra_check).is_err(),
+            "unexpected check was accepted"
+        );
         let mut failed_advisory = envelope.clone();
         failed_advisory
             .verdict

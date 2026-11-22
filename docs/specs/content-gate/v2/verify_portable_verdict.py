@@ -123,6 +123,8 @@ def require_policy_coverage(policy, change, has_collection, verdict):
         # Bound work before forming a Cartesian product of untrusted inputs.
         if expected_count > len(checks):
             raise VerificationError('resolved policy check is missing')
+    if expected_count != len(checks):
+        raise VerificationError('unexpected check outside resolved policy')
     needs_items = any(not (gate['kind'] == 'unique_collection_metadata' and has_collection)
                       for gate in policy['gates'])
     if needs_items and any(entry.get('after') is not None and entry['media_type'] not in

@@ -274,7 +274,9 @@ verdict whose declared HTML scope or validator version differs from those option
 It also compares each validator profile with the resolved policy name. For the
 currently understood Aexeo v1 resolved-policy artifact, it requires a check for
 each configured gate and applicable changed item, or the collection-scoped check
-when a collection is supplied, with the configured blocking flag. Unknown gate
+when a collection is supplied, with the configured blocking flag. It also
+rejects additional checks outside that policy in the supported candidate profile;
+an unconfigured check cannot satisfy a host-required check. Unknown gate
 kinds, policy versions and empty gate lists are rejected. This detects omitted checks even if the
 host's explicit required-check list omits them. It does not validate every gate
 parameter, prove the evaluator ran the checks correctly, or authenticate the
