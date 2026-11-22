@@ -1226,7 +1226,7 @@ impl ComposedBaseline {
         preset: ContentPreset,
         html_scope: crate::html_content_adapter::HtmlContentScope,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, None)
+        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, None, None)
     }
 
     /// Prepare both item and collection scopes with source-bound link observations.
@@ -1237,7 +1237,36 @@ impl ComposedBaseline {
         html_scope: crate::html_content_adapter::HtmlContentScope,
         observations: BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, Some(observations))
+        Self::prepare_with_observations(
+            snapshot,
+            metadata,
+            preset,
+            html_scope,
+            Some(observations),
+            None,
+        )
+    }
+
+    /// Prepare item evidence gates and collection gates against the same base.
+    /// Evidence provenance, freshness and completeness remain host responsibilities.
+    pub fn prepare_adapted_with_evidence(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        observations: Option<
+            BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: IncrementalEvidence,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_observations(
+            snapshot,
+            metadata,
+            preset,
+            html_scope,
+            observations,
+            Some(evidence),
+        )
     }
 
     fn prepare_with_observations(
@@ -1248,6 +1277,7 @@ impl ComposedBaseline {
         observations: Option<
             BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
         >,
+        evidence: Option<IncrementalEvidence>,
     ) -> Result<Self, NotChecked> {
         preset
             .validate()
@@ -1265,7 +1295,21 @@ impl ComposedBaseline {
                 "mixed preset must contain item and collection gates",
             ));
         }
-        let items = if let Some(observations) = observations {
+        let items = if let Some(evidence) = evidence {
+            let item_metadata = items
+                .gates
+                .iter()
+                .any(is_item_metadata_gate)
+                .then(|| metadata.clone());
+            IncrementalBaseline::prepare_adapted_with_evidence(
+                snapshot.clone(),
+                items,
+                html_scope,
+                item_metadata,
+                observations,
+                evidence,
+            )?
+        } else if let Some(observations) = observations {
             let item_metadata = items
                 .gates
                 .iter()
@@ -1310,7 +1354,7 @@ impl ComposedBaseline {
     /// collection cannot be hidden by a successful result in the other scope.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> ComposedEvaluation {
         let overlay = checked_overlay(&self.items.snapshot, change, after);
-        self.evaluate_with_overlay(change, overlay, None)
+        self.evaluate_with_overlay(change, overlay, None, None)
     }
 
     /// Evaluate both scopes after verifying all host-supplied referenced states.
@@ -1331,7 +1375,7 @@ impl ComposedBaseline {
             max_state_bytes,
             max_total_bytes,
         );
-        self.evaluate_with_overlay(change, overlay, None)
+        self.evaluate_with_overlay(change, overlay, None, None)
     }
 
     /// Evaluate both scopes using an explicit complete candidate link inventory.
@@ -1342,7 +1386,7 @@ impl ComposedBaseline {
         observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
     ) -> ComposedEvaluation {
         let overlay = checked_overlay(&self.items.snapshot, change, after);
-        self.evaluate_with_overlay(change, overlay, Some(observations))
+        self.evaluate_with_overlay(change, overlay, Some(observations), None)
     }
 
     /// Evaluate both scopes after checking referenced content and link inventories.
@@ -1365,7 +1409,48 @@ impl ComposedBaseline {
             max_state_bytes,
             max_total_bytes,
         );
-        self.evaluate_with_overlay(change, overlay, Some(observations))
+        self.evaluate_with_overlay(change, overlay, Some(observations), None)
+    }
+
+    /// Evaluate both scopes with an explicit candidate evidence inventory.
+    pub fn evaluate_with_evidence(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        observations: Option<
+            &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: &IncrementalEvidence,
+    ) -> ComposedEvaluation {
+        let overlay = checked_overlay(&self.items.snapshot, change, after);
+        self.evaluate_with_overlay(change, overlay, observations, Some(evidence))
+    }
+
+    /// Evaluate both scopes after verifying referenced states, with candidate evidence.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_sources_and_evidence<
+        P: crate::content_gate_sources::ConfinedContentFiles,
+    >(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+        observations: Option<
+            &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: &IncrementalEvidence,
+    ) -> ComposedEvaluation {
+        let overlay = checked_overlay_with_sources(
+            &self.items.snapshot,
+            change,
+            after,
+            provider,
+            max_state_bytes,
+            max_total_bytes,
+        );
+        self.evaluate_with_overlay(change, overlay, observations, Some(evidence))
     }
 
     /// Project candidate metadata after verifying all host-supplied referenced states.
@@ -1393,6 +1478,7 @@ impl ComposedBaseline {
         observations: Option<
             &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
         >,
+        evidence: Option<&IncrementalEvidence>,
     ) -> ComposedEvaluation {
         let item_result = self
             .items
@@ -1400,7 +1486,7 @@ impl ComposedBaseline {
             .and_then(|()| overlay.as_ref().map_err(Clone::clone))
             .and_then(|overlay| {
                 self.items
-                    .evaluate_overlay(change, overlay, observations, None)
+                    .evaluate_overlay(change, overlay, observations, evidence)
             });
         let collection_result = overlay
             .as_ref()
@@ -1660,6 +1746,85 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn composed_evidence_reuses_independent_reports_and_preserves_collection() {
+        let (mut snapshot, _, mut change) = fixture();
+        let a = item("a", "claim", None);
+        let b = item("b", "claim", None);
+        snapshot.items = vec![a.clone(), b.clone()];
+        let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='claim'\nquote='quote'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let metadata = BTreeMap::from([
+            (
+                "a".into(),
+                Some(BTreeMap::from([("slug".into(), "a".into())])),
+            ),
+            (
+                "b".into(),
+                Some(BTreeMap::from([("slug".into(), "b".into())])),
+            ),
+        ]);
+        let source = BTreeMap::from([("study".into(), "quote".into())]);
+        let base = BTreeMap::from([("a".into(), source.clone()), ("b".into(), source)]);
+        let baseline = ComposedBaseline::prepare_adapted_with_evidence(
+            snapshot,
+            metadata,
+            preset,
+            crate::html_content_adapter::HtmlContentScope::Document,
+            None,
+            base.clone(),
+        )
+        .unwrap();
+        let next = item("a", "claim revised", None);
+        let mut update = entry("a", Operation::Update, Some(&a), Some(&next));
+        update.metadata = Some(BTreeMap::from([("slug".into(), "a".into())]));
+        change.entries = vec![update];
+        let after = std::slice::from_ref(&next);
+        let result = baseline.evaluate_with_evidence(&change, after, None, &base);
+        assert!(matches!(
+            result.items,
+            IncrementalEvaluation::Evaluated {
+                evaluated: 1,
+                reused: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            result.collection,
+            CollectionEvaluation::Report { .. }
+        ));
+        let mut changed = base.clone();
+        changed
+            .get_mut("b")
+            .unwrap()
+            .insert("study".into(), "different".into());
+        let result = baseline.evaluate_with_evidence(&change, after, None, &changed);
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = result.items
+        else {
+            panic!("item result unavailable")
+        };
+        assert_eq!((evaluated, reused), (2, 0));
+        assert_eq!(reports["b"].gates[0].status, GateStatus::Failed);
+        changed.remove("b");
+        let result = baseline.evaluate_with_evidence(&change, after, None, &changed);
+        assert!(matches!(
+            result.items,
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        assert!(matches!(
+            result.collection,
+            CollectionEvaluation::Report { .. }
+        ));
+        assert!(matches!(
+            baseline.evaluate(&change, after).items,
+            IncrementalEvaluation::NotChecked { .. }
+        ));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use aexeo_core::{
     content_gate_verdict::LinkObservationSnapshot,
     content_incremental::{
         CollectionBaseline, CollectionEvaluation, ComposedBaseline, IncrementalBaseline,
-        IncrementalEvaluation, NotChecked,
+        IncrementalEvaluation, IncrementalEvidence, NotChecked,
     },
     content_presets::{builtin_content_presets, resolve_content_preset},
     html_content_adapter::HtmlContentScope,
@@ -46,6 +46,8 @@ struct Batch {
     base_metadata: Option<Metadata>,
     #[serde(default, deserialize_with = "observations_if_present")]
     base_link_observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
+    #[serde(default, deserialize_with = "evidence_if_present")]
+    base_evidence: Option<IncrementalEvidence>,
     proposals: Vec<Proposal>,
 }
 type Metadata = BTreeMap<String, Option<BTreeMap<String, String>>>;
@@ -60,6 +62,12 @@ fn observations_if_present<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<BTreeMap<String, LinkObservationSnapshot>>, D::Error> {
     BTreeMap::deserialize(deserializer).map(Some)
+}
+
+fn evidence_if_present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<IncrementalEvidence>, D::Error> {
+    IncrementalEvidence::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -77,6 +85,8 @@ struct Proposal {
     after: Vec<CandidateItem>,
     #[serde(default, deserialize_with = "observations_if_present")]
     link_observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
+    #[serde(default, deserialize_with = "evidence_if_present")]
+    evidence: Option<IncrementalEvidence>,
 }
 
 enum Baseline {
@@ -91,6 +101,7 @@ fn prepare_baseline(
     preset: ContentPreset,
     mode: Mode,
     observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
+    evidence: Option<IncrementalEvidence>,
 ) -> Result<Baseline, NotChecked> {
     let collection_gates = preset
         .gates
@@ -102,9 +113,9 @@ fn prepare_baseline(
             reason: "base metadata inventory is required for collection gates".into(),
         })?;
         if collection_gates == preset.gates.len() {
-            if observations.is_some() {
+            if observations.is_some() || evidence.is_some() {
                 return Err(NotChecked {
-                    reason: "link observations require a reachability gate".into(),
+                    reason: "link observations and evidence require item gates".into(),
                 });
             }
             return CollectionBaseline::prepare(snapshot, metadata, preset)
@@ -119,7 +130,16 @@ fn prepare_baseline(
                 });
             }
         };
-        let composed = if let Some(observations) = observations {
+        let composed = if let Some(evidence) = evidence {
+            ComposedBaseline::prepare_adapted_with_evidence(
+                snapshot,
+                metadata,
+                preset,
+                scope,
+                observations,
+                evidence,
+            )
+        } else if let Some(observations) = observations {
             ComposedBaseline::prepare_adapted_with_link_observations(
                 snapshot,
                 metadata,
@@ -131,6 +151,26 @@ fn prepare_baseline(
             ComposedBaseline::prepare_adapted_with_html_scope(snapshot, metadata, preset, scope)
         };
         return composed.map(|baseline| Baseline::Composed(Box::new(baseline)));
+    }
+    if let Some(evidence) = evidence {
+        let scope = match mode {
+            Mode::Adapted => HtmlContentScope::Document,
+            Mode::AdaptedMain => HtmlContentScope::Main,
+            _ => {
+                return Err(NotChecked {
+                    reason: "evidence requires an adapted mode".into(),
+                });
+            }
+        };
+        return IncrementalBaseline::prepare_adapted_with_evidence(
+            snapshot,
+            preset,
+            scope,
+            metadata,
+            observations,
+            evidence,
+        )
+        .map(Baseline::Items);
     }
     if let Some(observations) = observations {
         let scope = match mode {
@@ -280,6 +320,9 @@ fn export_observation_templates(
     };
     if !batch.snapshot.complete {
         bail!("base inventory completeness is not attested");
+    }
+    if batch.base_evidence.is_some() || batch.proposals.iter().any(|p| p.evidence.is_some()) {
+        bail!("remove evidence inventories before exporting link templates");
     }
     if batch.base_link_observations.is_some()
         || batch
@@ -471,6 +514,12 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         .flatten()
         .filter(|state| state.inline.is_none())
         .count();
+    let base_evidence_supplied = batch.base_evidence.is_some();
+    let proposals_with_evidence = batch
+        .proposals
+        .iter()
+        .filter(|p| p.evidence.is_some())
+        .count();
     let base_link_observations_supplied = batch.base_link_observations.is_some();
     let proposals_with_link_observations = batch
         .proposals
@@ -486,6 +535,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         preset,
         batch.mode,
         batch.base_link_observations,
+        batch.base_evidence,
     );
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     let mut totals = Totals::default();
@@ -496,7 +546,26 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 true,
             ),
             Ok(Baseline::Items(baseline)) => {
-                let result = if let Some(observations) = &proposal.link_observations {
+                let result = if let Some(evidence) = &proposal.evidence {
+                    if let Some(provider) = providers[index].as_mut() {
+                        baseline.evaluate_with_sources_and_evidence(
+                            &proposal.change,
+                            &proposal.after,
+                            provider,
+                            MAX_CONTENT_INPUT_BYTES,
+                            MAX_TOTAL_CONTENT_BYTES,
+                            proposal.link_observations.as_ref(),
+                            evidence,
+                        )
+                    } else {
+                        baseline.evaluate_with_evidence(
+                            &proposal.change,
+                            &proposal.after,
+                            proposal.link_observations.as_ref(),
+                            evidence,
+                        )
+                    }
+                } else if let Some(observations) = &proposal.link_observations {
                     if let Some(provider) = providers[index].as_mut() {
                         baseline.evaluate_with_sources_and_link_observations(
                             &proposal.change,
@@ -527,10 +596,14 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 let unchecked = totals.items(&result);
                 (serde_json::to_value(result)?, unchecked)
             }
-            Ok(Baseline::Collection(_)) if proposal.link_observations.is_some() => (
-                serde_json::json!({"status":"not_checked", "reason":"link observations require a reachability gate"}),
-                true,
-            ),
+            Ok(Baseline::Collection(_))
+                if proposal.link_observations.is_some() || proposal.evidence.is_some() =>
+            {
+                (
+                    serde_json::json!({"status":"not_checked", "reason":"link observations and evidence require item gates"}),
+                    true,
+                )
+            }
             Ok(Baseline::Collection(baseline)) => {
                 let result = if let Some(provider) = providers[index].as_mut() {
                     baseline.evaluate_with_sources(
@@ -550,7 +623,26 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 )
             }
             Ok(Baseline::Composed(baseline)) => {
-                let result = if let Some(observations) = &proposal.link_observations {
+                let result = if let Some(evidence) = &proposal.evidence {
+                    if let Some(provider) = providers[index].as_mut() {
+                        baseline.evaluate_with_sources_and_evidence(
+                            &proposal.change,
+                            &proposal.after,
+                            provider,
+                            MAX_CONTENT_INPUT_BYTES,
+                            MAX_TOTAL_CONTENT_BYTES,
+                            proposal.link_observations.as_ref(),
+                            evidence,
+                        )
+                    } else {
+                        baseline.evaluate_with_evidence(
+                            &proposal.change,
+                            &proposal.after,
+                            proposal.link_observations.as_ref(),
+                            evidence,
+                        )
+                    }
+                } else if let Some(observations) = &proposal.link_observations {
                     if let Some(provider) = providers[index].as_mut() {
                         baseline.evaluate_with_sources_and_link_observations(
                             &proposal.change,
@@ -598,7 +690,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_link_observations_supplied":base_link_observations_supplied, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
         );
     }
     Ok(if totals.not_checked != 0 {

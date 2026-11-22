@@ -1920,8 +1920,7 @@ objects with `change` and `after`, as in `content-impact`). The batch is limited
 to 16 MiB, 256 base items or changed projections per proposal, and 16 proposals.
 Inline change content works by default. Referenced states require explicit host
 access as described below. The `final_newline` source gate also runs in plain
-mode against each complete supplied source. Other source-dependent, site and
-external gates remain unsupported and are `not_checked`. A complete synthetic example is
+mode against each complete supplied source. Other source-dependent and site gates remain unsupported and are `not_checked`. A complete synthetic example is
 [`incremental-batch.json`](../crates/aexeo-cli/tests/fixtures/incremental-batch.json);
 it exercises a composed item and collection preset and is tested through the
 CLI. The example is illustrative; it does not establish a real site's inventory.
@@ -1961,6 +1960,18 @@ revision and establish its authenticity and freshness. Item metadata gates and
 mixed item/collection presets require `adapted` or `adapted_main` mode.
 Collection-only presets may use any mode. The supported collection gate is
 `unique_collection_metadata`; other collection gates are not inferred.
+
+For evidence gates, `base_evidence` maps every base entity ID to a map of
+source names and their exact string snapshots. Every proposal must provide its
+own `evidence` map covering the candidate identities, including unchanged
+entities. These maps must be omitted or objects; explicit `null` is invalid.
+This requires `adapted` or `adapted_main` and supports the existing evidence
+anchor, structured fact, evidence review and review-age gates, including with
+item metadata, link observations and collection gates. Changing an entity's
+evidence forces its item report to be evaluated again. Missing evidence or an
+incomplete identity inventory is not checked. Evidence is supplied by the host;
+Aexeo does not establish source authenticity, freshness, entailment or truth.
+Telemetry reports only inventory counts and never evidence contents.
 
 Stdout is newline-delimited JSON, one result per proposal, in input order. Each
 record has `schema`, `proposal_index`, and `result`. An `evaluated` result has
