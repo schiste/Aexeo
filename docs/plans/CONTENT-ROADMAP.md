@@ -304,6 +304,11 @@ registry before considering the release delivered.
 - [x] Measure EmDash projection separately from projection plus evaluation on a
   synthetic 500-block snapshot, with local aggregate p50/p95 and CI budgets.
   These measurements exclude JSON parsing, WASM startup and network latency.
+- [x] Avoid an unnecessary second HTML parse when the lexical source map
+  exactly matches the projection. Recheck masked reference labels against the
+  parsed projection. `cargo run --release -p aexeo-core --example
+  html_source_map_bench` reports separate synthetic ordinary and citation cases;
+  it is a local diagnostic, not a CI performance budget.
 - [x] Record fresh-process Node module import, first WASM evaluation and total
   process p50/p95 on a synthetic item. The benchmark runs against the real
   bundled bridge, checks its output and fails if the bridge is missing. CI
