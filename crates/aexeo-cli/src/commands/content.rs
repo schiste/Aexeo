@@ -173,6 +173,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("fix") && (path == "-" || args.get_flag("no-text")) {
         user_bail!("--fix requires a local content file");
     }
+    let adapter_json =
+        args.get_one::<String>("input-format").map(String::as_str) == Some("adapter-json");
+    if adapter_json && (args.get_flag("fix") || args.get_flag("export-adapter-input")) {
+        user_bail!("adapter-json cannot be combined with --fix or --export-adapter-input");
+    }
     let measuring = args.get_flag("telemetry");
     let input_started = measuring.then(std::time::Instant::now);
     let is_markdown =
@@ -284,6 +289,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut structured_lists = None;
     let mut paragraph_list_items = None;
     let mut destinations = None;
+    let mut adapter_source = None;
+    let mut host_projection = None;
     // The event exists only on request and never contains content, paths, or URLs.
     let mut html_projection = (measuring
         && args.get_one::<String>("input-format").map(String::as_str) == Some("html"))
@@ -382,6 +389,25 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 }
             }
         }
+        (Some("adapter-json"), Some(data)) => {
+            let adapted = super::content_adapter::parse(id, &data)
+                .user_context("invalid adapter JSON projection")?;
+            host_projection = Some(serde_json::json!({
+                "paragraphs": adapted.context.paragraphs.as_ref().map(Vec::len),
+                "lists": adapted.lists.as_ref().map(Vec::len),
+                "headings": adapted.input.headings.as_ref().map(Vec::len),
+                "link_destinations": adapted.destinations.as_ref().map(Vec::len),
+                "paragraph_list_classification": adapted.paragraph_list_items.is_some()
+            }));
+            adapter_source = Some(data);
+            structured_lists = adapted.lists;
+            heading_levels = adapted.headings;
+            paragraph_list_items = adapted.paragraph_list_items;
+            link_count = adapted.destinations.as_ref().map(Vec::len);
+            destinations = adapted.destinations;
+            context = Some(adapted.context);
+            adapted.input
+        }
         (Some("paragraph-text"), Some(text)) => {
             match aexeo_core::plain_text_adapter::paragraph_text_context(&text) {
                 Ok(capabilities) => {
@@ -418,6 +444,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         },
     };
     let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
+    if measuring && let Some(projection) = host_projection {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"content_adapter_projection", "version":1, "duration_ms":adapter_ms, "observations":projection})
+        );
+    }
     input.metadata = metadata;
     input.evidence_sources = evidence_sources;
     if args.get_flag("export-adapter-input") {
@@ -559,7 +591,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
-    let plain_source = if source_map.is_none() && source_complete {
+    let plain_source = if source_map.is_none() && source_complete && !adapter_json {
         input
             .source_text
             .as_deref()
@@ -641,6 +673,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         };
         let positions = hierarchy_positions
             .or_else(|| {
+                if adapter_json {
+                    return None;
+                }
                 aexeo_core::markdown_adapter::list_source_positions(
                     structured_lists.as_deref()?,
                     gate,
@@ -748,7 +783,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         output["resolved_policy_fingerprint"] = serde_json::json!({
             "version": 1, "sha256": super::feedback::policy_hash(&policy)?
         });
-        if let Some(source) = input.source_text.as_ref().filter(|_| source_complete) {
+        if let Some(source) = adapter_source
+            .as_ref()
+            .or(input.source_text.as_ref())
+            .filter(|_| source_complete)
+        {
             let text_sha256 = super::feedback::text_hash(source.as_bytes());
             let metadata_sha256 = input
                 .metadata
@@ -774,6 +813,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             output["source_location_capability"] = serde_json::json!({
                 "status": if html_map.is_some() { "literal_html" } else if mapping_available { "identity_projection" } else { "unavailable" },
                 "finding_coordinates": "projected_text"
+            });
+        }
+        if adapter_json {
+            output["source_location_capability"] = serde_json::json!({
+                "status": "unavailable", "finding_coordinates": "projected_text"
             });
         }
         if args.get_one::<String>("html-scope").map(String::as_str) == Some("main") {
@@ -816,6 +860,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                         mapping_available
                             || args.get_one::<String>("input-format").map(String::as_str)
                                 == Some("html")
+                            || adapter_json
                     )
                 );
                 if let Some(suggestion) = &finding.suggestion {

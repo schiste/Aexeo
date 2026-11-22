@@ -100,6 +100,12 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Accept explicitly complete host-projected paragraphs, list counts,
+  headings and ordered link destinations through a bounded, versioned CLI JSON
+  adapter. Missing capabilities remain not checked; report binding covers the
+  complete supplied JSON and telemetry contains aggregate counts only. Host
+  completeness, provenance and source locations remain unverified.
+
 - [x] Reuse one Markdown parse for optional list and link observations alongside
   content projection in the single-content CLI, change verdicts and adapted
   incremental evaluation. Unobserved embedded HTML still withholds structural

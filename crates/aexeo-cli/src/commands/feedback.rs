@@ -195,7 +195,8 @@ fn build_note(
     };
     note["report_binding"] = json!(binding);
     if let Some(format) = report.get("input_format") {
-        if !["text", "paragraph-text", "markdown", "html"].contains(&format.as_str().unwrap_or(""))
+        if !["text", "paragraph-text", "markdown", "html", "adapter-json"]
+            .contains(&format.as_str().unwrap_or(""))
         {
             bail!("invalid report input format");
         }
