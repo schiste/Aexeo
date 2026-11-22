@@ -80,6 +80,8 @@ impl GateTimer {
 struct SourceLocation<'a> {
     gate_id: &'a str,
     finding_index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<&'static str>,
     line: usize,
     column: usize,
 }
@@ -291,6 +293,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut destinations = None;
     let mut adapter_source = None;
     let mut host_projection = None;
+    let mut host_source_map = None;
     // The event exists only on request and never contains content, paths, or URLs.
     let mut html_projection = (measuring
         && args.get_one::<String>("input-format").map(String::as_str) == Some("html"))
@@ -397,8 +400,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "lists": adapted.lists.as_ref().map(Vec::len),
                 "headings": adapted.input.headings.as_ref().map(Vec::len),
                 "link_destinations": adapted.destinations.as_ref().map(Vec::len),
-                "paragraph_list_classification": adapted.paragraph_list_items.is_some()
+                "paragraph_list_classification": adapted.paragraph_list_items.is_some(),
+                "source_spans": adapted.source_map.as_ref().map(|map| map.span_count())
             }));
+            host_source_map = adapted.source_map;
             adapter_source = Some(data);
             structured_lists = adapted.lists;
             heading_levels = adapted.headings;
@@ -623,7 +628,29 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     if main_scope && let Some(projection) = html_projection.as_mut() {
         projection["scope"] = serde_json::json!("main");
     }
-    let mapping_available = source_map.is_some() || plain_source.is_some() || html_map.is_some();
+    let mapping_available = source_map.is_some()
+        || plain_source.is_some()
+        || html_map.is_some()
+        || host_source_map.is_some();
+    let host_indexes = host_source_map
+        .as_ref()
+        .zip(input.text.as_deref())
+        .and_then(|(map, text)| {
+            preset
+                .gates
+                .iter()
+                .zip(&report.gates)
+                .any(|(gate, result)| {
+                    aexeo_core::source_mapping::prose_gate_has_positions(gate)
+                        && !result.findings.is_empty()
+                })
+                .then(|| {
+                    (
+                        aexeo_core::text_index::LineIndex::new(text),
+                        map.source_index(),
+                    )
+                })
+        });
     let plain_index = plain_source
         .filter(|_| {
             preset
@@ -708,6 +735,16 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                         )
                     })
                     .or_else(|| {
+                        let (projected_index, source_index) = host_indexes.as_ref()?;
+                        host_source_map.as_ref()?.gate_positions(
+                            input.text.as_deref()?,
+                            projected_index,
+                            source_index,
+                            gate,
+                            result,
+                        )
+                    })
+                    .or_else(|| {
                         aexeo_core::plain_text_adapter::gate_source_positions(
                             plain_index.as_ref()?,
                             plain_source?,
@@ -722,6 +759,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     source_locations.push(SourceLocation {
                         gate_id: &result.gate_id,
                         finding_index,
+                        source: adapter_json.then_some("host_supplied_source_text"),
                         line,
                         column,
                     });
@@ -817,7 +855,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
         if adapter_json {
             output["source_location_capability"] = serde_json::json!({
-                "status": "unavailable", "finding_coordinates": "projected_text"
+                "status": if host_source_map.is_some() { "host_supplied_spans" } else { "unavailable" },
+                "finding_coordinates": "projected_text",
+                "source_coordinates": if host_source_map.is_some() { Some("host_supplied_source_text") } else { None }
             });
         }
         if args.get_one::<String>("html-scope").map(String::as_str) == Some("main") {
@@ -958,6 +998,10 @@ fn finding_line(
         &finding.message,
     );
     match source_location {
+        Some(source) if source.source.is_some() => format!(
+            "{path}: {message} (host-supplied source text {}:{})",
+            source.line, source.column
+        ),
         Some(source) => format!("{path}:{}:{}: {message}", source.line, source.column),
         None if projected => format!("{path}: {message} (projected text {line}:{column})"),
         None => format!("{path}:{line}:{column}: {message}"),

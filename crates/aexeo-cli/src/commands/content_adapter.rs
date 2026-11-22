@@ -26,6 +26,8 @@ struct AdapterInput {
     lists: Option<Vec<List>>,
     #[serde(default)]
     link_destinations: Option<Vec<String>>,
+    #[serde(default)]
+    source_map: Option<HostSourceMap>,
 }
 
 #[derive(Deserialize)]
@@ -44,6 +46,96 @@ struct List {
     depth: usize,
 }
 
+/// Source bytes and byte-identical host-declared prose spans. Their correspondence
+/// to the actual host content remains the host's responsibility.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HostSourceMap {
+    source_text: String,
+    spans: Vec<HostSourceSpan>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostSourceSpan {
+    projected_start: usize,
+    projected_end: usize,
+    source_start: usize,
+}
+
+impl HostSourceMap {
+    fn validate(&self, projected: &str) -> Result<()> {
+        ensure!(
+            self.spans.len() <= MAX_OBSERVATIONS,
+            "source map observation limit exceeded"
+        );
+        let (mut previous_end, mut previous_source_end) = (0, 0);
+        for span in &self.spans {
+            ensure!(
+                span.projected_start >= previous_end
+                    && span.projected_end > span.projected_start
+                    && span.source_start >= previous_source_end,
+                "source map spans must be ordered and nonoverlapping"
+            );
+            let expected = projected
+                .get(span.projected_start..span.projected_end)
+                .ok_or_else(|| anyhow::anyhow!("invalid projected source map range"))?;
+            let source_end = span
+                .source_start
+                .checked_add(expected.len())
+                .ok_or_else(|| anyhow::anyhow!("invalid source map range"))?;
+            ensure!(
+                self.source_text.get(span.source_start..source_end) == Some(expected),
+                "source map bytes do not match projected text"
+            );
+            previous_end = span.projected_end;
+            previous_source_end = source_end;
+        }
+        Ok(())
+    }
+
+    pub(super) fn gate_positions(
+        &self,
+        projected: &str,
+        projected_index: &LineIndex,
+        source_index: &LineIndex,
+        gate: &aexeo_core::content_gate::ContentGate,
+        result: &aexeo_core::content_gate::ContentGateResult,
+    ) -> Option<Vec<Option<(usize, usize)>>> {
+        if !aexeo_core::source_mapping::prose_gate_has_positions(gate) {
+            return None;
+        }
+        Some(
+            result
+                .findings
+                .iter()
+                .map(|finding| {
+                    let offset = projected_index.offset(projected, finding.line, finding.column)?;
+                    let index = self
+                        .spans
+                        .partition_point(|span| span.projected_start <= offset)
+                        .checked_sub(1)?;
+                    let span = self.spans.get(index)?;
+                    if offset >= span.projected_end {
+                        return None;
+                    }
+                    source_index.position(
+                        &self.source_text,
+                        span.source_start + offset - span.projected_start,
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub(super) fn source_index(&self) -> LineIndex {
+        LineIndex::new(&self.source_text)
+    }
+    pub(super) fn span_count(&self) -> usize {
+        self.spans.len()
+    }
+}
+
 pub(super) struct AdapterProjection {
     pub input: ContentInput,
     pub context: ContentContext,
@@ -51,6 +143,7 @@ pub(super) struct AdapterProjection {
     pub lists: Option<Vec<StructuredList>>,
     pub paragraph_list_items: Option<Vec<bool>>,
     pub destinations: Option<Vec<String>>,
+    pub source_map: Option<HostSourceMap>,
 }
 
 pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
@@ -66,7 +159,8 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
             || (projection.paragraphs.is_none()
                 && projection.block_ends.is_none()
                 && projection.lists.is_none()
-                && projection.link_destinations.is_none()),
+                && projection.link_destinations.is_none()
+                && projection.source_map.is_none()),
         "text-dependent observations require projected text"
     );
     if let Some(levels) = &projection.heading_levels {
@@ -103,6 +197,9 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
         "adapter observation limit exceeded"
     );
     let text = projection.text.as_deref().unwrap_or("");
+    if let Some(map) = &projection.source_map {
+        map.validate(text)?;
+    }
     if let Some(ends) = &projection.block_ends {
         ensure!(
             ends.windows(2).all(|pair| pair[0] < pair[1])
@@ -175,5 +272,6 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
         lists,
         paragraph_list_items,
         destinations: projection.link_destinations,
+        source_map: projection.source_map,
     })
 }
