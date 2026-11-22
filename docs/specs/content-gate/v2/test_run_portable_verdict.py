@@ -6,7 +6,11 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
+
+import run_portable_verdict as runner
 
 from verify_candidate_inputs import binding, overlay, revision_digest
 
@@ -43,6 +47,7 @@ class PortableRunner(unittest.TestCase):
         self.assertFalse(json.loads(result.stdout)['publication_authorized'])
         event = json.loads(result.stderr)
         self.assertEqual(event['status'], 'matched')
+        self.assertTrue(event['process_group_cleanup_required'])
         self.assertNotIn(str(self.root), result.stdout + result.stderr)
         self.assertNotIn('private-child-output', result.stdout + result.stderr)
 
@@ -60,6 +65,52 @@ class PortableRunner(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertEqual(json.loads(result.stdout), {'matched': False, 'publication_authorized': False})
                 self.assertEqual(json.loads(result.stderr.splitlines()[-1])['status'], 'error')
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'waitid') and hasattr(os, 'WNOWAIT'),
+                         'POSIX process-group observation required')
+    def test_stops_background_writer_before_returning(self):
+        ready = self.root / 'ready'
+        marker = self.root / 'late-write'
+        code = ("import os,sys,time,subprocess; from pathlib import Path; "
+            "subprocess.Popen([sys.executable,'-c',"
+            "'import sys,time; from pathlib import Path; Path(sys.argv[1]).touch(); time.sleep(0.6); Path(sys.argv[2]).touch()',"
+            "sys.argv[2],sys.argv[3]]); "
+            "exec('while not Path(sys.argv[2]).exists(): time.sleep(0.01)'); "
+            "Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes())")
+        result = self.execute(code, [str(ready), str(marker)])
+        self.assertIn(result.returncode, (0, 2), result.stderr)
+        if result.returncode == 2:
+            self.assertIn('evaluator process group', result.stderr)
+        time.sleep(0.8)
+        self.assertTrue(ready.exists())
+        self.assertFalse(marker.exists())
+        self.assertNotIn(str(marker), result.stdout + result.stderr)
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'waitid') and hasattr(os, 'WNOWAIT'),
+                         'POSIX process-group observation required')
+    def test_timeout_stops_background_writer(self):
+        self.flags[self.flags.index('--timeout-seconds') + 1] = '0.3'
+        ready = self.root / 'ready'
+        marker = self.root / 'late-write'
+        code = ("import sys,time,subprocess; from pathlib import Path; "
+            "subprocess.Popen([sys.executable,'-c',"
+            "'import sys,time; from pathlib import Path; Path(sys.argv[1]).touch(); time.sleep(0.7); Path(sys.argv[2]).touch()',"
+            "sys.argv[2],sys.argv[3]]); time.sleep(3)")
+        result = self.execute(code, [str(ready), str(marker)])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        time.sleep(0.8)
+        self.assertTrue(ready.exists())
+        self.assertFalse(marker.exists())
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+
+    def test_unavailable_or_uninspectable_process_group_fails_closed(self):
+        with mock.patch.object(runner.os, 'name', 'nt'):
+            with self.assertRaisesRegex(runner.VerificationError, 'cleanup is unavailable'):
+                runner.run_process([sys.executable, '-c', 'pass'], os.environ.copy(), 2)
+        if os.name == 'posix' and hasattr(os, 'waitid') and hasattr(os, 'WNOWAIT'):
+            with mock.patch.object(runner.os, 'killpg', side_effect=PermissionError):
+                with self.assertRaisesRegex(runner.VerificationError, 'could not be checked'):
+                    runner.run_process([sys.executable, '-c', 'pass'], os.environ.copy(), 2)
 
     def test_detects_changed_artifact_during_process(self):
         result = self.execute("import os,sys; from pathlib import Path; "
