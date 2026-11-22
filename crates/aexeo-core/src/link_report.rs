@@ -1145,9 +1145,39 @@ fn observe_aliases(
     pages: &[RenderedPage],
     canonicals: &[Vec<String>],
 ) -> Vec<(usize, InventoryAliasObservation)> {
+    let Some(inventory) = inventory else {
+        return Vec::new();
+    };
+    if !inventory.pages.iter().any(|entry| {
+        matches!(
+            entry.disposition,
+            InventoryDisposition::Redirect
+                | InventoryDisposition::CanonicalAlias
+                | InventoryDisposition::LocaleFallback
+        ) && entry
+            .target
+            .as_deref()
+            .is_some_and(|target| !target.trim().is_empty())
+    }) {
+        return Vec::new();
+    }
     let paths = pages.iter().map(response_paths).collect::<Vec<_>>();
+    // Keep the earliest occurrence, as the original ordered search did. The
+    // index is never iterated, so hash ordering cannot affect the report.
+    let mut path_index = std::collections::HashMap::new();
+    for (page_index, page_paths) in paths.iter().enumerate() {
+        for (path_index_in_page, path) in page_paths.iter().enumerate() {
+            for (position, url) in path.iter().enumerate() {
+                path_index.entry(url.as_str()).or_insert((
+                    page_index,
+                    path_index_in_page,
+                    position,
+                ));
+            }
+        }
+    }
     let mut observed = Vec::new();
-    for entry in inventory.iter().flat_map(|inventory| &inventory.pages) {
+    for entry in &inventory.pages {
         let redirect_only = match entry.disposition {
             InventoryDisposition::Redirect => true,
             InventoryDisposition::CanonicalAlias | InventoryDisposition::LocaleFallback => false,
@@ -1163,15 +1193,10 @@ fn observe_aliases(
         };
         target.set_fragment(None);
         let target = String::from(target);
-        let Some((index, path, position)) =
-            paths.iter().enumerate().find_map(|(index, page_paths)| {
-                page_paths.iter().find_map(|path| {
-                    Some((index, path, path.iter().position(|url| *url == alias)?))
-                })
-            })
-        else {
+        let Some(&(index, path_index_in_page, position)) = path_index.get(alias.as_str()) else {
             continue;
         };
+        let path = &paths[index][path_index_in_page];
         let served_directly = position + 1 == path.len();
         let verified_by = if !served_directly {
             path[position + 1..]
@@ -1436,7 +1461,10 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             coverage_issues.insert("destination_unmatched_near_variant");
         }
     }
-    let mut aliases = observe_aliases(input.inventory.as_ref(), &input.pages, &canonicals);
+    let mut aliases_by_page = vec![Vec::new(); input.pages.len()];
+    for (index, alias) in observe_aliases(input.inventory.as_ref(), &input.pages, &canonicals) {
+        aliases_by_page[index].push(alias);
+    }
     // A verified alias resolves only when its target is itself an inventory
     // page, so the inventory accounts for where the alias leads.
     let inventory_urls = inventory_dispositions
@@ -1446,17 +1474,16 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     let resolved = |alias: &InventoryAliasObservation| {
         alias.verified_by.is_some() && inventory_urls.contains(&alias.expected_target)
     };
-    let verified_aliases = aliases
+    let verified_aliases = aliases_by_page
         .iter()
-        .map(|(_, alias)| alias)
+        .flatten()
         .filter(|alias| resolved(alias))
         .map(|alias| alias.url.clone())
         .collect::<std::collections::BTreeSet<_>>();
     for (index, page) in input.pages.iter().enumerate() {
-        let resolved_here = aliases
+        let resolved_here = aliases_by_page[index]
             .iter()
-            .filter(|(at, alias)| *at == index && resolved(alias))
-            .map(|(_, alias)| alias)
+            .filter(|alias| resolved(alias))
             .collect::<Vec<_>>();
         // Every request that redirected here must be accounted for by a
         // verified alias, each through its own chain.
@@ -1484,7 +1511,11 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             coverage_issues.insert("canonical_target_unresolved");
         }
     }
-    if aliases.iter().any(|(_, alias)| alias.issue.is_some()) {
+    if aliases_by_page
+        .iter()
+        .flatten()
+        .any(|alias| alias.issue.is_some())
+    {
         coverage_issues.insert("inventory_alias_unobserved");
     }
     let mut reconciliation = input.inventory.as_ref().map(|inventory| {
@@ -1630,10 +1661,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                 redirect_chain: page.redirect_chain.clone(),
                 redirected_arrivals: page.redirected_arrivals.clone(),
                 via_redirect,
-                inventory_aliases: aliases
-                    .extract_if(.., |(at, _)| *at == index)
-                    .map(|(_, alias)| alias)
-                    .collect(),
+                inventory_aliases: std::mem::take(&mut aliases_by_page[index]),
             }
         })
         .collect();
@@ -2873,6 +2901,37 @@ mod tests {
             }),
         })
         .unwrap()
+    }
+
+    #[test]
+    fn alias_observation_uses_the_first_matching_page_even_if_a_later_one_verifies() {
+        let direct = served(ALIAS, "<main>Alias</main>");
+        let redirect = guide_via(ALIAS);
+        let report = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![direct.clone(), redirect.clone()],
+        );
+        assert_eq!(report.pages[0].inventory_aliases.len(), 1);
+        assert_eq!(report.pages[0].inventory_aliases[0].verified_by, None);
+        assert!(report.pages[1].inventory_aliases.is_empty());
+        assert!(
+            report
+                .issues
+                .contains(&"inventory_alias_unobserved".to_string())
+        );
+
+        let reversed = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![redirect, direct],
+        );
+        assert_eq!(reversed.pages[0].inventory_aliases.len(), 1);
+        assert_eq!(
+            reversed.pages[0].inventory_aliases[0].verified_by,
+            Some(AliasEvidence::Redirect)
+        );
+        assert!(reversed.pages[1].inventory_aliases.is_empty());
     }
 
     fn reconciliation(report: &LinkReport) -> &InventoryReconciliation {
