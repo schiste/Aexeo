@@ -104,9 +104,7 @@ pub(crate) fn map_gate_source_positions(
     destinations: Option<&[String]>,
     observations: Option<&[crate::content_gate::LinkReachabilityObservation]>,
 ) -> Option<Vec<Option<(usize, usize)>>> {
-    use crate::content_gate::{
-        ContentGate, LinkReachabilityObservation, heading_finding_indices, valid_link_destination,
-    };
+    use crate::content_gate::{ContentGate, heading_finding_indices};
     let heading_indices = input
         .headings
         .as_deref()
@@ -127,33 +125,11 @@ pub(crate) fn map_gate_source_positions(
     }
     let size = result.findings.len();
     let mut positions = vec![None; size];
-    if let ContentGate::LinkDestinations {
-        allowed_schemes,
-        allow_relative,
-        ..
-    } = gate
-    {
-        let values = destinations?;
-        let indices: Vec<_> = values
-            .iter()
-            .enumerate()
-            .filter_map(|(index, value)| {
-                (!valid_link_destination(value, allowed_schemes, *allow_relative)).then_some(index)
-            })
-            .collect();
-        if indices.len() == result.total_findings() {
-            for (position, index) in positions.iter_mut().zip(indices) {
-                *position = map.link_position(source, index);
-            }
-        }
-    } else if matches!(gate, ContentGate::LinkReachability { .. }) {
-        let indices: Vec<_> = observations?
-            .iter()
-            .enumerate()
-            .filter_map(|(index, observation)| {
-                (*observation == LinkReachabilityObservation::NotFound).then_some(index)
-            })
-            .collect();
+    if matches!(
+        gate,
+        ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+    ) {
+        let indices = link_finding_indices(gate, destinations, observations)?;
         if indices.len() == result.total_findings() {
             for (position, index) in positions.iter_mut().zip(indices) {
                 *position = map.link_position(source, index);
@@ -174,4 +150,39 @@ pub(crate) fn map_gate_source_positions(
         return None;
     }
     Some(positions)
+}
+
+/// Indices of link observations that produce findings, in evaluation order.
+pub fn link_finding_indices(
+    gate: &crate::content_gate::ContentGate,
+    destinations: Option<&[String]>,
+    observations: Option<&[crate::content_gate::LinkReachabilityObservation]>,
+) -> Option<Vec<usize>> {
+    use crate::content_gate::{ContentGate, LinkReachabilityObservation, valid_link_destination};
+    match gate {
+        ContentGate::LinkDestinations {
+            allowed_schemes,
+            allow_relative,
+            ..
+        } => Some(
+            destinations?
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| {
+                    (!valid_link_destination(value, allowed_schemes, *allow_relative))
+                        .then_some(index)
+                })
+                .collect(),
+        ),
+        ContentGate::LinkReachability { .. } => Some(
+            observations?
+                .iter()
+                .enumerate()
+                .filter_map(|(index, observation)| {
+                    (*observation == LinkReachabilityObservation::NotFound).then_some(index)
+                })
+                .collect(),
+        ),
+        _ => None,
+    }
 }

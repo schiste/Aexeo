@@ -528,8 +528,8 @@ array supplies one UTF-8 byte offset or null per heading, in heading order.
 Non-null offsets must identify nonempty, byte-identical heading text in ordered,
 nonoverlapping source ranges. Heading-length, duplicate-heading and hierarchy
 findings can then receive positions for those headings; null entries stay
-unmapped. Other structural findings remain unmapped. The report labels these
-positions `host_supplied_spans`: matching bytes cannot
+unmapped. An optional `link_offsets` array similarly supplies one UTF-8 byte offset or null per link destination, in occurrence order. Non-null offsets must match the nonempty destination bytes in ordered, nonoverlapping source ranges. Invalid-destination and externally observed unreachable-link findings can then receive positions; null entries remain unmapped. Encoded or otherwise different source bytes must be left null. Other structural findings remain unmapped. The report labels these
+positions `host_supplied_source_text`: matching bytes cannot
 prove that the host selected the correct occurrence, actual source or snapshot.
 The host must establish that correspondence and provenance. List finding
 positions remain placeholders; finding coordinates may refer to projected text
