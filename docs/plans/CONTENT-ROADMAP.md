@@ -100,6 +100,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Capture, export and replay human feedback for host adapter JSON; bind the
+  full projection and check cross-split overlap using projected content text.
+  Corpus examples require text; human provenance and source independence remain
+  the reviewer’s responsibility.
+
 - [x] Accept explicitly complete host-projected paragraphs, list counts,
   headings and ordered link destinations through a bounded, versioned CLI JSON
   adapter. Missing capabilities remain not checked; report binding covers the

@@ -39,6 +39,38 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "input format"):
             module.capture(self.text, self.report, "length", "e1")
 
+    def test_adapter_feedback_is_bound_to_exact_json_and_format(self):
+        self.text = '{"schema":"aexeo.content-adapter/v1","text":"Hello","lists":[]}'
+        self.corpus["examples"][0]["text"] = self.text
+        self.report["input_format"] = self.corpus["input_format"] = "adapter-json"
+        self.report["input_fingerprint"] = {"version": 1, "text_sha256": hashlib.sha256(self.text.encode()).hexdigest(), "metadata_sha256": None}
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "person", "manual")
+        self.assertEqual(note["report_binding"], "verified")
+        self.assertEqual(module.export_review(self.corpus, note)["events"][0]["input_format"], "adapter-json")
+        unbound = dict(note)
+        del unbound["input_format"]
+        with self.assertRaisesRegex(ValueError, "input format"):
+            module.export_review(self.corpus, unbound)
+        self.corpus["examples"][0]["text"] = self.text.replace('"lists":[]', '"lists":null')
+        with self.assertRaisesRegex(ValueError, "text"):
+            module.export_review(self.corpus, note)
+
+    def test_adapter_blind_packet_preserves_and_requires_format(self):
+        self.corpus["input_format"] = "adapter-json"
+        self.corpus["examples"][0]["text"] = '{"schema":"aexeo.content-adapter/v1","text":"Hello"}'
+        packet = module.blind_packet(self.corpus, "development", "Review the content.")
+        packet["examples"][0]["human_status"] = "passed"
+        self.assertEqual(packet["input_format"], "adapter-json")
+        bound, _, _ = module.bind_blind_reviews(self.corpus, packet, "person", "manual")
+        self.assertEqual(bound["examples"][0]["review"]["input_format"], "adapter-json")
+        self.assertEqual(module.combine_blind_reviews(self.corpus, [(packet, "person", "manual")])["events"][0]["input_format"], "adapter-json")
+        del packet["input_format"]
+        with self.assertRaisesRegex(ValueError, "input format"):
+            module.bind_blind_reviews(self.corpus, packet, "person", "manual")
+        packet["input_format"] = "text"
+        with self.assertRaisesRegex(ValueError, "input format"):
+            module.combine_blind_reviews(self.corpus, [(packet, "person", "manual")])
+
     def test_projection_is_preserved_and_cannot_be_exported_as_raw_text(self):
         self.report["content_projection"] = {"format": "html", "scope": "main"}
         note = module.capture(self.text, self.report, "length", "e1", "passed", "person", "manual")

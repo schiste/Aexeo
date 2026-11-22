@@ -53,7 +53,7 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
     else:
         note["report_binding"] = "verified"
     if "input_format" in report:
-        if report["input_format"] not in ("text", "paragraph-text", "markdown", "html"):
+        if report["input_format"] not in ("text", "paragraph-text", "markdown", "html", "adapter-json"):
             raise ValueError("invalid report input format")
         note["input_format"] = report["input_format"]
     if "content_projection" in report:
@@ -177,6 +177,8 @@ def blind_packet(corpus, split, rubric):
               "rubric": rubric, "examples": examples}
     if "content_projection" in corpus:
         packet["content_projection"] = copy.deepcopy(corpus["content_projection"])
+    if "input_format" in corpus:
+        packet["input_format"] = corpus["input_format"]
     return packet
 
 
@@ -187,6 +189,7 @@ def _blind_entries(corpus, packet, module):
             or not isinstance(packet.get("examples"), list)):
         raise ValueError("invalid blind review packet")
     module.check_projection(packet, module.corpus_projection(corpus))
+    module.check_input_format(packet, corpus)
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
     for entry in packet["examples"]:
@@ -242,6 +245,8 @@ def bind_blind_reviews(corpus, packet, reviewer, method, accept_human_label=Fals
             review["metadata_sha256"] = module.metadata_hash(item["metadata"])
         if "content_projection" in result:
             review["content_projection"] = copy.deepcopy(result["content_projection"])
+        if "input_format" in packet:
+            review["input_format"] = packet["input_format"]
         if old != status:
             review["previous_expected"] = old
         item["review"] = review
@@ -272,6 +277,8 @@ def combine_blind_reviews(corpus, reviews):
                 event["metadata_sha256"] = module.metadata_hash(item["metadata"])
             if "content_projection" in corpus:
                 event["content_projection"] = copy.deepcopy(corpus["content_projection"])
+            if "input_format" in packet:
+                event["input_format"] = packet["input_format"]
             events.append(event)
     if not events:
         raise ValueError("no explicit blind opinions to combine")

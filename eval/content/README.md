@@ -221,6 +221,14 @@ elapsed time. This action records supplied provenance, not proof that review
 was independent or blind; follow the holdout policy before using its metrics.
 The standalone native CLI currently supports capture and event export only.
 
+For host adapters, set `input_format` to `adapter-json` and put the exact JSON
+projection in each example's `text` string. The projection must contain a
+string `text` field. Fingerprints bind the full JSON bytes, including observed
+structures; exact and normalized cross-split overlap checks instead compare the
+projected content text, preventing different observations from hiding duplicate
+content. They do not establish independent sources; use `source_group` and
+human curation. The projection can contain private content and destinations.
+
 Corpora may set `input_format` to `paragraph-text` to evaluate blank-line-separated
 plain text with paragraph capabilities. As with text and Markdown corpora, the
 feedback fingerprint binds only text and metadata. New reports additionally
