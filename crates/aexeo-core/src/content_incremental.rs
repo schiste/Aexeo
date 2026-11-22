@@ -154,7 +154,8 @@ fn validate_preset(
     if preset.gates.iter().any(|gate| {
         let text_gate = matches!(
             gate,
-            ContentGate::WordCount { .. }
+            ContentGate::FinalNewline { .. }
+                | ContentGate::WordCount { .. }
                 | ContentGate::CharacterCount { .. }
                 | ContentGate::SentenceLength {
                     paragraphs_only: false,
@@ -186,7 +187,6 @@ fn validate_preset(
                     | ContentGate::DuplicateParagraphs { .. }
                     | ContentGate::SentenceLength { .. }
                     | ContentGate::SentenceCharacterLength { .. }
-                    | ContentGate::FinalNewline { .. }
             );
         let structured_gate = matches!(mode, ProjectionMode::Adapted(_))
             && matches!(
@@ -312,10 +312,15 @@ fn evaluate_item(
         }
         (_, "text/plain") => {
             let paragraphs = mode != ProjectionMode::Plain;
+            let needs_source = paragraphs
+                || preset
+                    .gates
+                    .iter()
+                    .any(|gate| matches!(gate, ContentGate::FinalNewline { .. }));
             let input = ContentInput {
                 id: item.entity_id.clone(),
                 text: Some(item.source.clone()),
-                source_text: paragraphs.then(|| item.source.clone()),
+                source_text: needs_source.then(|| item.source.clone()),
                 ..Default::default()
             };
             let context = if paragraphs {
@@ -2346,6 +2351,84 @@ mod tests {
             assert!(evaluated > 0 && reused > 0, "{gate}");
         }
     }
+    #[test]
+    fn plain_final_newline_matches_full_after_all_change_operations() {
+        let (mut snapshot, _, mut change) = fixture();
+        for (original, source) in
+            snapshot
+                .items
+                .iter_mut()
+                .zip(["old\n", "remove", "rename\r\n", "", "unchanged\n"])
+        {
+            *original = item(&original.entity_id, source, None);
+        }
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='newline'\n[[gates]]\nid='newline'\nkind='final_newline'\n",
+        )
+        .unwrap();
+        let updated = item("a", "café without newline", None);
+        let created = item("new", "created\n", None);
+        let renamed = item("renamed", "renamed\r\n", None);
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        ));
+        change.entries.push(entry(
+            "b",
+            Operation::Delete,
+            Some(&snapshot.items[1]),
+            None,
+        ));
+        change
+            .entries
+            .push(entry("new", Operation::Create, None, Some(&created)));
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&snapshot.items[2]),
+            Some(&renamed),
+        );
+        rename.previous_entity_id = Some("c".into());
+        change.entries.push(rename);
+        let after = [updated, created, renamed];
+        let candidate = overlay_candidate(&snapshot, &change, &after)
+            .unwrap()
+            .candidate;
+        let expected: BTreeMap<_, _> = candidate
+            .items
+            .iter()
+            .map(|item| {
+                let input = ContentInput {
+                    id: item.entity_id.clone(),
+                    text: Some(item.source.clone()),
+                    source_text: Some(item.source.clone()),
+                    ..Default::default()
+                };
+                (item.entity_id.clone(), preset.evaluate(&input).unwrap())
+            })
+            .collect();
+        let baseline = IncrementalBaseline::prepare(snapshot, preset).unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, &after)
+        else {
+            panic!("expected complete evaluation")
+        };
+        assert_eq!(
+            serde_json::to_value(&reports).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!((evaluated, reused), (3, 2));
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Failed);
+        assert_eq!(reports["d"].gates[0].status, GateStatus::Passed);
+        assert_eq!(reports["renamed"].gates[0].status, GateStatus::Passed);
+    }
+
     #[test]
     fn paragraph_text_gates_match_fresh_evaluation_after_change() {
         for gate in [

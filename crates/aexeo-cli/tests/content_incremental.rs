@@ -82,6 +82,31 @@ fn incomplete_baseline_and_stale_proposal_fail_closed() {
     assert_eq!(results[1]["result"]["status"], "not_checked");
 }
 #[test]
+fn plain_final_newline_reports_blocking_findings() {
+    let mut input = batch();
+    input["preset"] = json!("newline");
+    input["preset_sources"] = json!({"newline": "version=1\nname='newline'\n[[gates]]\nid='newline'\nkind='final_newline'\nblocking=true\n"});
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for result in lines(&output) {
+        assert_eq!(result["result"]["status"], "evaluated");
+        assert_eq!(
+            result["result"]["reports"]["a"]["summary"]["blocking_failed"],
+            1
+        );
+        assert_eq!(
+            result["result"]["reports"]["b"]["summary"]["blocking_failed"],
+            1
+        );
+    }
+}
+
+#[test]
 fn unsupported_gate_and_oversized_batch_do_not_claim_success() {
     let mut input = batch();
     input["mode"] = json!("plain");
