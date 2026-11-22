@@ -494,10 +494,10 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_unmapped_components?: UnmappedComponents; fragments?: import("./fragment-evaluation.js").FragmentAssessment[] }>(findingsKey(route));
+  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_projected_blocks?: number; body_unmapped_components?: UnmappedComponents; fragments?: import("./fragment-evaluation.js").FragmentAssessment[] }>(findingsKey(route));
   const findings = (record?.findings ?? []).filter((finding) => isCmsObservableFinding(finding, record?.body_coverage === "complete") && (!incomplete || !isSiteGraphFinding(finding)));
   const assessment = record?.assessment;
-  const bodyNotice = record && assessment?.status !== "error" ? cmsBodyCoverageNotice(record.body_coverage) : undefined;
+  const bodyNotice = record && assessment?.status !== "error" ? cmsBodyCoverageNotice(record.body_coverage, record.body_projected_blocks) : undefined;
   const componentsNotice = record && assessment?.status !== "error" ? unmappedComponentsNotice(record.body_unmapped_components) : undefined;
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(

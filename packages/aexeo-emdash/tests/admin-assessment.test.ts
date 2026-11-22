@@ -27,10 +27,11 @@ describe("React content assessment", () => {
 
 describe("component coverage presentation", () => {
   it("shows observed unmapped types without implying complete coverage", () => {
-    const view = JSON.stringify(BodyCoverageDetails({ route: { body_coverage: "unavailable", body_unmapped_components: {
+    const view = JSON.stringify(BodyCoverageDetails({ route: { body_coverage: "unavailable", body_projected_blocks: 2, body_unmapped_components: {
       entries: [{ kind: "block", type: "askYourAi", occurrences: 2 }], truncated: true,
     } } }));
     expect(view).toContain("Body coverage is unavailable");
+    expect(view).toContain("2 projected content block(s) were retained");
     expect(view).toContain("askYourAi (block, 2)");
     expect(view).toContain("additional types omitted");
     expect(view).toContain("verifying the host renderer");

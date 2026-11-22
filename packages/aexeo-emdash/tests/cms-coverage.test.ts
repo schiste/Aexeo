@@ -15,6 +15,10 @@ describe("CMS observation boundaries", () => {
     expect(cmsBodyCoverage({ route: "/a", title: "A", body: [] })).toBe("complete");
     expect(cmsBodyCoverageNotice("complete")).toBeUndefined();
     expect(cmsBodyCoverageNotice("partial")).toContain("partial");
+    expect(cmsBodyCoverageNotice("unavailable", 2)).toContain("2 projected content block(s) were retained");
+    expect(cmsBodyCoverageNotice("unavailable", 0)).not.toContain("projected content");
+    expect(cmsBodyCoverageNotice("unavailable", -1)).not.toContain("projected content");
+    expect(cmsBodyCoverageNotice("complete", 2)).toBeUndefined();
     expect(cmsBodyCoverageNotice(undefined)).toContain("unknown");
   });
 

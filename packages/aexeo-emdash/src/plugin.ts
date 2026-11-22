@@ -621,6 +621,21 @@ function recordCmsLocationCoverage(ctx: SandboxCtx, counts: { eligible: number; 
   try { ctx.log?.info?.("aexeo.cms_location_coverage", { ...counts, unmapped: counts.eligible - counts.mapped }); } catch { /* best effort */ }
 }
 
+type ProjectionCoverageCounts = { documents: number; incomplete_with_blocks: number; projected_blocks_in_incomplete: number };
+
+function countCmsProjection(counts: ProjectionCoverageCounts, document: EmdashDocument): void {
+  counts.documents++;
+  const blocks = document.body?.length ?? 0;
+  if (blocks > 0 && cmsBodyCoverage(document) !== "complete") {
+    counts.incomplete_with_blocks++;
+    counts.projected_blocks_in_incomplete += blocks;
+  }
+}
+
+function recordCmsProjectionCoverage(ctx: SandboxCtx, counts: ProjectionCoverageCounts): void {
+  try { ctx.log?.info?.("aexeo.cms_projection_coverage", counts); } catch { /* best effort */ }
+}
+
 // Parameterized afterSave for the configured plugin path. Runs in
 // the host's request context so all bridge calls are valid; replaces
 // just this document's findings (sitewide/template findings stay
@@ -745,10 +760,14 @@ export async function handleAfterSaveConfigured(
   const cmsLocationCounts = { eligible: 0, mapped: 0 };
   countCmsLocations(cmsLocationCounts, filtered);
   recordCmsLocationCoverage(ctx, cmsLocationCounts);
+  const projectionCounts: ProjectionCoverageCounts = { documents: 0, incomplete_with_blocks: 0, projected_blocks_in_incomplete: 0 };
+  countCmsProjection(projectionCounts, document);
+  recordCmsProjectionCoverage(ctx, projectionCounts);
   await kv.set(findingsKey(document.route), {
     route: document.route,
     findings: filtered,
     body_coverage: cmsBodyCoverage(document),
+    ...(document.body === undefined ? {} : { body_projected_blocks: document.body.length }),
     ...(adapted.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: adapted.meta.unmappedComponents }),
     ...(result.assessments?.[document.route] === undefined ? {} : { assessment: result.assessments[document.route] }),
     ...(result.fragments?.[document.route] === undefined ? {} : { fragments: result.fragments[document.route] }),
@@ -1129,6 +1148,7 @@ export async function evaluateAndPersistAll(
   //    design (sitewide findings are inherently cross-document).
   let totalAfterSuppression = 0;
   const cmsLocationCounts = { eligible: 0, mapped: 0 };
+  const projectionCounts: ProjectionCoverageCounts = { documents: 0, incomplete_with_blocks: 0, projected_blocks_in_incomplete: 0 };
   for (const [route, findings] of findingsByRoute) {
     const stored = adaptedByRoute.get(route);
     // A save or delete that landed during the sweep owns this route now.
@@ -1152,9 +1172,11 @@ export async function evaluateAndPersistAll(
         ? findings
         : suppressionFilter.apply(context, findings);
     countCmsLocations(cmsLocationCounts, filtered);
+    if (stored) countCmsProjection(projectionCounts, stored.document);
     await kv.set(findingsKey(route), {
       route, findings: filtered,
       ...(stored === undefined ? {} : { body_coverage: cmsBodyCoverage(stored.document) }),
+      ...(stored?.document.body === undefined ? {} : { body_projected_blocks: stored.document.body.length }),
       ...(stored?.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: stored.meta.unmappedComponents }),
       ...(result.fragments?.[route] === undefined ? {} : { fragments: result.fragments[route] }),
       ...(route === "*" && globalAssessment !== undefined ? { assessment: globalAssessment } :
@@ -1164,6 +1186,7 @@ export async function evaluateAndPersistAll(
     totalAfterSuppression += filtered.length;
   }
   recordCmsLocationCoverage(ctx, cmsLocationCounts);
+  recordCmsProjectionCoverage(ctx, projectionCounts);
   summary.totalFindings = totalAfterSuppression;
   if (inventoryComplete && !changed) {
     await removeStaleDocuments(ctx, collections, documentRoutes, storedAtStart);

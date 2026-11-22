@@ -34,11 +34,15 @@ export function cmsBodyCoverage(document: EmdashDocument): CmsBodyCoverage {
 }
 
 /** Short editor-facing explanation; absent coverage is a legacy or failed result. */
-export function cmsBodyCoverageNotice(coverage: CmsBodyCoverage | undefined): string | undefined {
+export function cmsBodyCoverageNotice(coverage: CmsBodyCoverage | undefined, projectedBlocks?: number): string | undefined {
   if (coverage === "complete") return undefined;
-  return coverage === undefined
+  const notice = coverage === undefined
     ? "Body coverage is unknown for this evaluation; save or refresh to reassess it."
     : `Body coverage is ${coverage}; content checks depending on missing capabilities cannot be evaluated reliably.`;
+  // A count describes the projection only, not completeness or original CMS blocks.
+  return Number.isSafeInteger(projectedBlocks) && projectedBlocks! > 0
+    ? `${notice} ${projectedBlocks} projected content block(s) were retained; this does not establish complete coverage.`
+    : notice;
 }
 
 /** Observations concern only components actually encountered in the projection. */

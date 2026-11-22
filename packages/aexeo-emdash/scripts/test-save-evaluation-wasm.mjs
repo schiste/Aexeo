@@ -715,6 +715,12 @@ blocking=false
   assert.equal(host.store.get("document:/nested").document.body[0].style, "h2");
   assert.equal(host.store.get("document:/nested").document.body[0].markDefs[0].href, "https://example.org/source");
   assert.ok(host.store.get("findings:/nested").assessment.gates.some((gate) => gate.status === "not_checked"));
+  assert.equal(host.store.get("findings:/nested").body_coverage, "unavailable");
+  assert.equal(host.store.get("findings:/nested").body_projected_blocks, 3);
+  await partial.routes.refresh.handler(host.ctx);
+  assert.equal(host.store.get("findings:/nested").body_coverage, "unavailable");
+  assert.equal(host.store.get("findings:/nested").body_projected_blocks, 3);
+  assert.ok(host.store.get("findings:/nested").assessment.gates.some((gate) => gate.status === "not_checked"));
   const mapped = createPlugin({ ...options, blockMappings: { ...options.blockMappings, notice: [{ kind: "paragraph", field: "text" }] } });
   await mapped.routes.refresh.handler(host.ctx);
   assert.equal(host.store.get("document:/nested").document.body_capabilities, undefined);
