@@ -251,6 +251,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For CLI revalidation failures, assert the specific error exit and diagnostic,
   and that any previous output remains unchanged. A nonzero exit alone can be
   an ordinary failed editorial gate rather than a rejected revalidation.
+- For process-group cleanup, test both a normal child exit and a timeout with
+  a live descendant, plus unsupported or denied inspection. On macOS,
+  signaling a group whose only member is an exited, unreaped leader can return
+  `EPERM`; do not interpret that alone as proof of a surviving process. Avoid
+  signaling a recycled group ID, and never treat ambiguous cleanup as success.
 - For receipt or manifest comparisons, test a supplied artifact changing
   between verification passes, and ensure different input snapshots are rejected.
   A matching digest does not establish provenance or protect later publication.
