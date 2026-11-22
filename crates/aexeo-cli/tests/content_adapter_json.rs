@@ -237,3 +237,94 @@ fn host_projection_feedback_exports_and_replays_with_real_cli() {
     let refused = export(&dir.path().join("refused.json"));
     assert_eq!(refused.status.code(), Some(2));
 }
+
+#[test]
+fn host_source_spans_map_only_verified_prose_and_keep_other_findings_unmapped() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad','ugly']\nblocking=false\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let source = "Édit\nbad\n";
+    let projection = json!({"schema":"aexeo.content-adapter/v1", "text":"bad ugly", "lists":[{"item_count":3,"depth":1}], "source_map":{"source_text":source,"spans":[{"projected_start":0,"projected_end":3,"source_start":source.find("bad").unwrap()}]}});
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let output = run(&file, &preset, &["--telemetry"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_location_capability"]["status"],
+        "host_supplied_spans"
+    );
+    assert_eq!(
+        report["source_location_capability"]["source_coordinates"],
+        "host_supplied_source_text"
+    );
+    assert_eq!(
+        report["source_mapping"],
+        json!({"eligible":3,"mapped":1,"unmapped":2})
+    );
+    assert_eq!(
+        report["source_locations"],
+        json!([{"gate_id":"terms","finding_index":0,"source":"host_supplied_source_text","line":2,"column":1}])
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("Édit"));
+    let text = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("content")
+        .arg(&file)
+        .args([
+            "--input-format",
+            "adapter-json",
+            "--preset",
+            "custom",
+            "--preset-source",
+        ])
+        .arg(format!("custom={}", preset.display()))
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.contains("host-supplied source text 2:1"));
+    assert!(!text.contains("projection.json:2:1"));
+}
+
+#[test]
+fn host_source_map_rejects_forged_ambiguous_and_invalid_spans() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(
+        &preset,
+        "version=1\nname='custom'\n[[gates]]\nid='p'\nkind='paragraph_count'\nmin=1\n",
+    )
+    .unwrap();
+    let file = dir.path().join("projection.json");
+    let valid = json!({"schema":"aexeo.content-adapter/v1", "text":"éx", "source_map":{"source_text":"éx","spans":[{"projected_start":0,"projected_end":2,"source_start":0}]}});
+    for map in [
+        json!({"source_text":"ay","spans":[{"projected_start":0,"projected_end":2,"source_start":0}]}),
+        json!({"source_text":"éx","spans":[{"projected_start":1,"projected_end":2,"source_start":0}]}),
+        json!({"source_text":"éx","spans":[{"projected_start":0,"projected_end":2,"source_start":usize::MAX}]}),
+        json!({"source_text":"éx","spans":[{"projected_start":0,"projected_end":2,"source_start":0},{"projected_start":0,"projected_end":2,"source_start":0}]}),
+        json!({"source_text":"éx","spans":[{"projected_start":0,"projected_end":2,"source_start":0,"extra":true}]}),
+    ] {
+        let mut candidate = valid.clone();
+        candidate["source_map"] = map;
+        fs::write(&file, serde_json::to_vec(&candidate).unwrap()).unwrap();
+        let output = run(&file, &preset, &[]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(error["success"], false);
+    }
+    let mut no_text = valid;
+    no_text["text"] = serde_json::Value::Null;
+    fs::write(&file, serde_json::to_vec(&no_text).unwrap()).unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+}
