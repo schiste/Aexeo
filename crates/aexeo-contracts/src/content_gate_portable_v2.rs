@@ -14,9 +14,9 @@ pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
 pub const PROFILE: &str = "content-gate.candidate-binding/v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
-/// This draft profile permits the informational Aexeo offline-binding or
-/// observed-link-binding and
-/// explicit HTML main-scope extensions; other extensions are rejected.
+/// This draft profile permits the informational Aexeo offline binding, or
+/// source-evidence and optional observed-link bindings, plus an explicit HTML
+/// main-scope extension. Other extensions are rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoundVerdict {

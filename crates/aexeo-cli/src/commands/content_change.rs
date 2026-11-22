@@ -471,11 +471,11 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             ReceiptSnapshots {
                 collection: &collection,
                 links: snapshots.as_ref(),
+                evidence: evidence.as_ref(),
             },
             &mut provider,
             Path::new(&verdict_path),
             html_scope,
-            evidence.as_ref(),
         );
     }
     let max_checks = *args
@@ -1018,6 +1018,7 @@ fn parse_previous_offline_receipt(
 struct ReceiptSnapshots<'a> {
     collection: &'a Option<CollectionSnapshot>,
     links: Option<&'a ChangeLinkSnapshots>,
+    evidence: Option<&'a ChangeEvidenceInventory>,
 }
 
 fn command_offline_receipt(
@@ -1028,7 +1029,6 @@ fn command_offline_receipt(
     provider: &mut HostFiles,
     output: &Path,
     html_scope: HtmlContentScope,
-    evidence: Option<&ChangeEvidenceInventory>,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
         LinkSnapshotDecisionContext, OfflineDecisionContext, OfflineDecisionReceipt,
@@ -1039,6 +1039,7 @@ fn command_offline_receipt(
     let ReceiptSnapshots {
         collection,
         links: snapshots,
+        evidence,
     } = snapshots;
     let identity = args
         .get_one::<String>("evaluator-identity")
