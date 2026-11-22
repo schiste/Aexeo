@@ -71,6 +71,15 @@ const returning =
   async () => ({ ok: true, findings });
 
 describe("handleAfterSaveConfigured", () => {
+  it("persists projection coverage with the evaluated snapshot", async () => {
+    const { ctx } = fakeCtx(null);
+    await handleAfterSaveConfigured(event, ctx, returning());
+    const record = await ctx.kv.get<{ metadata_coverage: { observed_fields: string[]; description_source_observed: boolean; description_value_supplied: boolean } }>(findingsKey(ROUTE));
+    expect(record?.metadata_coverage.observed_fields).toContain("title");
+    expect(record?.metadata_coverage.description_source_observed).toBe(false);
+    expect(record?.metadata_coverage.description_value_supplied).toBe(false);
+  });
+
   it("drops site-graph findings when they cannot be observed in CMS records", async () => {
     const { ctx, findings } = fakeCtx([
       finding("LNK001", "broken internal link: /stored"),

@@ -1,5 +1,5 @@
 import { describeGate, describeSourceMapping, summarizeGates } from "./assessment-display.js";
-import { cmsBodyCoverageNotice, unmappedComponentsNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
+import { cmsBodyCoverageNotice, cmsMetadataCoverageNotice, unmappedComponentsNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
 import type { CustomBlockMappings, DescriptionField, MetadataFields, UnmappedComponents } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
 //
@@ -494,7 +494,7 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_projected_blocks?: number; body_unmapped_components?: UnmappedComponents; fragments?: import("./fragment-evaluation.js").FragmentAssessment[] }>(findingsKey(route));
+  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_projected_blocks?: number; metadata_coverage?: import("./cms-coverage.js").CmsMetadataCoverage; body_unmapped_components?: UnmappedComponents; fragments?: import("./fragment-evaluation.js").FragmentAssessment[] }>(findingsKey(route));
   const findings = (record?.findings ?? []).filter((finding) => isCmsObservableFinding(finding, record?.body_coverage === "complete") && (!incomplete || !isSiteGraphFinding(finding)));
   const assessment = record?.assessment;
   const bodyNotice = record && assessment?.status !== "error" ? cmsBodyCoverageNotice(record.body_coverage, record.body_projected_blocks) : undefined;
@@ -520,6 +520,7 @@ export async function renderDocumentPanel(
       },
       { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
       ...(bodyNotice ? [{ type: "context", text: bodyNotice }] : []),
+      ...(record && assessment?.status !== "error" ? [{ type: "context", text: cmsMetadataCoverageNotice(record.metadata_coverage) }] : []),
       ...(componentsNotice ? [{ type: "context", text: componentsNotice }] : []),
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(record && assessment === undefined ? [{ type: "context", text: "No content preset assessment was recorded for this document; absence of findings is not an editorial quality assessment." }] : []),

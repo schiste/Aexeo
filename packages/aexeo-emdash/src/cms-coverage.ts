@@ -51,3 +51,32 @@ export function unmappedComponentsNotice(components: UnmappedComponents | undefi
   const items = components.entries.map((entry) => `${entry.type} (${entry.kind}, ${entry.occurrences})`).join(", ");
   return `Unmapped components observed${items ? `: ${items}` : ""}${components.truncated ? "; additional types omitted" : ""}. Configure mappings after verifying the host renderer.`;
 }
+
+/** Metadata inputs recorded for this evaluation; values themselves are not copied. */
+export interface CmsMetadataCoverage {
+  observed_fields: string[];
+  supplied_fields: string[];
+  unavailable_fields: string[];
+  description_source_observed: boolean;
+  description_value_supplied: boolean;
+}
+
+export function cmsMetadataCoverage(document: EmdashDocument): CmsMetadataCoverage {
+  return {
+    observed_fields: document.observed_metadata_fields ?? [],
+    supplied_fields: Object.keys(document.meta ?? {}),
+    unavailable_fields: document.unavailable_metadata_fields ?? [],
+    description_source_observed: document.description_source_observed === true,
+    description_value_supplied: document.description !== undefined,
+  };
+}
+
+/** This describes the supplied CMS projection, not the rendered page. */
+export function cmsMetadataCoverageNotice(coverage: CmsMetadataCoverage | undefined): string {
+  if (!coverage) return "Metadata coverage is unknown for this evaluation; save or refresh to reassess it.";
+  const description = coverage.description_source_observed
+    ? coverage.description_value_supplied ? "source observed and value supplied" : "source observed with no value supplied"
+    : coverage.description_value_supplied ? "value supplied; source mapping unverified" : "source mapping unverified; no value supplied";
+  const list = (fields: string[]) => fields.length ? fields.join(", ") : "none";
+  return `CMS metadata input: observed fields: ${list(coverage.observed_fields)}; supplied custom fields: ${list(coverage.supplied_fields)}; unavailable custom fields: ${list(coverage.unavailable_fields)}. Description: ${description}. This does not establish rendered page metadata.`;
+}

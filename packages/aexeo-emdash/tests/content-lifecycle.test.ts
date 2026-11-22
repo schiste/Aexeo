@@ -576,6 +576,7 @@ describe("custom block mappings", () => {
 describe("partial CMS projection visibility", () => {
   it("preserves the count in save, refresh and both editor views without asserting completeness", async () => {
     const subject = item("partial", NEW);
+    subject.data.description = "Private supplied description";
     subject.data.body = [
       { _type: "block", children: [{ _type: "span", text: "Before" }] },
       { _type: "unknown", _key: "u" },
@@ -587,9 +588,13 @@ describe("partial CMS projection visibility", () => {
     const evaluator = returning("CNT001");
     const verify = async () => {
       expect(store.get(findingsKey("/partial"))).toMatchObject({ body_coverage: "unavailable", body_projected_blocks: 2, findings: [] });
-      expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/partial"))).toContain("2 projected content block(s) were retained");
+      const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/partial"));
+      expect(panel).toContain("2 projected content block(s) were retained");
+      expect(panel).toContain("value supplied; source mapping unverified");
+      expect(panel).not.toContain("Private supplied description");
       const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator });
-      expect(payload.routes.find((route) => route.route === "/partial")).toMatchObject({ body_coverage: "unavailable", body_projected_blocks: 2 });
+      expect(payload.routes.find((route) => route.route === "/partial")).toMatchObject({ body_coverage: "unavailable", body_projected_blocks: 2, metadata_coverage: { description_source_observed: false, description_value_supplied: true } });
+      expect(JSON.stringify(payload.routes)).not.toContain("Private supplied description");
     };
     await save(ctx, subject, evaluator);
     await verify();

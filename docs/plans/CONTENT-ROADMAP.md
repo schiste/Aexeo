@@ -53,6 +53,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Add opt-in independent fragment audits to configured saves and refreshes,
   with mapped findings, explicit unavailable results, aggregate telemetry and
   regression coverage using the WASM engine.
+- [x] Record CMS metadata projection coverage with save and refresh assessments;
+  both editor views distinguish supplied description values from observed source
+  mappings without copying metadata values or claiming rendered-page coverage.
 - [ ] Publish and install the tested npm package, enable the desired presets and
   revision access on the target host, then verify its connected MCP actions and
   permissions against a real revision. Repository support alone does not expose

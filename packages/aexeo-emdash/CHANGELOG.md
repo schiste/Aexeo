@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Show the metadata input coverage recorded with CMS save and refresh assessments, including whether the description mapping was observed. Field names are reported without copying metadata values; rendered page metadata remains unverified.
+
 ## [0.9.5]
 
 - Report retained projected body-block counts separately from capability coverage in revision audits and editor views. Aggregate save and refresh telemetry counts incomplete projections without recording content or identifiers; a projected block count does not prove completeness.
