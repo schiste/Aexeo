@@ -12,6 +12,7 @@ EDITORIAL_JSON=$(cargo run --release -q -p aexeo-core --example editorial_bench 
 EMDASH_JSON=$(cargo run --release -q -p aexeo-emdash-bridge --example emdash_content_bench)
 cargo build --release -q -p aexeo-cli
 STARTUP_JSON=$(node scripts/bench-content-startup.js "${CARGO_TARGET_DIR:-target}/release/aexeo-cli")
+REVISION_JSON=$(node scripts/bench-content-revision.js "${CARGO_TARGET_DIR:-target}/release/aexeo-cli")
 
 mkdir -p .aexeo-reports
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$STATIC_JSON" "$RUNTIME_JSON" "$CONTENT_JSON" "$LITERAL_JSON" "$LINK_GRAPH_JSON" "$EDITORIAL_JSON" "$STARTUP_JSON" "$EMDASH_JSON" | node scripts/check-performance-budget.js
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$STATIC_JSON" "$RUNTIME_JSON" "$CONTENT_JSON" "$LITERAL_JSON" "$LINK_GRAPH_JSON" "$EDITORIAL_JSON" "$STARTUP_JSON" "$EMDASH_JSON" "$REVISION_JSON" | node scripts/check-performance-budget.js
