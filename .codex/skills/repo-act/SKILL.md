@@ -114,6 +114,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   visible paragraphs. An omitted block can hide a boundary; withhold completeness
   unless the consumer can preserve that boundary, and distinguish unknown from
   an observed empty structure.
+- For Markdown footnote projection tests, include a matching footnote definition: unresolved markers follow a different parser path. Check adjacent words, punctuation and original source coordinates separately.
 - For rules with overlapping triggers, isolate the trigger under test in the
   regression fixture and confirm the test fails before the fix; another
   matching trigger can otherwise hide the defect.
