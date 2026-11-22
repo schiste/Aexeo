@@ -1128,6 +1128,29 @@ site impact of deletion and rename remains separately `not_checked`. Optional
 telemetry reports only item count and the supplied completeness flag. Rust hosts
 can use `evaluate_change_with_collection` and `ChangeCollection`.
 
+For evidence-dependent gates, `content-change --evidence-inventory evidence.json`
+loads a host-supplied inventory such as:
+
+```json
+{"article": {"source-id": "Source snapshot text"}}
+```
+
+The outer keys must exactly match proposed entities with an after state; use an
+empty object for an entity with no supplied sources. A missing named source
+leaves its gate `not_checked`. Duplicate JSON keys, unknown or omitted entities,
+and evidence exceeding the evaluator's per-source or aggregate byte limits are
+rejected. The output path must differ from the inventory file. Inventory and
+verdicts may contain private data; telemetry reports only entity and source counts.
+
+The verdict's evidence binding covers the inventory, change, resolved policy and
+selected options. `--verify-verdict` compares the same bound inputs and a fresh
+evaluation; it rejects changed inventory before making link requests. The host
+must independently establish the source's origin, freshness and relevance. A
+matching anchor does not prove that a source supports a claim, and this is not
+publication authorization. The option composes with collection snapshots, custom
+extensions and link observations, but is not available with experimental offline
+receipts or portable candidate verdicts.
+
 The verdict output path must differ from every input file, including preset
 sources, external results, collection snapshots, previous verdicts and confined
 content files. Aexeo rejects direct paths, resolvable symlink aliases and, on

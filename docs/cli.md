@@ -388,6 +388,9 @@ Options:
       --collection-snapshot <collection-snapshot>
           Host-supplied post-change collection JSON with explicit completeness
 
+      --evidence-inventory <evidence-inventory>
+          Load per-entity named UTF-8 evidence snapshots from JSON; may contain private content
+
       --verify-verdict <verify-verdict>
           Re-evaluate and compare a previous verdict before writing a fresh verdict
 
