@@ -1122,6 +1122,23 @@ fn verify_candidate_policy_coverage(
             bail!("resolved policy check is missing");
         }
     }
+    let needs_item_checks = preset.gates.iter().any(|gate| {
+        !(has_collection
+            && matches!(
+                gate,
+                crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
+            ))
+    });
+    if needs_item_checks
+        && entries.iter().any(|entry| {
+            !matches!(
+                entry.media_type.as_str(),
+                "text/plain" | "text/markdown" | "text/html"
+            )
+        })
+    {
+        bail!("item media type is not supported by this evaluator");
+    }
     for gate in &preset.gates {
         let collection_gate = has_collection
             && matches!(
@@ -3034,6 +3051,27 @@ mod tests {
         assert!(
             verify(&envelope).is_err(),
             "omitted advisory gate was accepted"
+        );
+    }
+
+    #[test]
+    fn candidate_policy_coverage_rejects_unsupported_item_media() {
+        let mut change = change();
+        let policy = preset(1);
+        let verdict = evaluate(&change, 1).unwrap();
+        assert!(verify_candidate_policy_coverage(&verdict, &change, &policy, false).is_ok());
+        change.entries[0].media_type = "application/json".into();
+        assert!(verify_candidate_policy_coverage(&verdict, &change, &policy, false).is_err());
+        let collection = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='title'\n").unwrap();
+        let mut collection_verdict = verdict.clone();
+        collection_verdict.checks[0].id = "collection:0::unique".into();
+        assert!(
+            verify_candidate_policy_coverage(&collection_verdict, &change, &collection, true)
+                .is_ok()
+        );
+        assert!(
+            verify_candidate_policy_coverage(&collection_verdict, &change, &collection, false)
+                .is_err()
         );
     }
 

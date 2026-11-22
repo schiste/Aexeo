@@ -123,6 +123,11 @@ def require_policy_coverage(policy, change, has_collection, verdict):
         # Bound work before forming a Cartesian product of untrusted inputs.
         if expected_count > len(checks):
             raise VerificationError('resolved policy check is missing')
+    needs_items = any(not (gate['kind'] == 'unique_collection_metadata' and has_collection)
+                      for gate in policy['gates'])
+    if needs_items and any(entry.get('after') is not None and entry['media_type'] not in
+                           {'text/plain', 'text/markdown', 'text/html'} for entry in change['entries']):
+        raise VerificationError('item media type is not supported by this evaluator')
     for gate in policy['gates']:
         gate_id, kind, blocking = gate['id'], gate['kind'], gate['blocking']
         if kind == 'unique_collection_metadata' and has_collection:

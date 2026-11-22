@@ -145,7 +145,10 @@ an independently supplied candidate context, then verifies the required passing
 checks and independently supplied content streams. It validates the resolved
 preset and requires every configured item or collection check, including
 advisory checks, with its configured blocking flag. Advisory failures remain
-nonblocking. This verifies coverage, not evaluator authenticity. An incomplete declared base,
+nonblocking. If item gates are configured, this helper and the Python
+comparator reject media types the current evaluator cannot parse. A pure
+collection policy does not require an item parser. These checks verify coverage,
+not evaluator authenticity. An incomplete declared base,
 changed candidate, policy, scope, evidence or content fails the comparison. It
 also rejects a verdict whose declared HTML scope differs from the independently
 selected scope, whose validator profile differs from the resolved policy name,
