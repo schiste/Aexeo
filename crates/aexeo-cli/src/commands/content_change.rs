@@ -456,6 +456,11 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         })
         .transpose()?;
     if args.get_flag("offline-receipt") {
+        if evidence.is_some() && !args.get_flag("draft-portable-verdict") {
+            user_bail!(
+                "evidence inventory requires a draft portable verdict when using an offline receipt"
+            );
+        }
         if args.get_flag("telemetry") {
             report_html_scope(&change, html_scope);
         }
@@ -470,6 +475,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             &mut provider,
             Path::new(&verdict_path),
             html_scope,
+            evidence.as_ref(),
         );
     }
     let max_checks = *args
@@ -1022,6 +1028,7 @@ fn command_offline_receipt(
     provider: &mut HostFiles,
     output: &Path,
     html_scope: HtmlContentScope,
+    evidence: Option<&ChangeEvidenceInventory>,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
         LinkSnapshotDecisionContext, OfflineDecisionContext, OfflineDecisionReceipt,
@@ -1058,7 +1065,7 @@ fn command_offline_receipt(
     });
     if args.contains_id("candidate-base") {
         return command_candidate_bound_verdict(
-            args, &context, snapshots, provider, output, html_scope,
+            args, &context, snapshots, provider, output, html_scope, evidence,
         );
     }
     if args.get_flag("experimental-bound-verdict") {
@@ -1187,6 +1194,7 @@ fn command_candidate_bound_verdict(
     provider: &mut HostFiles,
     output: &Path,
     scope: HtmlContentScope,
+    evidence: Option<&ChangeEvidenceInventory>,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
         CandidateDecisionContext, CandidateLinkDecisionContext, ExperimentalCandidateVerdict,
@@ -1214,9 +1222,30 @@ fn command_candidate_bound_verdict(
         let verdict = if let Some(path) = args.get_one::<String>("verify-draft-portable-verdict") {
             let previous: aexeo_contracts::content_gate_portable_v2::BoundVerdict =
                 read_candidate_input(path, output, "previous portable verdict")?;
-            aexeo_core::content_gate_verdict::revalidate_draft_portable_candidate(
-                &previous,
+            if let Some(sources) = evidence {
+                aexeo_core::content_gate_verdict::revalidate_draft_portable_candidate_evidence(
+                    &previous,
+                    &context,
+                    sources,
+                    snapshots,
+                    provider,
+                    &iso_now(),
+                    scope,
+                )
+            } else {
+                aexeo_core::content_gate_verdict::revalidate_draft_portable_candidate(
+                    &previous,
+                    &context,
+                    snapshots,
+                    provider,
+                    &iso_now(),
+                    scope,
+                )
+            }
+        } else if let Some(sources) = evidence {
+            aexeo_core::content_gate_verdict::evaluate_draft_portable_candidate_evidence_verdict(
                 &context,
+                sources,
                 snapshots,
                 provider,
                 &iso_now(),
@@ -1254,7 +1283,7 @@ fn command_candidate_bound_verdict(
                 "{}",
                 serde_json::json!({"event":"content_change_portable_draft", "version":1,
                 "status":verdict.verdict.status, "collection_supplied":decision.collection.is_some(),
-                "link_snapshot_supplied":snapshots.is_some(), "revalidation":args.contains_id("verify-draft-portable-verdict"),
+                "link_snapshot_supplied":snapshots.is_some(), "source_inventory_supplied":evidence.is_some(), "revalidation":args.contains_id("verify-draft-portable-verdict"),
                 "file_state_count":decision.change.entries.iter().flat_map(|entry|
                     [entry.before.as_ref(), entry.after.as_ref()].into_iter().flatten())
                     .filter(|state| state.file.is_some()).count(),

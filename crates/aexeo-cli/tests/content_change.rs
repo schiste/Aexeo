@@ -2349,6 +2349,63 @@ fn candidate_bound_verdict_rebuilds_and_revalidates_inputs() {
 }
 
 #[test]
+fn draft_portable_candidate_cli_binds_and_revalidates_source_inventory() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let after = dir.path().join("after.json");
+    let evidence = dir.path().join("evidence.json");
+    fs::write(&base, serde_json::to_vec(&serde_json::json!({"scope":"site", "site_id":"site", "site_base_url":null, "base":{"kind":"opaque","revision":"r1"}, "complete":true, "items":[]})).unwrap()).unwrap();
+    fs::write(&after, serde_json::to_vec(&serde_json::json!([{"entity_id":"article", "public_path":"/article", "media_type":"text/plain", "revision":null, "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source":"abc", "links":null}])).unwrap()).unwrap();
+    fs::write(&evidence, r#"{"article":{"s":"private quote"}}"#).unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n";
+    let opts = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "build",
+        "--candidate-base",
+        base.to_str().unwrap(),
+        "--candidate-after",
+        after.to_str().unwrap(),
+        "--draft-portable-verdict",
+        "--evidence-inventory",
+        evidence.to_str().unwrap(),
+        "--telemetry",
+    ];
+    let result = run(dir.path(), &input(), policy, &opts);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("private quote"));
+    let output = dir.path().join("verdict.json");
+    let saved = fs::read(&output).unwrap();
+    let previous = dir.path().join("previous.json");
+    fs::write(&previous, &saved).unwrap();
+    let mut verify = opts.to_vec();
+    verify.extend([
+        "--verify-draft-portable-verdict",
+        previous.to_str().unwrap(),
+    ]);
+    let repeat = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(
+        repeat.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&repeat.stderr)
+    );
+    let saved = fs::read(&output).unwrap();
+    fs::write(&evidence, r#"{"article":{"s":"different"}}"#).unwrap();
+    assert_eq!(
+        run(dir.path(), &input(), policy, &verify).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+}
+
+#[test]
 fn draft_portable_candidate_cli_matches_existing_binding_and_rejects_unsupported_modes() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("base.json");

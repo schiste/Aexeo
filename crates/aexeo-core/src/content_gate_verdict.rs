@@ -1577,6 +1577,46 @@ pub fn revalidate_draft_portable_candidate<P: ConfinedContentFiles>(
     Ok(fresh)
 }
 
+/// Revalidate a candidate with independently supplied source and link evidence.
+/// This compares every decision input and reruns evaluation; it does not
+/// authenticate the supplied evidence or authorize publication.
+pub fn revalidate_draft_portable_candidate_evidence<P: ConfinedContentFiles>(
+    previous: &aexeo_contracts::content_gate_portable_v2::BoundVerdict,
+    context: &CandidateDecisionContext<'_>,
+    sources: &ChangeEvidenceInventory,
+    links: Option<&ChangeLinkSnapshots>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
+    previous.validate_verdict().map_err(anyhow::Error::msg)?;
+    validate_change_evidence(
+        context.decision.change,
+        sources,
+        context.decision.max_entry_bytes,
+        context.decision.max_total_bytes,
+    )?;
+    let evidence = candidate_evidence_artifact(sources, links)?;
+    let binding = candidate_binding(context, scope, Some(&evidence), provider)?;
+    if previous.binding_sha256 != binding {
+        bail!("draft portable decision inputs differ");
+    }
+    let fresh = evaluate_draft_portable_candidate_evidence_verdict(
+        context,
+        sources,
+        links,
+        provider,
+        evaluated_at,
+        scope,
+    )?;
+    let mut old = previous.verdict.clone();
+    old.evaluated_at = fresh.verdict.evaluated_at.clone();
+    if old != fresh.verdict || previous.binding_sha256 != fresh.binding_sha256 {
+        bail!("draft portable verdict differs from fresh evaluation");
+    }
+    Ok(fresh)
+}
+
 /// Evaluate changed content and bind the independently built candidate snapshot.
 pub fn evaluate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     context: &CandidateDecisionContext<'_>,
@@ -6731,6 +6771,18 @@ mod tests {
         let extensions = combined.verdict.extensions.as_ref().unwrap();
         assert!(extensions.contains_key(EVIDENCE_BINDING_EXTENSION));
         assert!(extensions.contains_key(OBSERVED_LINK_BINDING_EXTENSION));
+        assert!(
+            revalidate_draft_portable_candidate_evidence(
+                &combined,
+                &candidate,
+                &sources,
+                Some(&snapshots),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                scope,
+            )
+            .is_ok()
+        );
         sources
             .get_mut("article")
             .unwrap()
@@ -6745,6 +6797,19 @@ mod tests {
         )
         .unwrap();
         assert_ne!(combined.binding_sha256, changed.binding_sha256);
+        assert!(
+            revalidate_draft_portable_candidate_evidence(
+                &combined,
+                &candidate,
+                &sources,
+                Some(&snapshots),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                scope,
+            )
+            .is_err()
+        );
+
         sources.clear();
         assert!(
             evaluate_draft_portable_candidate_evidence_verdict(

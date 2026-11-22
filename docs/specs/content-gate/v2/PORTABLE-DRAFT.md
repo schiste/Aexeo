@@ -112,6 +112,18 @@ fresh result. It does not fetch links or verify their origin or freshness. It is
 are exercised by Rust and Python tests. Full verdict validation, interoperable
 artifact profiles and end-to-end host integration remain unfinished.
 
+An optional `--evidence-inventory` supplies per-entity named source snapshots
+for this draft mode and may be combined with `--link-observations`. The portable
+binding covers an external artifact of the form
+`{"schema":"aexeo.candidate-external-evidence/v1","sources":{...},"links":null}`;
+`links` contains the change link snapshot when supplied. The Rust helper
+`candidate_evidence_artifact` serializes the exact bytes for independent callers.
+These bytes can contain private source text and URLs; protect them accordingly.
+Each after-state entity must occur in the inventory, even when its source map is
+empty. An absent named source leaves the associated gate not checked. A matching
+binding establishes neither source authenticity nor factual support. Inventory
+inputs are rejected for non-portable experimental receipt modes.
+
 The CLI can re-evaluate a prior draft using the same candidate inputs and
 `--draft-portable-verdict --verify-draft-portable-verdict PREVIOUS`. It strictly
 parses the prior envelope, compares the recomputed binding before evaluation,
