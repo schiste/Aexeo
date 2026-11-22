@@ -276,7 +276,7 @@ class PortableComparison(unittest.TestCase):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])
         verdict = copy.deepcopy(self.previous['verdict'])
-        for kind in ('custom', 'site_group', 'site_audit', 'evidence_anchors',
+        for kind in ('custom', 'site_group', 'site_audit', 'link_reachability', 'evidence_anchors',
                      'structured_fact', 'evidence_review', 'evidence_review_age'):
             policy['gates'][0]['kind'] = kind
             for blocking in (True, False):
@@ -289,6 +289,15 @@ class PortableComparison(unittest.TestCase):
                     with self.subTest(kind=kind, status=status, blocking=blocking):
                         with self.assertRaises(VerificationError):
                             require_policy_coverage(policy, change, False, verdict)
+
+    def test_link_observations_allow_claimed_link_evaluation(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        policy['gates'][0]['kind'] = 'link_reachability'
+        for status in ('passed', 'failed', 'not_checked'):
+            verdict['checks'][0]['status'] = status
+            require_policy_coverage(policy, change, False, verdict, True)
 
     def test_rebound_verdict_cannot_claim_missing_evidence_was_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])

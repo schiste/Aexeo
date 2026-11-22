@@ -57,8 +57,8 @@ unavailable check may become a pass.
   Shared Rust/Python vectors exercise the encoding. These primitives do not
   authenticate snapshots or prove their scope, provenance or completeness.
   The candidate verifier rejects claims that evidence-dependent gates ran when
-  this evaluator received no per-item evidence sources. Link observations are
-  separate; this restriction does not authenticate the evaluator or sources.
+  this evaluator received no per-item evidence sources, and link reachability
+  claims without link observations. These inputs are separate; this restriction does not authenticate the evaluator or sources.
 - [#525](https://github.com/schiste/Aexeo/pull/525) and
   [#528](https://github.com/schiste/Aexeo/pull/528) provide bounded in-memory
   incremental evaluation for a subset of independent plain-text gates, with

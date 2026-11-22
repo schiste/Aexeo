@@ -97,7 +97,7 @@ _ITEM_GATE_KINDS = frozenset({
 })
 
 
-def require_policy_coverage(policy, change, has_collection, verdict):
+def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False):
     """Reject a verdict omitting a configured gate instance or its blocking flag."""
     if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
             or type(policy['version']) is not int or policy['version'] != 1
@@ -144,6 +144,8 @@ def require_policy_coverage(policy, change, has_collection, verdict):
             if kind in {'custom', 'site_group', 'site_audit', 'evidence_anchors',
                         'structured_fact', 'evidence_review', 'evidence_review_age'} and check.get('status') != 'not_checked':
                 raise VerificationError('candidate evaluator cannot execute site, custom or evidence gates')
+            if kind == 'link_reachability' and not has_link_observations and check.get('status') != 'not_checked':
+                raise VerificationError('candidate evaluator cannot execute link reachability without observations')
     return len(policy['gates']), expected_count
 
 
@@ -207,7 +209,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (evidence is not None):
             raise VerificationError('link evidence does not match the verdict profile')
         validate_verdict(verdict)
-        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict)
+        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, evidence is not None)
         if verdict['validator']['version'] != host_options['engine_version']:
             raise VerificationError('validator version does not match host options')
         if verdict['validator'].get('profile') != policy['name']:
