@@ -426,3 +426,15 @@ identity. This comparison is not a complete BCP 47 validator.
 - Saved graph reports bind to the serialized audit they qualify. `report render`
   withholds qualifications for unbound or mismatched reports; the binding detects
   accidental mixups but is not authentication or proof of graph integrity.
+
+## Runtime regression observations
+
+On 2026-11-22, at Aexeo `9d71b5059ec4`, five full `aexeo-core` library
+test runs passed on a local macOS machine, each including both runtime tests
+from [issue #12](https://github.com/schiste/Aexeo/issues/12). The CLI
+checkpoint-resume integration test from [issue #13](https://github.com/schiste/Aexeo/issues/13)
+also passed ten consecutive isolated runs. These runs used a fresh target and
+no sccache wrapper. Earlier changes keep fixture servers alive until explicit
+shutdown and handle fragmented requests, but neither this sample nor those
+changes establish the root cause or exclude future intermittent failures.
+The issues remain open.
