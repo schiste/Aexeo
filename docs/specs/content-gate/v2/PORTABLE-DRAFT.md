@@ -123,9 +123,11 @@ Each after-state entity must occur in the inventory, even when its source map is
 empty. An absent named source leaves the associated gate not checked. A matching
 binding establishes neither source authenticity nor factual support. Inventory
 inputs are rejected for non-portable experimental receipt modes.
-Aethyme 0.8.159 rejects this new evidence profile as an unsupported verdict
-field; use the independent Python comparator until its native comparator gains
-support. Never interpret that rejection as a passing decision.
+Aethyme 0.8.159 rejects this evidence profile as an unsupported verdict field.
+Native support was merged in [Aethyme #1957](https://github.com/schiste/Aethyme/pull/1957);
+use a build containing that change or the independent Python comparator. A
+rejection is not a passing decision. This does not imply a released Aethyme
+version includes the change.
 
 The CLI can re-evaluate a prior draft using the same candidate inputs and
 `--draft-portable-verdict --verify-draft-portable-verdict PREVIOUS`. It strictly

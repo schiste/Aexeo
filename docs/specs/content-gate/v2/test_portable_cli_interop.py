@@ -105,10 +105,30 @@ class PortableCliInterop(unittest.TestCase):
             matched = subprocess.run(verify, capture_output=True, text=True)
             self.assertEqual(matched.returncode, 0, matched.stdout + matched.stderr)
             self.assertFalse(json.loads(matched.stdout)['publication_authorized'])
+            native = os.environ.get('AETHYME_CLI_BIN')
+            if native:
+                manifest = {name: str(root / name) for name in
+                    ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
+                manifest.update(collection=None, external_evidence=str(root / 'evidence'),
+                    evaluator_identity=str(root / 'evaluator'), validator_name='aexeo',
+                    validator_version='0.0.24', required_checks=['gate:7:article:source'],
+                    fresh_exit_code=0, fresh_timed_out=False)
+                (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
+                native_command = [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')]
+                native_env = dict(os.environ)
+                native_env.pop('AETHYME_GATE_WORKER_ID', None)
+                native_match = subprocess.run(native_command, env=native_env, capture_output=True, text=True)
+                self.assertEqual(native_match.returncode, 0, native_match.stdout + native_match.stderr)
+                self.assertEqual(json.loads(native_match.stdout)['status'], 'match')
+                self.assertFalse(json.loads(native_match.stdout)['publication_authorized'])
             artifact['sources']['article']['s'] = 'different'
             (root / 'evidence').write_text(json.dumps(artifact, separators=(',', ':')), encoding='utf-8')
             rejected = subprocess.run(verify, capture_output=True, text=True)
             self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+            if native:
+                native_rejected = subprocess.run(native_command, env=native_env, capture_output=True, text=True)
+                self.assertNotEqual(native_rejected.returncode, 0, native_rejected.stdout + native_rejected.stderr)
+                self.assertFalse(json.loads(native_rejected.stdout)['publication_authorized'])
 
     def test_real_multi_gate_verdict_rejects_omitted_advisory_check(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
