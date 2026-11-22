@@ -60,10 +60,11 @@ unavailable check may become a pass.
   evaluation regression tests. Adapted Markdown and HTML also support the
   independent heading-hierarchy gate using complete ordered levels; mixed
   presets can compose it with prose-only rhythm checks. Missing heading
-  observations remain not checked. Markdown list-count gates also work in
-  adapted incremental and change evaluation; other formats without complete
-  list observations remain not checked. Missing capabilities remain not checked; this
-  is neither a rendered-page assessment nor a publication verdict.
+  observations remain not checked. Markdown and conservatively observed static
+  HTML list-count gates also work in adapted incremental and change evaluation.
+  Ambiguous or hidden HTML lists and formats without complete list observations
+  remain not checked. This is neither a rendered-page assessment nor a
+  publication verdict.
   Standalone and composed incremental baselines can explicitly select the
   static HTML main scope ([#706](https://github.com/schiste/Aexeo/pull/706),
   [#707](https://github.com/schiste/Aexeo/pull/707)); the default remains the
