@@ -8,6 +8,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5]
 
+- Preserve sentence boundaries and source positions for decimal numbers written with Arabic-Indic and Persian digits, including across Portable Text spans. This does not establish general Arabic segmentation or translation quality.
+
 - Allow authorized MCP clients to audit an unsaved, explicitly configured fragment against a CMS revision without writing content. Reports identify the candidate and do not reuse revision-only link observations or list-completeness attestations.
 
 - Preserve whitespace in nonempty plain-text CMS fields, including whitespace-only values, so character-sensitive gates measure the supplied text. Automatically selected rich content still takes precedence over a whitespace-only fallback.
