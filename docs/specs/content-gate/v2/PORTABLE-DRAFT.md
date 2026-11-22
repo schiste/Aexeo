@@ -261,12 +261,19 @@ It also compares each validator profile with the resolved policy name. For the
 currently understood Aexeo v1 resolved-policy artifact, it requires a check for
 each configured gate and applicable changed item, or the collection-scoped check
 when a collection is supplied, with the configured blocking flag. Unknown gate
-kinds and policy versions are rejected. This detects omitted checks even if the
+kinds, policy versions and empty gate lists are rejected. This detects omitted checks even if the
 host's explicit required-check list omits them. It does not validate every gate
 parameter, prove the evaluator ran the checks correctly, or authenticate the
 policy or validator labels. The host must still independently select its required
 checks and enforce completeness, freshness and the publication boundary. It still cannot
 establish that the independently supplied options were used by the evaluator.
+On 2026-11-22, the separately installed Aethyme 0.8.155 comparator
+(build 3bdff6a5) accepted a matching and rebound empty gate list that this
+Python comparator rejects. Hosts using that native version must independently
+reject empty policies; the comparators are not equivalent on this case.
+The optional regression `test_native_rejects_rebound_empty_policy` in
+`test_portable_cli_interop.py` runs when `AETHYME_CLI_BIN` is set; it is
+expected to fail against that version after a valid positive control.
 The producer's artifact encodings are still Aexeo-specific; the host must
 obtain them independently rather than trust a bundle from the previous result.
 The comparator accepts no evidence for the offline profile, or exact snapshot

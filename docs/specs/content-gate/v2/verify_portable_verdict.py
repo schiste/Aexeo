@@ -101,7 +101,7 @@ def require_policy_coverage(policy, change, has_collection, verdict):
     """Reject a verdict omitting a configured gate instance or its blocking flag."""
     if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
             or type(policy['version']) is not int or policy['version'] != 1
-            or not isinstance(policy['gates'], list)):
+            or not isinstance(policy['gates'], list) or not policy['gates']):
         raise VerificationError('unsupported resolved policy shape')
     text(policy['name'], empty=False)
     checks = {check['id']: check for check in verdict['checks']}
