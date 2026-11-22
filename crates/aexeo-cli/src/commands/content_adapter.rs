@@ -55,6 +55,8 @@ pub(super) struct HostSourceMap {
     spans: Vec<HostSourceSpan>,
     #[serde(default)]
     heading_offsets: Option<Vec<Option<usize>>>,
+    #[serde(default)]
+    link_offsets: Option<Vec<Option<usize>>>,
 }
 
 #[derive(Deserialize)]
@@ -66,7 +68,12 @@ struct HostSourceSpan {
 }
 
 impl HostSourceMap {
-    fn validate(&self, projected: &str, headings: Option<&[String]>) -> Result<()> {
+    fn validate(
+        &self,
+        projected: &str,
+        headings: Option<&[String]>,
+        destinations: Option<&[String]>,
+    ) -> Result<()> {
         ensure!(
             self.spans.len() <= MAX_OBSERVATIONS,
             "source map observation limit exceeded"
@@ -116,7 +123,76 @@ impl HostSourceMap {
                 }
             }
         }
+        if let Some(offsets) = &self.link_offsets {
+            let destinations = destinations
+                .ok_or_else(|| anyhow::anyhow!("link offsets require link destinations"))?;
+            ensure!(
+                offsets.len() == destinations.len(),
+                "link offsets must match link destinations"
+            );
+            let mut previous_end = 0;
+            for (offset, destination) in offsets.iter().zip(destinations) {
+                if let Some(start) = offset {
+                    let end = start
+                        .checked_add(destination.len())
+                        .ok_or_else(|| anyhow::anyhow!("invalid link source range"))?;
+                    ensure!(
+                        !destination.is_empty()
+                            && *start >= previous_end
+                            && self.source_text.get(*start..end) == Some(destination.as_str()),
+                        "link source bytes must match ordered nonoverlapping destinations"
+                    );
+                    previous_end = end;
+                }
+            }
+        }
         Ok(())
+    }
+
+    pub(super) fn link_positions(
+        &self,
+        source_index: &LineIndex,
+        destinations: Option<&[String]>,
+        observations: Option<&[aexeo_core::content_gate::LinkReachabilityObservation]>,
+        gate: &aexeo_core::content_gate::ContentGate,
+        result: &aexeo_core::content_gate::ContentGateResult,
+    ) -> Option<Vec<Option<(usize, usize)>>> {
+        if result.findings.is_empty() {
+            return None;
+        }
+        let offsets = self.link_offsets.as_deref()?;
+        let destinations = destinations?;
+        if offsets.len() != destinations.len()
+            || observations.is_some_and(|values| values.len() != destinations.len())
+        {
+            return None;
+        }
+        let indices = aexeo_core::source_mapping::link_finding_indices(
+            gate,
+            Some(destinations),
+            observations,
+        )?;
+        if indices.len() != result.total_findings() {
+            return None;
+        }
+        Some(
+            indices
+                .into_iter()
+                .take(result.findings.len())
+                .map(|index| {
+                    source_index.position(&self.source_text, offsets.get(index).copied().flatten()?)
+                })
+                .collect(),
+        )
+    }
+
+    pub(super) fn has_link_offsets(&self) -> bool {
+        self.link_offsets.is_some()
+    }
+    pub(super) fn link_offset_count(&self) -> usize {
+        self.link_offsets.as_ref().map_or(0, |offsets| {
+            offsets.iter().filter(|offset| offset.is_some()).count()
+        })
     }
 
     pub(super) fn heading_positions(
@@ -269,7 +345,11 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
     );
     let text = projection.text.as_deref().unwrap_or("");
     if let Some(map) = &projection.source_map {
-        map.validate(text, projection.headings.as_deref())?;
+        map.validate(
+            text,
+            projection.headings.as_deref(),
+            projection.link_destinations.as_deref(),
+        )?;
     }
     if let Some(ends) = &projection.block_ends {
         ensure!(

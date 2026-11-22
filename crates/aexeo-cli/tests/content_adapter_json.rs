@@ -419,3 +419,109 @@ fn host_heading_offsets_reject_wrong_bytes_order_and_utf8_boundaries() {
     fs::write(&file, serde_json::to_vec(&missing).unwrap()).unwrap();
     assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
 }
+
+#[test]
+fn host_link_offsets_map_only_matching_occurrences() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let source = "é valid https://ok.test\n✨ bad http://bad.test\nsecond http://bad.test\n";
+    let projection = json!({"schema":"aexeo.content-adapter/v1", "text":"Body",
+        "link_destinations":["https://ok.test","http://bad.test","http://bad.test"],
+        "source_map":{"source_text":source,"spans":[],"link_offsets":[source.find("https://ok.test"),source.find("http://bad.test"),null]}});
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let output = run(&file, &preset, &["--telemetry"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_mapping"],
+        json!({"eligible":2,"mapped":1,"unmapped":1})
+    );
+    assert_eq!(
+        report["source_locations"],
+        json!([
+            {"gate_id":"links","finding_index":0,"source":"host_supplied_source_text","line":2,"column":7}
+        ])
+    );
+    let telemetry = String::from_utf8(output.stderr).unwrap();
+    assert!(telemetry.contains("\"link_offsets\":2"), "{telemetry}");
+    assert!(!telemetry.contains("bad.test"));
+}
+
+#[test]
+fn host_link_offsets_reject_wrong_bytes_order_and_utf8_boundaries() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='links'\nkind='link_destinations'\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let base = json!({"schema":"aexeo.content-adapter/v1","text":"Body", "link_destinations":["é","é"],
+        "source_map":{"source_text":"é é","spans":[],"link_offsets":[0,3]}});
+    for offsets in [
+        json!([0]),
+        json!([1, 3]),
+        json!([3, 0]),
+        json!([0, 0]),
+        json!([0, usize::MAX]),
+    ] {
+        let mut input = base.clone();
+        input["source_map"]["link_offsets"] = offsets;
+        fs::write(&file, serde_json::to_vec(&input).unwrap()).unwrap();
+        assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+    }
+    let mut missing = base;
+    missing.as_object_mut().unwrap().remove("link_destinations");
+    fs::write(&file, serde_json::to_vec(&missing).unwrap()).unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+}
+
+#[test]
+fn host_link_offsets_map_bound_unreachable_observations() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='online'\nkind='link_reachability'\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let source = "Text\nhttps://example.org/a\nhttps://example.org/b";
+    let projection = json!({"schema":"aexeo.content-adapter/v1","text":"Body", "link_destinations":["https://example.org/a","https://example.org/b"],
+        "source_map":{"source_text":source,"spans":[],"link_offsets":[source.find("https://example.org/a"),source.find("https://example.org/b")]}});
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let export = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            file.to_str().unwrap(),
+            "--input-format",
+            "adapter-json",
+            "--export-link-observations",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        export.status.success(),
+        "{}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let mut snapshot: serde_json::Value = serde_json::from_slice(&export.stdout).unwrap();
+    snapshot["observations"] = json!(["not_checked", "not_found"]);
+    let snapshot_file = dir.path().join("snapshot.json");
+    fs::write(&snapshot_file, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let output = run(
+        &file,
+        &preset,
+        &["--link-observations", snapshot_file.to_str().unwrap()],
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(
+        report["source_locations"],
+        json!([
+            {"gate_id":"online","finding_index":0,"source":"host_supplied_source_text","line":3,"column":1}
+        ])
+    );
+}
