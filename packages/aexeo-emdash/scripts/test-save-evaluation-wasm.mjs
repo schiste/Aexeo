@@ -194,6 +194,11 @@ ignore_whitespace=false
   const gate = host.store.get("findings:/plain-characters").assessment.gates.find((entry) => entry.gate_id === "characters");
   assert.equal(gate.status, "passed");
   assert.equal(gate.measurements.character_count, 13);
+  page.data.body = "  ";
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const whitespaceGate = host.store.get("findings:/plain-characters").assessment.gates.find((entry) => entry.gate_id === "characters");
+  assert.equal(whitespaceGate.status, "failed");
+  assert.equal(whitespaceGate.measurements.character_count, 2);
   assert.deepEqual(host.logged, []);
 }
 

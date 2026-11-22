@@ -528,8 +528,13 @@ function extractFirstPortableText(
   // separate composition format: its _type/_version/_key envelope does not
   // contain Portable Text's `children`, so passing it through loses the text.
   let foundEmptyBody = false;
+  let whitespaceBody: { value: string; slug: string } | undefined;
   for (const slug of ["body", "content"]) {
     const value = data[slug];
+    // Keep a whitespace-only value if no richer field is available.
+    if (typeof value === "string" && value.length > 0 && value.trim().length === 0) {
+      whitespaceBody ??= { value, slug };
+    }
     if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
     if (isPortableTextArray(value)) return { blocks: value };
     if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings, coverage);
@@ -550,6 +555,9 @@ function extractFirstPortableText(
     if (isPortableTextArray(value)) return { blocks: value };
     if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings, coverage);
     if (isEmdashBlocksArray(value, field)) return mapMixedPortableText(value, mappings, coverage);
+  }
+  if (whitespaceBody) {
+    return { blocks: [portableTextBlock(whitespaceBody.value, `${whitespaceBody.slug}-text`)], capabilities: ["text"] };
   }
   return foundEmptyBody ? { blocks: [] } : null;
 }
