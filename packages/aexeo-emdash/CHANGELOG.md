@@ -8,6 +8,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5]
 
+- Report retained projected body-block counts separately from capability coverage in revision audits and editor views. Aggregate save and refresh telemetry counts incomplete projections without recording content or identifiers; a projected block count does not prove completeness.
+
 - Treat explicitly linked numeric Wikipedia `#cite_note-…` markers as citations during rhythm analysis, while preserving literal text and source positions. This does not verify the reference.
 
 - Report revision read failures without exposing host errors; retain evaluated reports with unknown currentness when a later status read fails. Revision audit telemetry includes the bounded reason or currentness status.

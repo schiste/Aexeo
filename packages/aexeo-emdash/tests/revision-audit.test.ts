@@ -294,7 +294,7 @@ describe("revision audits", () => {
     const evaluate = () => auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, options);
     const result = await evaluate();
     expect(result).toMatchObject({ input_coverage: {
-      body: { coverage: "complete", field_selection: "configured", configured_fields: ["content"], capabilities: ["text", "headings", "paragraphs", "links"] },
+      body: { coverage: "complete", projected_blocks: 1, field_selection: "configured", configured_fields: ["content"], capabilities: ["text", "headings", "paragraphs", "links"] },
       description: { field_selection: "configured", configured_fields: ["seo_description", "excerpt"], source_observed: true, value_supplied: true },
       rendered_page: "not_observed",
     } });
@@ -303,8 +303,10 @@ describe("revision audits", () => {
     data.seo_description = null;
     data.excerpt = null;
     expect(await evaluate()).toMatchObject({ input_coverage: { description: { source_observed: true, value_supplied: false } } });
+    data.content = [{ _type: "block", children: [{ _type: "span", text: "Known prose" }] }, { _type: "unknown", _key: "u" }];
+    expect(await evaluate()).toMatchObject({ input_coverage: { body: { coverage: "unavailable", projected_blocks: 1, capabilities: [] } } });
     delete data.content;
-    expect(await evaluate()).toMatchObject({ input_coverage: { body: { coverage: "unavailable", capabilities: [] } } });
+    expect(await evaluate()).toMatchObject({ input_coverage: { body: { coverage: "unavailable", projected_blocks: null, capabilities: [] } } });
   });
   it("does not silently use current content when revisions are unavailable or mismatched", async () => {
     const { ctx, revision } = host();

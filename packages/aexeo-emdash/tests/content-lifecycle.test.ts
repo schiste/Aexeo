@@ -573,6 +573,34 @@ describe("custom block mappings", () => {
   });
 });
 
+describe("partial CMS projection visibility", () => {
+  it("preserves the count in save, refresh and both editor views without asserting completeness", async () => {
+    const subject = item("partial", NEW);
+    subject.data.body = [
+      { _type: "block", children: [{ _type: "span", text: "Before" }] },
+      { _type: "unknown", _key: "u" },
+      { _type: "block", children: [{ _type: "span", text: "After" }] },
+    ];
+    const { ctx, store } = host([subject]);
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    const evaluator = returning("CNT001");
+    const verify = async () => {
+      expect(store.get(findingsKey("/partial"))).toMatchObject({ body_coverage: "unavailable", body_projected_blocks: 2, findings: [] });
+      expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/partial"))).toContain("2 projected content block(s) were retained");
+      const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator });
+      expect(payload.routes.find((route) => route.route === "/partial")).toMatchObject({ body_coverage: "unavailable", body_projected_blocks: 2 });
+    };
+    await save(ctx, subject, evaluator);
+    await verify();
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    await verify();
+    const metrics = events.filter(([name]) => name === "aexeo.cms_projection_coverage").map(([, value]) => value);
+    expect(metrics).toEqual([{ documents: 1, incomplete_with_blocks: 1, projected_blocks_in_incomplete: 2 }, { documents: 1, incomplete_with_blocks: 1, projected_blocks_in_incomplete: 2 }]);
+    expect(JSON.stringify(metrics)).not.toContain("partial");
+  });
+});
+
 describe("assessment persistence", () => {
   it("retains content-preset findings even when IDs collide with site rules", async () => {
     const { ctx, store } = host();

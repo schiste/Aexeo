@@ -100,6 +100,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Show retained projected body-block counts independently from capability
+  coverage in revision audits and both CMS views. Save and refresh logs aggregate
+  incomplete projections without content or identifiers; counts describe adapter
+  output and do not assert CMS block counts or establish coverage completeness.
+
 - [x] Recognize numeric markers linked to Wikipedia `#cite_note-…` targets
   in Markdown, HTML and Portable Text, preserving literal content, destinations
   and source coordinates. This is an explicit target convention, not source or

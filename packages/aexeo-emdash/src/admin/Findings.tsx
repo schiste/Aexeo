@@ -58,8 +58,8 @@ export function ContentAssessmentDetails({ assessment }: { assessment: Extract<D
   </details>;
 }
 
-export function BodyCoverageDetails({ route }: { route: Pick<RouteSummary, "body_coverage" | "body_unmapped_components"> }): React.JSX.Element {
-  const bodyNotice = cmsBodyCoverageNotice(route.body_coverage);
+export function BodyCoverageDetails({ route }: { route: Pick<RouteSummary, "body_coverage" | "body_projected_blocks" | "body_unmapped_components"> }): React.JSX.Element {
+  const bodyNotice = cmsBodyCoverageNotice(route.body_coverage, route.body_projected_blocks);
   const componentsNotice = unmappedComponentsNotice(route.body_unmapped_components);
   return <>{bodyNotice && <p>{bodyNotice}</p>}{componentsNotice && <p>{componentsNotice}</p>}</>;
 }

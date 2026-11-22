@@ -175,6 +175,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     input_coverage: {
       body: {
         coverage: cmsBodyCoverage(adapted.document),
+        projected_blocks: adapted.document.body?.length ?? null,
         capabilities: adapted.document.body === undefined ? [] :
           adapted.document.body_capabilities ?? ["text", "headings", "paragraphs", "links"],
         field_selection: contentFields === undefined ? "automatic" as const : "configured" as const,
