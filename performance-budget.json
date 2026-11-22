@@ -29,6 +29,14 @@
     "max_avg_ms": 2000,
     "max_p95_ms": 4000
   },
+  "content/markdown_lists_combined": {
+    "max_avg_ms": 500,
+    "max_p95_ms": 1000
+  },
+  "content/markdown_lists_two_parse_baseline": {
+    "max_avg_ms": 1000,
+    "max_p95_ms": 2000
+  },
   "content/markdown_links_and_evaluation": {
     "max_avg_ms": 500,
     "max_p95_ms": 1000
