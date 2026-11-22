@@ -210,6 +210,26 @@ fn shared_list_cases_match_markdown_html_and_wasm() {
                 "{}: {format}",
                 case["name"]
             );
+            assert_eq!(
+                report["gates"][0]["findings"].as_array().unwrap().len(),
+                case["finding_count"].as_u64().unwrap() as usize,
+                "{}: {format}",
+                case["name"]
+            );
+            let positions: Vec<_> = report["source_locations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|location| serde_json::json!([location["line"], location["column"]]))
+                .collect();
+            assert_eq!(
+                serde_json::json!(positions),
+                case[format!("{format}_positions")],
+                "{}: {format}",
+                case["name"]
+            );
+            assert_eq!(report["source_mapping"]["mapped"], case["finding_count"]);
+            assert_eq!(report["source_mapping"]["unmapped"], 0);
         }
     }
 }
