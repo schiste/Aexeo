@@ -86,6 +86,10 @@ unavailable check may become a pass.
   referenced file and URI states using an explicit confined host provider and
   bounded byte comparisons. The default methods still refuse references; this
   does not fetch URIs or establish provenance, freshness or publication safety.
+  The in-process item baseline also accepts a complete per-entity evidence
+  inventory for existing evidence gates, re-evaluating an unchanged item when
+  its evidence changes. This does not establish evidence authenticity, freshness,
+  or an atomic publication boundary, and does not extend the CLI or composed baseline.
   The incremental CLI ([#791](https://github.com/schiste/Aexeo/pull/791))
   accepts a host-authorized root and an explicit per-proposal
   reference map, with aggregate telemetry and the same bounded verification.
