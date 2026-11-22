@@ -148,7 +148,9 @@ describe("EmDash content adaptation", () => {
     expect(contentItemToEmdashDocument(item).body).toBeUndefined();
     expect(contentItemToEmdashDocument({ ...item, data: { body: "plain text" } }).body_capabilities).toEqual(["text"]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: [] } }).body).toEqual([]);
-    expect(contentItemToEmdashDocument({ ...item, data: { body: "  " } }).body).toEqual([]);
+    const whitespace = contentItemToEmdashDocument({ ...item, data: { body: "  " } });
+    expect(whitespace.body?.[0]?.children[0]?.text).toBe("  ");
+    expect(whitespace.body_capabilities).toEqual(["text"]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: [], content: body("actual text") } }).body?.[0]?.children[0]?.text).toBe("actual text");
     const multiField = contentItemToEmdashDocument({ ...item, data: { introduction: body("intro"), sections: [{ _type: "faq", _key: "f", _version: 1 }] } });
     expect(multiField.body_capabilities).toEqual([]);
@@ -157,6 +159,19 @@ describe("EmDash content adaptation", () => {
     expect(selected.body?.map((block) => block.children[0]?.text)).toEqual(["intro", "section"]);
     expect(adaptContentItem(item, { contentFields: ["missing"] }).document.body).toBeUndefined();
     expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
+  });
+
+  it("preserves whitespace in observed plain-text fields", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { body: "  Start\nEnd  " } };
+    const direct = contentItemToEmdashDocument(item);
+    expect(direct.body?.[0]?.children[0]?.text).toBe("  Start\nEnd  ");
+    expect(direct.body_capabilities).toEqual(["text"]);
+    const selected = adaptContentItem({ ...item, data: { intro: "  Start\nEnd  " } }, { contentFields: ["intro"] }).document;
+    expect(selected.body?.[0]?.children[0]?.text).toBe("  Start\nEnd  ");
+    expect(selected.body_capabilities).toEqual(["text"]);
+    const whitespace = adaptContentItem({ ...item, data: { intro: "  " } }, { contentFields: ["intro"] }).document;
+    expect(whitespace.body?.[0]?.children[0]?.text).toBe("  ");
+    expect(whitespace.body_capabilities).toEqual(["text"]);
   });
 
   it("withholds automatic coverage when another conventional body field is unrecognized", () => {
