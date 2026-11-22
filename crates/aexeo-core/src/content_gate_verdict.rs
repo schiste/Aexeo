@@ -1146,11 +1146,22 @@ fn verify_candidate_policy_coverage(
                 crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
             );
         let verify = |id: String| -> Result<()> {
-            if !checks
+            let check = checks
                 .get(id.as_str())
-                .is_some_and(|check| check.blocking == gate.blocking())
+                .filter(|check| check.blocking == gate.blocking())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("resolved policy check is missing or has inconsistent blocking")
+                })?;
+            // The portable candidate evaluator supplies neither a site nor custom
+            // extensions, even when it receives collection or link observations.
+            if matches!(
+                gate,
+                crate::content_gate::ContentGate::Custom { .. }
+                    | crate::content_gate::ContentGate::SiteGroup { .. }
+                    | crate::content_gate::ContentGate::SiteAudit { .. }
+            ) && check.status != CheckStatus::NotChecked
             {
-                bail!("resolved policy check is missing or has inconsistent blocking");
+                bail!("candidate evaluator cannot execute site or custom gates");
             }
             Ok(())
         };
@@ -3052,6 +3063,37 @@ mod tests {
             verify(&envelope).is_err(),
             "omitted advisory gate was accepted"
         );
+    }
+
+    #[test]
+    fn candidate_policy_coverage_rejects_claimed_execution_without_host_capabilities() {
+        let change = change();
+        for kind in ["custom", "site_group", "site_audit"] {
+            for blocking in [true, false] {
+                let extra = match kind {
+                    "custom" => "extension='example'\n",
+                    "site_group" => "group='links'\n",
+                    _ => "",
+                };
+                let policy = ContentPreset::from_toml(&format!(
+                    "version=1\nname='test'\n[[gates]]\nid='words'\nkind='{kind}'\nblocking={blocking}\n{extra}"
+                )).unwrap();
+                let mut verdict = evaluate(&change, 1).unwrap();
+                verdict.checks[0].blocking = blocking;
+                verdict.checks[0].status = CheckStatus::NotChecked;
+                assert!(
+                    verify_candidate_policy_coverage(&verdict, &change, &policy, false).is_ok()
+                );
+                for status in [CheckStatus::Passed, CheckStatus::Failed] {
+                    verdict.checks[0].status = status;
+                    assert!(
+                        verify_candidate_policy_coverage(&verdict, &change, &policy, false)
+                            .is_err(),
+                        "{kind} was claimed as checked"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -260,6 +260,23 @@ class PortableComparison(unittest.TestCase):
             with self.subTest(kind=invalid), self.assertRaises(VerificationError):
                 require_policy_coverage(policy, change, False, verdict)
 
+    def test_unavailable_host_capabilities_cannot_be_reported_as_checked(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        for kind in ('custom', 'site_group', 'site_audit'):
+            policy['gates'][0]['kind'] = kind
+            for blocking in (True, False):
+                policy['gates'][0]['blocking'] = blocking
+                verdict['checks'][0]['blocking'] = blocking
+                verdict['checks'][0]['status'] = 'not_checked'
+                require_policy_coverage(policy, change, False, verdict)
+                for status in ('passed', 'failed'):
+                    verdict['checks'][0]['status'] = status
+                    with self.subTest(kind=kind, status=status, blocking=blocking):
+                        with self.assertRaises(VerificationError):
+                            require_policy_coverage(policy, change, False, verdict)
+
     def test_fresh_process_must_complete_successfully(self):
         for code, timed_out in ((1, False), (2, False), (None, False), (True, False),
                                 (0.0, False), (0, True), (0, None), (0, 0), (0, "false")):

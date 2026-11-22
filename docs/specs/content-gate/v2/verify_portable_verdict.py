@@ -138,6 +138,9 @@ def require_policy_coverage(policy, change, has_collection, verdict):
             check = checks.get(check_id)
             if check is None or check['blocking'] is not blocking:
                 raise VerificationError('resolved policy check is missing or has inconsistent blocking')
+            # This candidate evaluator never receives a site or custom extensions.
+            if kind in {'custom', 'site_group', 'site_audit'} and check.get('status') != 'not_checked':
+                raise VerificationError('candidate evaluator cannot execute site or custom gates')
     return len(policy['gates']), expected_count
 
 
