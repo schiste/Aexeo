@@ -336,7 +336,7 @@ fn host_heading_offsets_map_partial_structural_findings() {
     let preset = dir.path().join("preset.toml");
     fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=3\nblocking=false\n[[gates]]\nid='duplicates'\nkind='duplicate_headings'\nblocking=false\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\nblocking=false\n").unwrap();
     let file = dir.path().join("projection.json");
-    let source = "Préface\nAlpha\nTrop long\nAlpha\n";
+    let source = "Préface\n✨ Alpha\nTrop long\n✨ Alpha\n";
     let projection = json!({"schema":"aexeo.content-adapter/v1", "text":"Body.",
         "headings":["Alpha","Trop long","Alpha"], "heading_levels":[1,2,4],
         "source_map":{"source_text":source,"spans":[],"heading_offsets":[source.find("Alpha"),null,source.rfind("Alpha")]}});
@@ -355,10 +355,10 @@ fn host_heading_offsets_map_partial_structural_findings() {
     assert_eq!(
         report["source_locations"],
         json!([
-            {"gate_id":"length","finding_index":0,"source":"host_supplied_source_text","line":2,"column":1},
-            {"gate_id":"length","finding_index":2,"source":"host_supplied_source_text","line":4,"column":1},
-            {"gate_id":"duplicates","finding_index":0,"source":"host_supplied_source_text","line":4,"column":1},
-            {"gate_id":"hierarchy","finding_index":0,"source":"host_supplied_source_text","line":4,"column":1}
+            {"gate_id":"length","finding_index":0,"source":"host_supplied_source_text","line":2,"column":3},
+            {"gate_id":"length","finding_index":2,"source":"host_supplied_source_text","line":4,"column":3},
+            {"gate_id":"duplicates","finding_index":0,"source":"host_supplied_source_text","line":4,"column":3},
+            {"gate_id":"hierarchy","finding_index":0,"source":"host_supplied_source_text","line":4,"column":3}
         ])
     );
     let telemetry = String::from_utf8(output.stderr).unwrap();
@@ -379,8 +379,8 @@ fn host_heading_offsets_map_partial_structural_findings() {
         .unwrap();
     assert!(text.status.success());
     let text = String::from_utf8(text.stdout).unwrap();
-    assert!(text.contains("host-supplied source text 4:1"));
-    assert!(!text.contains("projection.json:4:1"));
+    assert!(text.contains("host-supplied source text 4:3"));
+    assert!(!text.contains("projection.json:4:3"));
 }
 
 #[test]
