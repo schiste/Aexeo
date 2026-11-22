@@ -602,3 +602,16 @@ const sharedCitations = JSON.parse(await readFile(new URL("../../../crates/aexeo
 const sharedCitationReport = await evaluateContent(sharedCitations.document, "workflow", { workflow: sharedCitations.preset });
 assert.equal(sharedCitationReport.gates[0].measurements.sentence_count, sharedCitations.expected_sentences);
 console.log("WASM numeric citations match shared Markdown and HTML sentence boundaries");
+
+// Shared with the CLI: URL punctuation must not create extra sentences.
+const sharedUrls = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-urls.json", import.meta.url), "utf8"));
+for (const scenario of sharedUrls.cases) {
+  const report = await evaluateContent(scenario.document, "workflow", { workflow: sharedUrls.preset });
+  assert.equal(report.gates[0].measurements.sentence_count, scenario.expected_sentences, scenario.name);
+  assert.equal(report.gates[0].findings.length, scenario.expected_findings, scenario.name);
+  assert.equal(report.source_mapping.mapped, scenario.expected_findings, scenario.name);
+  assert.equal(report.source_locations[0].block_index, 0, scenario.name);
+  assert.equal(report.source_locations[0].span_index, 0, scenario.name);
+  assert.equal(report.source_locations[0].utf16_offset, 0, scenario.name);
+}
+console.log("WASM URLs match shared Markdown and HTML sentence boundaries");
