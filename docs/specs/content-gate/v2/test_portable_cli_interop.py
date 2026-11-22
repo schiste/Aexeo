@@ -63,6 +63,53 @@ class PortableCliInterop(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0, rejected.stdout + rejected.stderr)
             self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
 
+    def test_source_evidence_real_cli_and_python_comparator(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        binary = os.environ.get('AEXEO_CLI_BIN')
+        executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-sources-') as directory:
+            root = Path(directory)
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(fixture['artifacts']['change'], encoding='utf-8')
+            (root / 'preset').write_text(
+                "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"
+                "[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n",
+                encoding='utf-8')
+            sources = {'article': {'s': 'private quote'}}
+            (root / 'sources').write_text(json.dumps(sources), encoding='utf-8')
+            common = executable + ['content-change', '--preset', 'test', '--preset-source',
+                'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build']
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            exported = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+            self.assertEqual(exported.returncode, 2, exported.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                '--candidate-after', str(root / 'after'), '--draft-portable-verdict',
+                '--evidence-inventory', str(root / 'sources')]
+            result = subprocess.run(command, cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'previous')), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (root / 'fresh').write_bytes((root / 'previous').read_bytes())
+            artifact = {'schema': 'aexeo.candidate-external-evidence/v1', 'sources': sources, 'links': None}
+            (root / 'evidence').write_text(json.dumps(artifact, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+            verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+            for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                verify += ['--' + name.replace('_', '-'), str(root / name)]
+            verify += ['--external-evidence', str(root / 'evidence'), '--require-check', 'gate:7:article:source',
+                       '--validator-name', 'aexeo', '--validator-version', '0.0.24',
+                       '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+            matched = subprocess.run(verify, capture_output=True, text=True)
+            self.assertEqual(matched.returncode, 0, matched.stdout + matched.stderr)
+            self.assertFalse(json.loads(matched.stdout)['publication_authorized'])
+            artifact['sources']['article']['s'] = 'different'
+            (root / 'evidence').write_text(json.dumps(artifact, separators=(',', ':')), encoding='utf-8')
+            rejected = subprocess.run(verify, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+
     def test_real_multi_gate_verdict_rejects_omitted_advisory_check(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         with tempfile.TemporaryDirectory(prefix='aexeo-v2-coverage-') as directory:
