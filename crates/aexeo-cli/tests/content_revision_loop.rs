@@ -3,6 +3,7 @@ use std::{
     fs,
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    time::{Duration, Instant},
 };
 
 struct Session {
@@ -12,12 +13,25 @@ struct Session {
 }
 impl Session {
     fn read(&mut self) -> Value {
-        let mut line = String::new();
-        assert!(
-            self.output.read_line(&mut line).unwrap() > 0,
-            "missing event"
-        );
-        serde_json::from_str(&line).unwrap()
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let line = std::thread::scope(|scope| {
+            let output = &mut self.output;
+            scope.spawn(move || {
+                let mut line = String::new();
+                let result = output.read_line(&mut line).map(|n| (n, line));
+                let _ = sender.send(result);
+            });
+            match receiver.recv_timeout(Duration::from_secs(30)) {
+                Ok(result) => Some(result.unwrap()),
+                Err(_) => {
+                    let _ = self.child.kill();
+                    None
+                }
+            }
+        })
+        .expect("timed out waiting for revision event");
+        assert!(line.0 > 0, "missing event");
+        serde_json::from_str(&line.1).unwrap()
     }
     fn send(&mut self, value: Value) {
         writeln!(self.input, "{value}").unwrap();
@@ -25,7 +39,18 @@ impl Session {
     }
     fn finish(mut self) -> i32 {
         drop(self.input);
-        self.child.wait().unwrap().code().unwrap()
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status.code().unwrap();
+            }
+            if Instant::now() >= deadline {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                panic!("timed out waiting for revision command to exit");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 fn start(draft: &str, preset: &str, format: &str, extra: &[&str]) -> Session {
