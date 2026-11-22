@@ -2925,9 +2925,22 @@ mod tests {
                         stream
                             .set_read_timeout(Some(Duration::from_secs(5)))
                             .unwrap();
+                        // TCP can split a request across reads. Consume the complete
+                        // header before choosing a route or closing the connection.
+                        let mut request_bytes = Vec::new();
                         let mut buffer = [0_u8; 4096];
-                        let size = stream.read(&mut buffer).unwrap();
-                        let request = String::from_utf8_lossy(&buffer[..size]).into_owned();
+                        while !request_bytes.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                            let size = stream.read(&mut buffer).unwrap();
+                            if size == 0 {
+                                break;
+                            }
+                            request_bytes.extend_from_slice(&buffer[..size]);
+                            assert!(
+                                request_bytes.len() <= 65_536,
+                                "test request headers too large"
+                            );
+                        }
+                        let request = String::from_utf8_lossy(&request_bytes).into_owned();
                         handler(stream, request, address);
                     }
                     Err(error) if error.kind() == ErrorKind::WouldBlock => {
@@ -2967,6 +2980,34 @@ mod tests {
             stream.read_to_string(&mut response).unwrap();
             assert!(response.contains("200 OK"));
         }
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn fixture_server_waits_for_fragmented_request_headers() {
+        let (base_url, server) = spawn_server();
+        let address = base_url.strip_prefix("http://").unwrap();
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        stream.write_all(b"GET /abo").unwrap();
+        let mut byte = [0_u8; 1];
+        let error = stream.read(&mut byte).unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            ErrorKind::WouldBlock | ErrorKind::TimedOut
+        ));
+        stream
+            .write_all(b"ut HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        assert!(response.contains("About"), "{response}");
         server.join().unwrap();
     }
 
