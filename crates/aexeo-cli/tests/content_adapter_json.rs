@@ -536,7 +536,7 @@ fn host_link_offsets_map_bound_unreachable_observations() {
         &["--link-observations", snapshot_file.to_str().unwrap()],
     );
     assert_eq!(stale.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&stale.stderr).contains("does not match"));
+    assert!(String::from_utf8_lossy(&stale.stdout).contains("does not match"));
 }
 
 #[test]
