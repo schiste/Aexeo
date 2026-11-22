@@ -100,10 +100,33 @@ def validate_policy_fingerprint(value):
 HTML_MAIN_PROJECTION = {"format": "html", "scope": "main"}
 
 
+def example_content(text, input_format):
+    """Return reviewable prose, rejecting ambiguous host projections."""
+    if input_format != "adapter-json":
+        return text
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate adapter JSON key")
+            result[key] = value
+        return result
+    def reject_constant(value):
+        raise ValueError("invalid adapter JSON constant")
+    try:
+        data = json.loads(text, object_pairs_hook=unique, parse_constant=reject_constant)
+    except (ValueError, TypeError) as error:
+        raise ValueError("invalid adapter JSON example") from error
+    if (not isinstance(data, dict) or data.get("schema") != "aexeo.content-adapter/v1"
+            or not isinstance(data.get("text"), str)):
+        raise ValueError("adapter JSON corpus requires projected text")
+    return data["text"]
+
+
 def corpus_projection(corpus):
     """Validate the declared adapter and return its explicit projection, if any."""
     input_format = corpus.get("input_format")
-    if input_format not in (None, "text", "paragraph-text", "markdown", "html"):
+    if input_format not in (None, "text", "paragraph-text", "markdown", "html", "adapter-json"):
         raise ValueError("unsupported input format")
     if input_format == "html":
         if corpus.get("content_projection") != HTML_MAIN_PROJECTION:
@@ -116,6 +139,8 @@ def corpus_projection(corpus):
 
 def check_input_format(container, corpus):
     """Check declared adapter identity when available; old artifacts remain unbound."""
+    if corpus.get("input_format") == "adapter-json" and "input_format" not in container:
+        raise ValueError("input format is required for adapter JSON")
     if "input_format" in container and container["input_format"] != (corpus.get("input_format") or "text"):
         raise ValueError("input format does not match the corpus")
 
@@ -167,9 +192,10 @@ def validate_corpus(corpus):
                 raise ValueError("strata must contain at most 8 ASCII category names and values of 1 to 64 characters")
         if split not in {"development", "holdout"} or not isinstance(text, str):
             raise ValueError("invalid example split or text")
-        if text in text_splits and text_splits[text] != split:
+        content = example_content(text, corpus.get("input_format"))
+        if content in text_splits and text_splits[content] != split:
             raise ValueError("identical example text appears in multiple splits")
-        text_splits[text] = split
+        text_splits[content] = split
         if "source_group" in item:
             group = item["source_group"]
             if (not isinstance(group, str) or not 1 <= len(group) <= 128
@@ -387,11 +413,11 @@ def input_multiplicity(examples):
                     "conflicting_label_groups": sum(len(labels) > 1 for _, labels in duplicates)}
 
 
-def normalized_split_overlap(examples, include_examples=False):
+def normalized_split_overlap(examples, include_examples=False, input_format=None):
     """Count normalized cross-split matches; disclose identifiers only on request."""
     groups = {}
     for item in examples:
-        normalized = " ".join(unicodedata.normalize("NFKC", item["text"]).casefold().split())
+        normalized = " ".join(unicodedata.normalize("NFKC", example_content(item["text"], input_format)).casefold().split())
         digest = hashlib.sha256(normalized.encode("utf-8")).digest()
         if digest not in groups:
             groups[digest] = {"development": [], "holdout": []} if include_examples else {"development": 0, "holdout": 0}
@@ -414,7 +440,7 @@ def normalized_split_overlap(examples, include_examples=False):
 def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=False):
     validate_corpus(corpus)
     projection = corpus_projection(corpus)
-    overlap = normalized_split_overlap(corpus["examples"])
+    overlap = normalized_split_overlap(corpus["examples"], input_format=corpus.get("input_format"))
     if reject_normalized_overlap and overlap["cross_split_groups"]:
         raise ValueError("normalized example text appears in multiple splits")
     for item in corpus["examples"]:
@@ -587,7 +613,7 @@ def main():
         corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
         if args.list_normalized_overlaps:
             validate_corpus(corpus)
-            overlap = normalized_split_overlap(corpus["examples"], include_examples=True)
+            overlap = normalized_split_overlap(corpus["examples"], include_examples=True, input_format=corpus.get("input_format"))
             print(json.dumps({"version": 1, **overlap}, ensure_ascii=False, indent=2))
             if args.reject_normalized_overlap and overlap["cross_split_groups"]:
                 parser.exit(1, "normalized cross-split overlap found\n")

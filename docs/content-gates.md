@@ -517,8 +517,10 @@ them from JSON. List finding positions remain placeholders and all finding
 coordinates refer to projected text, not the JSON source. `--fix` and
 `--export-adapter-input` are unavailable for this format. Reports bind the
 original JSON bytes, including its observations, in their input fingerprint.
-`feedback-capture` accepts that exact JSON input, but feedback corpus export and
-replay do not yet support this format.
+Feedback capture, corpus export and replay accept this format with the exact JSON
+as the example text. Corpus examples must contain a string `text` projection;
+exact and normalized cross-split checks compare that projected text, even if
+other observations differ. These checks cannot establish independent sources.
 Opt-in telemetry records aggregate observation counts and adapter duration, not
 text, identifiers or destinations. This is not a publication authorization.
 

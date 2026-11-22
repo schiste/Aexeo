@@ -138,6 +138,17 @@ fn export_matches_existing_python_validator_on_representative_inputs() {
     cases.push((corpus.clone(), format_note.clone()));
     format_note["input_format"] = json!(null);
     cases.push((format_corpus, format_note));
+    let mut adapter_corpus = corpus.clone();
+    let mut adapter_note = note.clone();
+    adapter_corpus["input_format"] = json!("adapter-json");
+    adapter_note["input_format"] = json!("adapter-json");
+    let adapter_text = r#"{"schema":"aexeo.content-adapter/v1","text":"abc"}"#;
+    adapter_corpus["examples"][0]["text"] = json!(adapter_text);
+    adapter_note["text_sha256"] =
+        json!("f2b62f3db65bb778f8a2afd2afa67ae8c55efd67e4629cb9e05852368d9d6ac8");
+    cases.push((adapter_corpus.clone(), adapter_note.clone()));
+    adapter_note.as_object_mut().unwrap().remove("input_format");
+    cases.push((adapter_corpus, adapter_note));
     let mut policy_note = note.clone();
     policy_note["resolved_policy_fingerprint"] = json!({"version": 1, "sha256": "a".repeat(64)});
     cases.push((corpus.clone(), policy_note.clone()));

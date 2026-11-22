@@ -261,7 +261,10 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
             }
         }
         Some(Value::String(format))
-            if format == "text" || format == "paragraph-text" || format == "markdown" =>
+            if format == "text"
+                || format == "paragraph-text"
+                || format == "markdown"
+                || format == "adapter-json" =>
         {
             if projection.is_some() {
                 bail!("content projection requires HTML input");
@@ -298,8 +301,25 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         if let Some(metadata) = item.get("metadata") {
             metadata_hash(metadata)?;
         }
+        let projected = if corpus.get("input_format").and_then(Value::as_str)
+            == Some("adapter-json")
+        {
+            let data = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(
+                text.as_bytes(),
+            )
+            .context("invalid adapter JSON example")?;
+            if data.get("schema").and_then(Value::as_str) != Some("aexeo.content-adapter/v1") {
+                bail!("invalid adapter JSON schema");
+            }
+            data.get("text")
+                .and_then(Value::as_str)
+                .context("adapter JSON corpus requires projected text")?
+                .to_owned()
+        } else {
+            text.to_owned()
+        };
         if splits
-            .insert(text, split)
+            .insert(projected, split)
             .is_some_and(|previous| previous != split)
         {
             bail!("identical example text appears in multiple splits");
@@ -341,6 +361,11 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         }
         if review_status == "reviewed" {
             let review = item.get("review").context("missing review provenance")?;
+            if corpus.get("input_format").and_then(Value::as_str) == Some("adapter-json")
+                && review.get("input_format").is_none()
+            {
+                bail!("review input format is required for adapter JSON");
+            }
             if let Some(format) = review.get("input_format") {
                 let expected = corpus
                     .get("input_format")
@@ -371,6 +396,11 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         || note.get("kind").and_then(Value::as_str) != Some("reported_human_feedback")
     {
         bail!("unsupported feedback note");
+    }
+    if corpus.get("input_format").and_then(Value::as_str) == Some("adapter-json")
+        && note.get("input_format").is_none()
+    {
+        bail!("feedback input format is required for adapter JSON");
     }
     if let Some(format) = note.get("input_format") {
         let expected = corpus

@@ -427,6 +427,30 @@ class EvaluateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "projection"):
             eval_module.validate_corpus(corpus)
 
+    def test_adapter_corpus_checks_projected_text_and_replays_exact_json(self):
+        raw = '{"schema":"aexeo.content-adapter/v1","text":"Café ","lists":[]}'
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "input_format": "adapter-json",
+                  "examples": [{"id": "a", "split": "development", "text": raw, "expected": "passed"}]}
+        def run(arguments, **kwargs):
+            self.assertEqual(arguments[arguments.index("--input-format") + 1], "adapter-json")
+            self.assertEqual(kwargs["input"], raw)
+            return SimpleNamespace(returncode=0, stdout='{"input_format":"adapter-json","gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            self.assertEqual(eval_module.evaluate("cli", corpus, "development")["counts"]["true_negative"], 1)
+        corpus["examples"].append({"id": "b", "split": "holdout", "text": '{"schema":"aexeo.content-adapter/v1","text":"Café ","lists":null}', "expected": "passed"})
+        with self.assertRaisesRegex(ValueError, "multiple splits"):
+            eval_module.validate_corpus(corpus)
+        corpus["examples"][1]["text"] = '{"schema":"aexeo.content-adapter/v1","text":"cafe\\u0301"}'
+        self.assertEqual(eval_module.normalized_split_overlap(corpus["examples"], input_format="adapter-json")["cross_split_groups"], 1)
+        with self.assertRaisesRegex(ValueError, "normalized example text"):
+            eval_module.evaluate("cli", corpus, "development", reject_normalized_overlap=True)
+        for raw_invalid in ('{"schema":"aexeo.content-adapter/v1","text":null}',
+                            '{"schema":"aexeo.content-adapter/v1","text":"a","text":"b"}',
+                            '{"schema":"wrong","text":"a"}'):
+            corpus["examples"][0]["text"] = raw_invalid
+            with self.assertRaises(ValueError):
+                eval_module.validate_corpus(corpus)
+
     def test_rejects_report_with_different_input_format(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "input_format": "paragraph-text",
                   "examples": [{"id": "a", "split": "development", "text": "First.\n\nSecond.", "expected": "passed"}]}

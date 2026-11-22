@@ -145,3 +145,95 @@ fn feedback_binding_covers_the_full_host_projection() {
     let second = capture(&dir.path().join("changed.json"));
     assert!(!second.status.success());
 }
+
+#[test]
+fn host_projection_feedback_exports_and_replays_with_real_cli() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input.json");
+    let preset = dir.path().join("preset.toml");
+    let report = dir.path().join("report.json");
+    let note = dir.path().join("note.json");
+    let corpus = dir.path().join("corpus.json");
+    let event = dir.path().join("event.json");
+    let preset_content = "version=1\nname='custom'\n[[gates]]\nid='p'\nkind='paragraph_count'\nmin=1\nblocking=false\n";
+    let source =
+        r#"{"schema":"aexeo.content-adapter/v1","text":"abc","paragraphs":[{"start":0,"end":3}]}"#;
+    fs::write(&preset, preset_content).unwrap();
+    fs::write(&input, source).unwrap();
+    let result = run(&input, &preset, &[]);
+    assert!(result.status.success());
+    fs::write(&report, result.stdout).unwrap();
+    let captured = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["feedback-capture", "--text"])
+        .arg(&input)
+        .arg("--report")
+        .arg(&report)
+        .args([
+            "--gate",
+            "p",
+            "--example",
+            "e",
+            "--human-status",
+            "passed",
+            "--reviewer",
+            "editor",
+            "--method",
+            "manual",
+            "--output",
+        ])
+        .arg(&note)
+        .output()
+        .unwrap();
+    assert!(
+        captured.status.success(),
+        "{}",
+        String::from_utf8_lossy(&captured.stderr)
+    );
+    let mut data = json!({"version":1,"preset":"custom","preset_toml":preset_content,"gate_id":"p","input_format":"adapter-json","examples":[{"id":"e","split":"development","text":source,"expected":"passed"}]});
+    fs::write(&corpus, serde_json::to_vec(&data).unwrap()).unwrap();
+    let export = |path: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args(["feedback-export", "--corpus"])
+            .arg(&corpus)
+            .arg("--note")
+            .arg(&note)
+            .arg("--output")
+            .arg(path)
+            .output()
+            .unwrap()
+    };
+    let exported = export(&event);
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let evaluator = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/evaluate-content-gates.py");
+    let replay = Command::new("python3")
+        .arg(evaluator)
+        .arg(&corpus)
+        .args([
+            "--binary",
+            env!("CARGO_BIN_EXE_aexeo-cli"),
+            "--split",
+            "development",
+            "--assert-regression",
+            "--review-events",
+        ])
+        .arg(&event)
+        .output()
+        .unwrap();
+    assert!(
+        replay.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&replay.stdout).unwrap();
+    assert_eq!(result["counts"]["true_negative"], 1);
+    data["examples"].as_array_mut().unwrap().push(json!({"id":"other","split":"holdout","text":r#"{"schema":"aexeo.content-adapter/v1","text":"abc","lists":[]}"#,"expected":"passed"}));
+    fs::write(&corpus, serde_json::to_vec(&data).unwrap()).unwrap();
+    let refused = export(&dir.path().join("refused.json"));
+    assert_eq!(refused.status.code(), Some(2));
+}
