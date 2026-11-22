@@ -119,6 +119,23 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaisesRegex(VerificationError, 'policy check is missing'):
             self.check()
 
+    def test_rebound_empty_policy_is_rejected(self):
+        # Both outputs and their binding agree, but Rust cannot evaluate an
+        # empty preset. Existing checks must not make the policy valid.
+        self.assertFalse(self.check()['publication_authorized'])
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'] = []
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'resolved policy'):
+            self.check()
+
     def test_policy_coverage_scopes_and_fails_closed(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])

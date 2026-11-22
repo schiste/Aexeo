@@ -13,6 +13,56 @@ ROOT = HERE.parents[3]
 
 
 class PortableCliInterop(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get('AETHYME_CLI_BIN'), 'native comparator not supplied')
+    def test_native_rejects_rebound_empty_policy(self):
+        # The valid control proves the selected executable supports this protocol.
+        from verify_candidate_inputs import binding, overlay, revision_digest
+
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-empty-policy-') as directory:
+            root = Path(directory)
+            def write(name, value):
+                (root / name).write_text(
+                    value if isinstance(value, str) else json.dumps(value), encoding='utf-8')
+
+            for name in ('base', 'after'):
+                write(name, fixture[name])
+            for name, value in fixture['artifacts'].items():
+                write(name, value)
+            for name in ('previous', 'fresh'):
+                write(name, fixture['portable'])
+            manifest = {name: str(root / name) for name in
+                ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
+            manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
+                validator_name='aexeo', validator_version='0.0.24',
+                required_checks=['gate:7:article:words'], fresh_exit_code=0, fresh_timed_out=False)
+            write('manifest', manifest)
+            env = dict(os.environ)
+            env.pop('AETHYME_GATE_WORKER_ID', None)
+            command = [os.environ['AETHYME_CLI_BIN'], 'content-gate', 'compare-v2', str(root / 'manifest')]
+            valid = subprocess.run(command, env=env, capture_output=True, text=True)
+            self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+            self.assertEqual(json.loads(valid.stdout)['status'], 'match')
+
+            policy = json.loads(fixture['artifacts']['resolved_policy'])
+            policy['gates'] = []
+            policy_bytes = json.dumps(policy).encode()
+            (root / 'resolved_policy').write_bytes(policy_bytes)
+            artifacts = {name: value.encode() for name, value in fixture['artifacts'].items()}
+            artifacts['resolved_policy'] = policy_bytes
+            change = json.loads(artifacts['change'])
+            candidate = overlay(fixture['base'], change, fixture['after'])
+            inputs = dict(artifacts, collection=None, external_evidence=None,
+                candidate_base_revision_sha256=revision_digest(fixture['base']),
+                candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                candidate_revision_sha256=revision_digest(candidate))
+            fixture['portable']['binding_sha256'] = binding(inputs)
+            for name in ('previous', 'fresh'):
+                write(name, fixture['portable'])
+            rejected = subprocess.run(command, env=env, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0, rejected.stdout + rejected.stderr)
+            self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+
     def test_real_multi_gate_verdict_rejects_omitted_advisory_check(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         with tempfile.TemporaryDirectory(prefix='aexeo-v2-coverage-') as directory:
