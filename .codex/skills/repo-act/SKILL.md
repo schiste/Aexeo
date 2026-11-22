@@ -141,6 +141,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   isolate each case: some tag names cause the HTML parser to leave SVG or
   MathML, so source nesting alone does not establish the resulting DOM.
 - For partial HTML projections, validate source positions against the selected subtree and the corresponding ordered elements; matching extracted text alone does not prove that surrounding links or headings map to the same source nodes. Withhold locations when that correspondence cannot be established. When extending the lexical subset, test full tag-name boundaries (including custom elements such as `script-widget`), malformed comments and raw-text delimiters; a tag-name prefix or ambiguous parser recovery must not produce a trusted location.
+- For host-provided source maps, check text and JSON reports with source bytes
+  distinct from the projection file. Label coordinates as referring to the
+  supplied source, never the projection file; byte equality alone does not prove
+  that the host chose the correct source occurrence or snapshot.
 - Check likely entrypoints and impacted callers before finishing. For source-mapping changes, run adapter and single-content CLI tests, `content_source_locations` and `error_contract_integration`, and the entire affected content-change verdict test module, not only the new scenario: older cases can encode separate expectations about supported and unmapped transformations.
 - After focused validation, run `sh scripts/clippy-strict.sh` for Rust changes.
   The CI applies extra lint rules beyond ordinary `cargo clippy -- -D warnings`;
