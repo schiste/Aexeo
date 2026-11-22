@@ -315,6 +315,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   confirm it is accepted without the target guard and rejected with it; an
   unrelated validation error can otherwise make a regression test pass. Use a
   prior build or an isolated in-memory mutation, leaving tracked code unchanged.
+- When a gate depends on a host-supplied source, check the candidate policy
+  coverage classifications in both Rust and the independent Python verifier.
+  Test missing sources for passed and failed claims, blocking and advisory
+  gates, and a valid source; exercise forged verdicts through each complete
+  verifier. Source presence does not establish authenticity or freshness.
 - For candidate verdicts with link evidence, test both production and independent verification with inline, file and URI states. Check that wrong host bytes, independent bytes and candidate content are rejected; support in the producer alone does not establish verifier interoperability.
 - For cross-process interoperability tests, build each executable from the
   exact source revision under test, or verify its build provenance before
