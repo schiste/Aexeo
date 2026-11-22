@@ -467,6 +467,53 @@ fn referenced_states_are_confined_to_their_proposal_and_reported_without_leaking
     assert_eq!(telemetry["mapped_proposals"], 2);
     assert!(!stderr.contains(root_arg));
     assert!(!stderr.contains("example.org"));
+    let mut export_input = b.clone();
+    export_input["mode"] = json!("adapted");
+    export_input["snapshot"]["items"][0]["media_type"] = json!("text/markdown");
+    for proposal in export_input["proposals"].as_array_mut().unwrap() {
+        proposal["after"][0]["media_type"] = json!("text/markdown");
+        proposal["change"]["entries"][0]["media_type"] = json!("text/markdown");
+    }
+    let export_args = [
+        "--export-link-observations",
+        "--content-root",
+        root_arg,
+        "--host-content-map",
+        &map_arg0,
+        "--host-content-map",
+        &map_arg1,
+    ];
+    let export = run(&export_input, &export_args);
+    assert_eq!(
+        export.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&export.stdout).unwrap()["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    fs::write(&second, "wrong").unwrap();
+    let bad_export = run(&export_input, &export_args);
+    assert!(!bad_export.status.success());
+    assert!(bad_export.stdout.is_empty());
+    fs::write(&second, "abc").unwrap();
+    let missing_export = run(
+        &export_input,
+        &[
+            "--export-link-observations",
+            "--content-root",
+            root_arg,
+            "--host-content-map",
+            &map_arg0,
+        ],
+    );
+    assert!(!missing_export.status.success());
+    assert!(missing_export.stdout.is_empty());
     let missing = run(
         &b,
         &["--content-root", root_arg, "--host-content-map", &map_arg0],
@@ -744,4 +791,148 @@ fn link_observation_inventories_work_with_items_and_composed_presets() {
         lines(&output)[0]["result"]["collection"]["status"],
         "report"
     );
+}
+
+#[test]
+fn exported_link_templates_round_trip_and_fail_closed() {
+    let mut input = batch();
+    let source = "[example](https://example.org)";
+    let digest = "b64cfc245d95ab25d38166f5a37f7263a0495a5588c728f959f3cb596e4a55d8";
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("links");
+    input["preset_sources"] = json!({"links":"version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n"});
+    input["snapshot"]["items"][0]["media_type"] = json!("text/markdown");
+    input["snapshot"]["items"][0]["source"] = json!(source);
+    input["snapshot"]["items"][0]["sha256"] = json!(digest);
+    for p in input["proposals"].as_array_mut().unwrap() {
+        p["after"][0]["media_type"] = json!("text/markdown");
+        p["after"][0]["source"] = json!(source);
+        p["after"][0]["sha256"] = json!(digest);
+        p["change"]["entries"][0]["media_type"] = json!("text/markdown");
+        p["change"]["entries"][0]["after"]["inline"] = json!(source);
+        p["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+    }
+    let export = run(&input, &["--export-link-observations", "--telemetry"]);
+    assert_eq!(
+        export.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let mut templates: Value = serde_json::from_slice(&export.stdout).unwrap();
+    assert_eq!(
+        templates["base_link_observations"]["b"]["destinations"],
+        json!(["https://example.org"])
+    );
+    assert_eq!(
+        templates["proposals"][0]["link_observations"]["a"]["observations"],
+        json!(["not_checked"])
+    );
+    let telemetry: Value = serde_json::from_slice(&export.stderr).unwrap();
+    assert_eq!(telemetry["projected_items"], 2);
+    assert_eq!(telemetry["reused_items"], 2);
+    assert!(!String::from_utf8_lossy(&export.stderr).contains("example.org"));
+    input["base_link_observations"] = templates["base_link_observations"].take();
+    for (i, proposal) in input["proposals"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        proposal["link_observations"] = templates["proposals"][i]["link_observations"].take();
+    }
+    assert_eq!(run(&input, &[]).status.code(), Some(2));
+    input["base_link_observations"]["b"]["observations"][0] = json!("reachable");
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        for id in ["a", "b"] {
+            proposal["link_observations"][id]["observations"][0] = json!("reachable");
+        }
+    }
+    assert_eq!(run(&input, &[]).status.code(), Some(0));
+    assert!(
+        !run(&input, &["--export-link-observations"])
+            .status
+            .success()
+    );
+    input
+        .as_object_mut()
+        .unwrap()
+        .remove("base_link_observations");
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal
+            .as_object_mut()
+            .unwrap()
+            .remove("link_observations");
+    }
+    input["snapshot"]["complete"] = json!(false);
+    let failed = run(&input, &["--export-link-observations"]);
+    assert!(!failed.status.success());
+    assert!(failed.stdout.is_empty());
+    input["snapshot"]["complete"] = json!(true);
+    input["proposals"][1]["after"][0]["sha256"] = json!("wrong");
+    let failed = run(&input, &["--export-link-observations"]);
+    assert!(!failed.status.success());
+    assert!(failed.stdout.is_empty());
+}
+
+#[test]
+fn link_template_export_respects_html_scope() {
+    let mut input = batch();
+    let source = "<nav><a href=\"/nav\">nav</a></nav><main><a href=\"/body\">body</a></main>";
+    let digest = "e84c4f7a44b2bbe4fb63e03f317f7152e85d3713d0989a9be6f7f00c747fdb1e";
+    input["snapshot"]["items"][0]["media_type"] = json!("text/html");
+    input["snapshot"]["items"][0]["source"] = json!(source);
+    input["snapshot"]["items"][0]["sha256"] = json!(digest);
+    for p in input["proposals"].as_array_mut().unwrap() {
+        p["after"][0]["media_type"] = json!("text/html");
+        p["after"][0]["source"] = json!(source);
+        p["after"][0]["sha256"] = json!(digest);
+        p["change"]["entries"][0]["media_type"] = json!("text/html");
+        p["change"]["entries"][0]["after"]["inline"] = json!(source);
+        p["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+    }
+    input["mode"] = json!("adapted_main");
+    let output = run(&input, &["--export-link-observations"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let data: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        data["base_link_observations"]["b"]["destinations"],
+        json!(["/body"])
+    );
+    input["mode"] = json!("adapted");
+    let output = run(&input, &["--export-link-observations"]);
+    assert_eq!(output.status.code(), Some(0));
+    let data: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        data["base_link_observations"]["b"]["destinations"],
+        json!(["/nav", "/body"])
+    );
+}
+
+#[test]
+fn link_template_export_refuses_unobserved_markdown_links() {
+    let mut input = batch();
+    let source = "<a href=\"/hidden\">link</a>";
+    let digest = "996a41864e0cb19cc71c7a214a69bd566f79b1bb5eac47819d6bcbf856b794bd";
+    input["mode"] = json!("adapted");
+    input["snapshot"]["items"][0]["media_type"] = json!("text/markdown");
+    input["snapshot"]["items"][0]["source"] = json!(source);
+    input["snapshot"]["items"][0]["sha256"] = json!(digest);
+    for p in input["proposals"].as_array_mut().unwrap() {
+        p["after"][0]["media_type"] = json!("text/markdown");
+        p["after"][0]["source"] = json!(source);
+        p["after"][0]["sha256"] = json!(digest);
+        p["change"]["entries"][0]["media_type"] = json!("text/markdown");
+        p["change"]["entries"][0]["after"]["inline"] = json!(source);
+        p["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+    }
+    let output = run(&input, &["--export-link-observations"]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not completely observed"));
 }
