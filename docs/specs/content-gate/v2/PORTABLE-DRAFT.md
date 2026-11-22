@@ -160,7 +160,8 @@ context, bytes and optional evidence independently, establish snapshot completen
 and freshness, and protect the publication boundary. The helper does not establish
 those properties or grant publication authorization.
 
-The independent comparator rejects changes containing deletions or renames:
+The Aexeo candidate-specific Rust passing helper and the independent comparator
+reject changes containing deletions or renames:
 this producer does not assess their site impact, and matching input bindings or
 a supplied passing check do not establish that impact. A future interoperable
 profile must define and independently verify the required impact evidence

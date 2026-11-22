@@ -1107,6 +1107,17 @@ pub fn verify_draft_passing_candidate_with_content<
     max_state_bytes: usize,
     max_total_bytes: usize,
 ) -> Result<()> {
+    // This producer does not assess site impact for these operations. A
+    // matching input binding or a claimed passing check cannot establish it.
+    if context
+        .decision
+        .change
+        .entries
+        .iter()
+        .any(|entry| matches!(entry.operation, Operation::Delete | Operation::Rename))
+    {
+        bail!("delete or rename impact is not independently assessed");
+    }
     verify_html_scope_declaration(&envelope.verdict, scope)?;
     if envelope.verdict.validator.profile.as_deref() != Some(context.decision.preset.name.as_str())
     {
@@ -2734,6 +2745,122 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn draft_candidate_passing_rejects_unassessed_delete_and_rename_impact() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate_sources::{ContentPhase, IndependentContent};
+
+        struct Bytes;
+        impl IndependentContent for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, _: ContentPhase) -> io::Result<Self::Reader> {
+                Ok(Cursor::new(b"abc".to_vec()))
+            }
+        }
+        for operation in [Operation::Delete, Operation::Rename] {
+            let mut change = change();
+            let state = change.entries[0].after.clone().unwrap();
+            change.entries[0].operation = operation.clone();
+            change.entries[0].before = Some(state.clone());
+            if operation == Operation::Rename {
+                change.entries[0].previous_entity_id = Some("old".into());
+            } else {
+                change.entries[0].after = None;
+            }
+            let old = CandidateItem {
+                entity_id: if operation == Operation::Rename {
+                    "old"
+                } else {
+                    "article"
+                }
+                .into(),
+                public_path: "/old".into(),
+                media_type: "text/plain".into(),
+                revision: None,
+                sha256: state.sha256.clone(),
+                source: "abc".into(),
+                links: None,
+            };
+            let mut replacement = old.clone();
+            replacement.entity_id = "article".into();
+            replacement.public_path = "/article".into();
+            let after = if operation == Operation::Rename {
+                vec![replacement]
+            } else {
+                vec![]
+            };
+            let base = CandidateSnapshot {
+                scope: "site".into(),
+                site_id: "s".into(),
+                site_base_url: None,
+                base: change.base.clone(),
+                complete: true,
+                items: vec![old],
+            };
+            let policy = preset(1);
+            let decision = OfflineDecisionContext {
+                change: &change,
+                preset: &policy,
+                max_entry_bytes: 1024,
+                max_total_bytes: 1024,
+                plain_text_paragraphs: false,
+                collection: None,
+                evaluator_identity: b"build",
+            };
+            let context = CandidateDecisionContext {
+                decision: &decision,
+                base: &base,
+                after: &after,
+            };
+            let mut envelope = evaluate_draft_portable_candidate_verdict(
+                &context,
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .unwrap();
+            // Simulate a consistently bound producer omitting the unchecked impact.
+            envelope.verdict.status = VerdictStatus::Pass;
+            envelope.verdict.reason = None;
+            envelope.verdict.checks = vec![Check {
+                id: "gate:7:article:words".into(),
+                status: CheckStatus::Passed,
+                blocking: true,
+                reason: None,
+            }];
+            envelope.verdict.summary = Summary {
+                checks: 1,
+                passed: 1,
+                failed: 0,
+                not_checked: 0,
+                blocking_failed: 0,
+                blocking_not_checked: 0,
+            };
+            let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+                validator_name: "aexeo",
+                validator_version: env!("CARGO_PKG_VERSION"),
+                required_checks: &["gate:7:article:words"],
+                exit_code: 0,
+                timed_out: false,
+            };
+            let result = verify_draft_passing_candidate_with_content(
+                &envelope,
+                &context,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Bytes,
+                1024,
+                1024,
+            );
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "delete or rename impact is not independently assessed",
+                "{operation:?}"
+            );
+        }
     }
 
     #[test]
