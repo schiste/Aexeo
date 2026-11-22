@@ -15,7 +15,13 @@ const document = { route: "/lists", title: "Lists", body: [block("one"), block("
 const assess = (doc) => evaluateContent(doc, "lists", { lists: preset });
 assert.equal((await assess(document)).gates[0].status, "not_checked");
 assert.equal((await assess({ ...document, list_structure_complete: false })).gates[0].status, "not_checked");
-assert.equal((await assess({ ...document, list_structure_complete: true })).gates[0].status, "failed");
+const located = await assess({ ...document, list_structure_complete: true });
+assert.equal(located.gates[0].status, "failed");
+assert.deepEqual(located.source_locations, [{ gate_id: "review", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
+assert.deepEqual(located.source_mapping, { eligible: 1, mapped: 1, unmapped: 0 });
+const unlocated = await assess({ ...document, list_structure_complete: true, body: [block(""), block("two"), block("three")] });
+assert.deepEqual(unlocated.source_locations, []);
+assert.deepEqual(unlocated.source_mapping, { eligible: 1, mapped: 0, unmapped: 1 });
 assert.equal((await assess({ ...document, list_structure_complete: true, body_capabilities: ["text"] })).gates[0].status, "not_checked");
 assert.equal((await assess({ ...document, list_structure_complete: true, body: [] })).gates[0].status, "passed");
 console.log("WASM structured list completeness test passed");
