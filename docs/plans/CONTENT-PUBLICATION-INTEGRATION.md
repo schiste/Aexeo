@@ -71,6 +71,10 @@ unavailable check may become a pass.
   full document. Missing, hidden or ambiguous main elements are not checked.
   The choice does not filter the separately supplied collection or establish
   browser visibility, inventory completeness, freshness or authorization.
+  The in-process item, collection and composed evaluators can also verify
+  referenced file and URI states using an explicit confined host provider and
+  bounded byte comparisons. The default methods still refuse references; this
+  does not fetch URIs or establish provenance, freshness or publication safety.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with
   explicit rename bridging; [#533](https://github.com/schiste/Aexeo/pull/533)

@@ -46,6 +46,29 @@ fn checked_overlay(
     snapshot.overlay(change, after).map_err(unavailable)
 }
 
+// Validate the overlay once, then compare every referenced state with the
+// corresponding immutable candidate bytes using the caller's confined source.
+fn checked_overlay_with_sources<P: crate::content_gate_sources::ConfinedContentFiles>(
+    snapshot: &ValidatedCandidateSnapshot,
+    change: &Change,
+    after: &[CandidateItem],
+    provider: &mut P,
+    max_state_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<CandidateOverlay, NotChecked> {
+    let overlay = snapshot.overlay(change, after).map_err(unavailable)?;
+    crate::content_gate_sources::verify_candidate_referenced_states_after_overlay(
+        change,
+        snapshot,
+        after,
+        provider,
+        max_state_bytes,
+        max_total_bytes,
+    )
+    .map_err(|error| unavailable(error.to_string()))?;
+    Ok(overlay)
+}
+
 /// Reports evaluated by this binary from an owned base and owned preset.
 /// Construct once and reuse for multiple proposals against the same base.
 /// The cache is intentionally not serializable and has no mutable accessors.
@@ -467,6 +490,37 @@ impl IncrementalBaseline {
         }
     }
 
+    /// Evaluate referenced states using a host-provided confined source.
+    /// The host remains responsible for provenance, freshness and atomicity.
+    pub fn evaluate_with_sources<P: crate::content_gate_sources::ConfinedContentFiles>(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+    ) -> IncrementalEvaluation {
+        let result = self
+            .validate_change_media(change)
+            .and_then(|()| {
+                checked_overlay_with_sources(
+                    &self.snapshot,
+                    change,
+                    after,
+                    provider,
+                    max_state_bytes,
+                    max_total_bytes,
+                )
+            })
+            .and_then(|overlay| self.evaluate_overlay(change, &overlay));
+        match result {
+            Ok(result) => result,
+            Err(error) => IncrementalEvaluation::NotChecked {
+                reason: error.reason,
+            },
+        }
+    }
+
     fn evaluate_checked(
         &self,
         change: &Change,
@@ -660,6 +714,56 @@ impl CollectionBaseline {
         self.project_overlay(change, &overlay)
     }
 
+    /// Project candidate metadata after verifying every referenced state.
+    pub fn project_candidate_with_sources<P: crate::content_gate_sources::ConfinedContentFiles>(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+    ) -> Result<ProjectedCandidateCollection, NotChecked> {
+        let overlay = checked_overlay_with_sources(
+            &self.snapshot,
+            change,
+            after,
+            provider,
+            max_state_bytes,
+            max_total_bytes,
+        )?;
+        self.project_overlay(change, &overlay)
+    }
+
+    /// Evaluate collection gates with independently supplied referenced bytes.
+    /// The host must establish source provenance, freshness and atomicity.
+    pub fn evaluate_with_sources<P: crate::content_gate_sources::ConfinedContentFiles>(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+    ) -> CollectionEvaluation {
+        let result = checked_overlay_with_sources(
+            &self.snapshot,
+            change,
+            after,
+            provider,
+            max_state_bytes,
+            max_total_bytes,
+        )
+        .and_then(|overlay| self.evaluate_overlay(change, &overlay));
+        match result {
+            Ok(report) => CollectionEvaluation::Report {
+                change_id: change.change_id.clone(),
+                report,
+            },
+            Err(error) => CollectionEvaluation::NotChecked {
+                reason: error.reason,
+            },
+        }
+    }
+
     /// Rebuild the candidate metadata collection from the owned base and the
     /// metadata in each change entry, then run the shared collection evaluator.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> CollectionEvaluation {
@@ -842,6 +946,53 @@ impl ComposedBaseline {
     /// collection cannot be hidden by a successful result in the other scope.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> ComposedEvaluation {
         let overlay = checked_overlay(&self.items.snapshot, change, after);
+        self.evaluate_with_overlay(change, overlay)
+    }
+
+    /// Evaluate both scopes after verifying all host-supplied referenced states.
+    /// This does not establish source provenance, freshness or publication safety.
+    pub fn evaluate_with_sources<P: crate::content_gate_sources::ConfinedContentFiles>(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+    ) -> ComposedEvaluation {
+        let overlay = checked_overlay_with_sources(
+            &self.items.snapshot,
+            change,
+            after,
+            provider,
+            max_state_bytes,
+            max_total_bytes,
+        );
+        self.evaluate_with_overlay(change, overlay)
+    }
+
+    /// Project candidate metadata after verifying all host-supplied referenced states.
+    pub fn project_candidate_with_sources<P: crate::content_gate_sources::ConfinedContentFiles>(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+    ) -> Result<ProjectedCandidateCollection, NotChecked> {
+        self.collection.project_candidate_with_sources(
+            change,
+            after,
+            provider,
+            max_state_bytes,
+            max_total_bytes,
+        )
+    }
+
+    fn evaluate_with_overlay(
+        &self,
+        change: &Change,
+        overlay: Result<CandidateOverlay, NotChecked>,
+    ) -> ComposedEvaluation {
         let item_result = self
             .items
             .validate_change_media(change)
@@ -1767,6 +1918,153 @@ mod tests {
         duplicate.items[1].entity_id = duplicate.items[0].entity_id.clone();
         assert!(CollectionBaseline::prepare(duplicate, metadata, unique).is_err());
     }
+    #[test]
+    fn referenced_states_are_verified_before_incremental_evaluation() {
+        use crate::content_gate_sources::{ConfinedContentFiles, ContentPhase};
+        use std::{io, io::Cursor, path::Path};
+
+        struct Provider {
+            old: Vec<u8>,
+            new: Vec<u8>,
+        }
+        impl ConfinedContentFiles for Provider {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, root: &Path, path: &Path) -> io::Result<Self::Reader> {
+                if root != Path::new("/trusted") || path != Path::new("before.txt") {
+                    return Err(io::ErrorKind::NotFound.into());
+                }
+                Ok(Cursor::new(self.old.clone()))
+            }
+            fn open_uri(
+                &mut self,
+                entity: &str,
+                phase: ContentPhase,
+                uri: &str,
+            ) -> io::Result<Self::Reader> {
+                if entity != "a"
+                    || phase != ContentPhase::After
+                    || uri != "https://example.org/after"
+                {
+                    return Err(io::ErrorKind::NotFound.into());
+                }
+                Ok(Cursor::new(self.new.clone()))
+            }
+        }
+        let (snapshot, preset, mut change) = fixture();
+        let next = item("a", "new article words", Some(vec![]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        ));
+        let inline_change = change.clone();
+        change.content_root = Some("/trusted".into());
+        let before = change.entries[0].before.as_mut().unwrap();
+        before.inline = None;
+        before.file = Some("before.txt".into());
+        let after = change.entries[0].after.as_mut().unwrap();
+        after.inline = None;
+        after.uri = Some("https://example.org/after".into());
+        let after_items = std::slice::from_ref(&next);
+        let mut provider = Provider {
+            old: snapshot.items[0].source.as_bytes().to_vec(),
+            new: next.source.as_bytes().to_vec(),
+        };
+        let baseline = IncrementalBaseline::prepare(snapshot.clone(), preset).unwrap();
+        assert!(matches!(
+            baseline.evaluate(&change, after_items),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        let expected =
+            serde_json::to_value(baseline.evaluate(&inline_change, after_items)).unwrap();
+        assert_eq!(
+            serde_json::to_value(baseline.evaluate_with_sources(
+                &change,
+                after_items,
+                &mut provider,
+                100,
+                200
+            ))
+            .unwrap(),
+            expected
+        );
+        assert!(matches!(
+            baseline.evaluate_with_sources(&change, after_items, &mut provider, 2, 200),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        assert!(matches!(
+            baseline.evaluate_with_sources(&change, after_items, &mut provider, 100, 2),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        provider.old = b"wrong old bytes".to_vec();
+        assert!(matches!(
+            baseline.evaluate_with_sources(&change, after_items, &mut provider, 100, 200),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        provider.old = snapshot.items[0].source.as_bytes().to_vec();
+        provider.new = b"wrong new bytes".to_vec();
+        assert!(matches!(
+            baseline.evaluate_with_sources(&change, after_items, &mut provider, 100, 200),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        provider.new = next.source.as_bytes().to_vec();
+        let metadata: BTreeMap<_, _> = snapshot
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    i.entity_id.clone(),
+                    Some(BTreeMap::from([("slug".into(), i.entity_id.clone())])),
+                )
+            })
+            .collect();
+        change.entries[0].metadata = Some(BTreeMap::from([("slug".into(), "a".into())]));
+        let unique = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let collection =
+            CollectionBaseline::prepare(snapshot.clone(), metadata.clone(), unique).unwrap();
+        assert!(
+            collection
+                .project_candidate_with_sources(&change, after_items, &mut provider, 100, 200)
+                .is_ok()
+        );
+        assert!(matches!(
+            collection.evaluate_with_sources(&change, after_items, &mut provider, 100, 200),
+            CollectionEvaluation::Report { .. }
+        ));
+        let mixed = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let composed = ComposedBaseline::prepare_adapted(snapshot, metadata, mixed).unwrap();
+        assert!(
+            composed
+                .project_candidate_with_sources(&change, after_items, &mut provider, 100, 200)
+                .is_ok()
+        );
+        let result = composed.evaluate_with_sources(&change, after_items, &mut provider, 100, 200);
+        assert!(matches!(
+            result.items,
+            IncrementalEvaluation::Evaluated { .. }
+        ));
+        assert!(matches!(
+            result.collection,
+            CollectionEvaluation::Report { .. }
+        ));
+        provider.new = b"wrong".to_vec();
+        let result = composed.evaluate_with_sources(&change, after_items, &mut provider, 100, 200);
+        assert!(matches!(
+            result.items,
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        assert!(matches!(
+            result.collection,
+            CollectionEvaluation::NotChecked { .. }
+        ));
+        assert!(
+            composed
+                .project_candidate_with_sources(&change, after_items, &mut provider, 100, 200)
+                .is_err()
+        );
+    }
+
     #[test]
     fn incremental_equals_full_after_update_delete_create_and_rename() {
         let (snapshot, preset, mut change) = fixture();
