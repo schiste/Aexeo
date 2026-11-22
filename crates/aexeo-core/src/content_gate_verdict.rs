@@ -127,17 +127,32 @@ fn verify_candidate_link_destinations(
     change: &Change,
     preset: &ContentPreset,
     scope: HtmlContentScope,
+    candidate_after: Option<&[crate::content_candidate::CandidateItem]>,
 ) -> Result<()> {
     let mut observer = snapshots.observer(change, preset)?;
+    if snapshots.entries.is_empty() {
+        return Ok(());
+    }
+    // Candidate sources are used only after the overlay and independent state
+    // streams have both been verified by the caller. Index once for large changes.
+    let sources = candidate_after.map(|items| {
+        items
+            .iter()
+            .map(|item| (item.entity_id.as_str(), item.source.as_str()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    });
     for entry in &change.entries {
         if !snapshots.entries.contains_key(&entry.entity_id) {
             continue;
         }
-        let source = entry
-            .after
-            .as_ref()
-            .and_then(|state| state.inline.as_deref())
-            .ok_or_else(|| anyhow::anyhow!("link observation source is unavailable"))?;
+        let source = match &sources {
+            Some(sources) => sources.get(entry.entity_id.as_str()).copied(),
+            None => entry
+                .after
+                .as_ref()
+                .and_then(|state| state.inline.as_deref()),
+        }
+        .ok_or_else(|| anyhow::anyhow!("link observation source is unavailable"))?;
         let destinations = match entry.media_type.as_str() {
             "text/markdown" => {
                 markdown_input_with_source_map_and_destinations(&entry.entity_id, source)?
@@ -1131,6 +1146,7 @@ pub fn verify_draft_passing_candidate_with_content<
             context.decision.change,
             context.decision.preset,
             scope,
+            Some(context.after),
         )?;
     }
     Ok(())
@@ -5360,7 +5376,8 @@ mod tests {
                 &snapshots,
                 &change,
                 &policy,
-                HtmlContentScope::Main
+                HtmlContentScope::Main,
+                None
             )
             .is_ok()
         );
@@ -5369,7 +5386,8 @@ mod tests {
                 &snapshots,
                 &change,
                 &policy,
-                HtmlContentScope::Document
+                HtmlContentScope::Document,
+                None
             )
             .is_err()
         );
@@ -5381,7 +5399,8 @@ mod tests {
                 &snapshots,
                 &change,
                 &policy,
-                HtmlContentScope::Document
+                HtmlContentScope::Document,
+                None
             )
             .is_ok()
         );
@@ -5396,7 +5415,8 @@ mod tests {
                 &snapshots,
                 &change,
                 &policy,
-                HtmlContentScope::Document
+                HtmlContentScope::Document,
+                None
             )
             .is_err()
         );
@@ -5430,7 +5450,8 @@ mod tests {
                 &snapshots,
                 &change,
                 &policy,
-                HtmlContentScope::Document
+                HtmlContentScope::Document,
+                None
             )
             .is_err()
         );
@@ -5440,7 +5461,8 @@ mod tests {
                 &snapshots,
                 &change,
                 &policy,
-                HtmlContentScope::Document
+                HtmlContentScope::Document,
+                None
             )
             .is_ok()
         );
@@ -5595,6 +5617,130 @@ mod tests {
             )
             .is_ok()
         );
+        // Referenced candidate states must support the same link evidence as
+        // inline states, after independently checking the host-provided bytes.
+        struct HostContent(Vec<u8>);
+        impl ConfinedContentFiles for HostContent {
+            type Reader = std::io::Cursor<Vec<u8>>;
+            fn open(
+                &mut self,
+                _: &std::path::Path,
+                _: &std::path::Path,
+            ) -> std::io::Result<Self::Reader> {
+                Ok(std::io::Cursor::new(self.0.clone()))
+            }
+            fn open_uri(
+                &mut self,
+                _: &str,
+                _: crate::content_gate_sources::ContentPhase,
+                _: &str,
+            ) -> std::io::Result<Self::Reader> {
+                Ok(std::io::Cursor::new(self.0.clone()))
+            }
+        }
+        for kind in ["file", "uri"] {
+            let mut referenced = change.clone();
+            let state = referenced.entries[0].after.as_mut().unwrap();
+            state.inline = None;
+            if kind == "file" {
+                state.file = Some("article.md".into());
+                referenced.content_root = Some("/trusted".into());
+            } else {
+                state.uri = Some("https://example.invalid/article".into());
+            }
+            let referenced_decision = OfflineDecisionContext {
+                change: &referenced,
+                preset: &policy,
+                max_entry_bytes: 1024,
+                max_total_bytes: 1024,
+                plain_text_paragraphs: false,
+                collection: None,
+                evaluator_identity: b"build-id",
+            };
+            let referenced_candidate = CandidateDecisionContext {
+                decision: &referenced_decision,
+                base: &base,
+                after: &after,
+            };
+            let referenced_context = CandidateLinkDecisionContext {
+                candidate: &referenced_candidate,
+                snapshots: &snapshots,
+            };
+            assert!(
+                evaluate_draft_portable_candidate_link_verdict(
+                    &referenced_context,
+                    &mut HostContent(b"wrong".to_vec()),
+                    "2026-01-01T00:00:00Z",
+                    scope
+                )
+                .is_err(),
+                "{kind}: wrong host bytes"
+            );
+            let mut host = HostContent(source.as_bytes().to_vec());
+            let produced = evaluate_draft_portable_candidate_link_verdict(
+                &referenced_context,
+                &mut host,
+                "2026-01-01T00:00:00Z",
+                scope,
+            )
+            .unwrap();
+            let evidence = LinkSnapshotDecisionContext {
+                offline: &referenced_decision,
+                snapshots: &snapshots,
+            }
+            .artifacts_with_html_scope(scope)
+            .unwrap()
+            .external_evidence;
+            assert!(
+                verify_draft_passing_candidate_with_content(
+                    &produced,
+                    &referenced_candidate,
+                    scope,
+                    Some(&evidence),
+                    &requirements,
+                    &mut IndependentBytes(source.as_bytes().to_vec()),
+                    1024,
+                    1024
+                )
+                .is_ok(),
+                "{kind}"
+            );
+            assert!(
+                verify_draft_passing_candidate_with_content(
+                    &produced,
+                    &referenced_candidate,
+                    scope,
+                    Some(&evidence),
+                    &requirements,
+                    &mut IndependentBytes(b"wrong".to_vec()),
+                    1024,
+                    1024
+                )
+                .is_err(),
+                "{kind}"
+            );
+            let mut altered_after = after.clone();
+            altered_after[0].source = "different".into();
+            let altered = CandidateDecisionContext {
+                decision: &referenced_decision,
+                base: &base,
+                after: &altered_after,
+            };
+            assert!(
+                verify_draft_passing_candidate_with_content(
+                    &produced,
+                    &altered,
+                    scope,
+                    Some(&evidence),
+                    &requirements,
+                    &mut IndependentBytes(source.as_bytes().to_vec()),
+                    1024,
+                    1024
+                )
+                .is_err(),
+                "{kind}: altered candidate"
+            );
+        }
         assert!(
             verify_draft_passing_candidate_with_content(
                 &portable,
