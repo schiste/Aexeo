@@ -791,6 +791,25 @@ fn link_observation_inventories_work_with_items_and_composed_presets() {
         lines(&output)[0]["result"]["collection"]["status"],
         "report"
     );
+    input["preset_sources"]["links"] = json!(
+        "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='example'\nquote='quote'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+    );
+    input["base_evidence"] = json!({"b":{"study":"quote"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["evidence"] = json!({"a":{"study":"quote"},"b":{"study":"quote"}});
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(lines(&output)[0]["result"]["items"]["reused"], 1);
+    input["proposals"][0]["evidence"]["b"]["study"] = json!("changed");
+    let output = run(&input, &[]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(lines(&output)[0]["result"]["items"]["evaluated"], 2);
 }
 
 #[test]
@@ -935,4 +954,118 @@ fn link_template_export_refuses_unobserved_markdown_links() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("not completely observed"));
+}
+
+#[test]
+fn evidence_inventories_work_for_items_and_composed_presets() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("evidence");
+    let preset = "version=1\nname='evidence'\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='abc'\nquote='quote'\n";
+    input["preset_sources"] = json!({"evidence":preset});
+    input["base_evidence"] = json!({"b":{"study":"quote"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["evidence"] = json!({"a":{"study":"quote"},"b":{"study":"quote"}});
+    }
+    input["proposals"][0]["evidence"]["b"]["study"] = json!("changed");
+    let output = run(&input, &["--telemetry"]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows = lines(&output);
+    assert_eq!(rows[0]["result"]["evaluated"], 2);
+    assert_eq!(
+        rows[0]["result"]["reports"]["b"]["gates"][0]["status"],
+        "failed"
+    );
+    assert_eq!(rows[1]["result"]["evaluated"], 1);
+    assert_eq!(rows[1]["result"]["reused"], 1);
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["base_evidence_supplied"], true);
+    assert_eq!(telemetry["proposals_with_evidence"], 2);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("quote"));
+    let mut incomplete = input.clone();
+    incomplete["proposals"][0]["evidence"]
+        .as_object_mut()
+        .unwrap()
+        .remove("b");
+    let output = run(&incomplete, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(lines(&output)[0]["result"]["status"], "not_checked");
+    let mut null = input.clone();
+    null["base_evidence"] = Value::Null;
+    assert!(!run(&null, &[]).status.success());
+    input["preset_sources"]["evidence"] = json!(format!(
+        "{preset}[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+    ));
+    input["base_metadata"] = json!({"b":{"slug":"b"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["change"]["entries"][0]["metadata"] = json!({"slug":"a"});
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows = lines(&output);
+    assert_eq!(rows[0]["result"]["items"]["evaluated"], 2);
+    assert_eq!(rows[1]["result"]["items"]["reused"], 1);
+    assert_eq!(rows[0]["result"]["collection"]["status"], "report");
+    input["proposals"][0]["evidence"]
+        .as_object_mut()
+        .unwrap()
+        .remove("b");
+    let output = run(&input, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    let rows = lines(&output);
+    assert_eq!(rows[0]["result"]["items"]["status"], "not_checked");
+    assert_eq!(rows[0]["result"]["collection"]["status"], "report");
+}
+
+#[test]
+fn evidence_composes_with_confined_file_states() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("evidence");
+    input["preset_sources"] = json!({"evidence":"version=1\nname='evidence'\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='abc'\nquote='quote'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"});
+    input["base_metadata"] = json!({"b":{"slug":"b"}});
+    input["base_evidence"] = json!({"b":{"study":"quote"}});
+    input["proposals"].as_array_mut().unwrap().truncate(1);
+    input["proposals"][0]["change"]["entries"][0]["metadata"] = json!({"slug":"a"});
+    input["proposals"][0]["evidence"] = json!({"a":{"study":"quote"},"b":{"study":"quote"}});
+    let expected = run(&input, &[]);
+    assert_eq!(expected.status.code(), Some(0));
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "abc").unwrap();
+    input["proposals"][0]["change"]["content_root"] = json!(dir.path());
+    let state = input["proposals"][0]["change"]["entries"][0]["after"]
+        .as_object_mut()
+        .unwrap();
+    state.remove("inline");
+    state.insert("file".into(), json!("a.txt"));
+    let args = ["--content-root", dir.path().to_str().unwrap()];
+    let result = run(&input, &args);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(lines(&result), lines(&expected));
+    fs::write(dir.path().join("a.txt"), "tampered").unwrap();
+    let result = run(&input, &args);
+    assert_eq!(result.status.code(), Some(2));
+    assert_eq!(
+        lines(&result)[0]["result"]["items"]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&result)[0]["result"]["collection"]["status"],
+        "not_checked"
+    );
 }
