@@ -10,6 +10,7 @@ use aexeo_contracts::{
 use aexeo_core::{
     content_candidate::{CandidateItem, CandidateSnapshot},
     content_gate::{ContentGate, ContentPreset, MAX_CONTENT_INPUT_BYTES},
+    content_gate_verdict::LinkObservationSnapshot,
     content_incremental::{
         CollectionBaseline, CollectionEvaluation, ComposedBaseline, IncrementalBaseline,
         IncrementalEvaluation, NotChecked,
@@ -43,6 +44,8 @@ struct Batch {
     mode: Mode,
     #[serde(default, deserialize_with = "metadata_if_present")]
     base_metadata: Option<Metadata>,
+    #[serde(default, deserialize_with = "observations_if_present")]
+    base_link_observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
     proposals: Vec<Proposal>,
 }
 type Metadata = BTreeMap<String, Option<BTreeMap<String, String>>>;
@@ -51,6 +54,12 @@ fn metadata_if_present<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Metadata>, D::Error> {
     Metadata::deserialize(deserializer).map(Some)
+}
+
+fn observations_if_present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BTreeMap<String, LinkObservationSnapshot>>, D::Error> {
+    BTreeMap::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -66,6 +75,8 @@ enum Mode {
 struct Proposal {
     change: Change,
     after: Vec<CandidateItem>,
+    #[serde(default, deserialize_with = "observations_if_present")]
+    link_observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
 }
 
 enum Baseline {
@@ -79,6 +90,7 @@ fn prepare_baseline(
     metadata: Option<Metadata>,
     preset: ContentPreset,
     mode: Mode,
+    observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
 ) -> Result<Baseline, NotChecked> {
     let collection_gates = preset
         .gates
@@ -90,6 +102,11 @@ fn prepare_baseline(
             reason: "base metadata inventory is required for collection gates".into(),
         })?;
         if collection_gates == preset.gates.len() {
+            if observations.is_some() {
+                return Err(NotChecked {
+                    reason: "link observations require a reachability gate".into(),
+                });
+            }
             return CollectionBaseline::prepare(snapshot, metadata, preset)
                 .map(Baseline::Collection);
         }
@@ -102,10 +119,37 @@ fn prepare_baseline(
                 });
             }
         };
-        return ComposedBaseline::prepare_adapted_with_html_scope(
-            snapshot, metadata, preset, scope,
+        let composed = if let Some(observations) = observations {
+            ComposedBaseline::prepare_adapted_with_link_observations(
+                snapshot,
+                metadata,
+                preset,
+                scope,
+                observations,
+            )
+        } else {
+            ComposedBaseline::prepare_adapted_with_html_scope(snapshot, metadata, preset, scope)
+        };
+        return composed.map(|baseline| Baseline::Composed(Box::new(baseline)));
+    }
+    if let Some(observations) = observations {
+        let scope = match mode {
+            Mode::Adapted => HtmlContentScope::Document,
+            Mode::AdaptedMain => HtmlContentScope::Main,
+            _ => {
+                return Err(NotChecked {
+                    reason: "link observations require an adapted mode".into(),
+                });
+            }
+        };
+        return IncrementalBaseline::prepare_adapted_with_link_observations(
+            snapshot,
+            preset,
+            scope,
+            metadata,
+            observations,
         )
-        .map(|baseline| Baseline::Composed(Box::new(baseline)));
+        .map(Baseline::Items);
     }
     let baseline = match (mode, metadata) {
         (Mode::Plain, None) => IncrementalBaseline::prepare(snapshot, preset),
@@ -256,10 +300,22 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         .flatten()
         .filter(|state| state.inline.is_none())
         .count();
+    let base_link_observations_supplied = batch.base_link_observations.is_some();
+    let proposals_with_link_observations = batch
+        .proposals
+        .iter()
+        .filter(|p| p.link_observations.is_some())
+        .count();
     let mut sources = builtin_content_presets();
     sources.extend(batch.preset_sources);
     let preset = resolve_content_preset(&batch.preset, &sources)?;
-    let baseline = prepare_baseline(batch.snapshot, batch.base_metadata, preset, batch.mode);
+    let baseline = prepare_baseline(
+        batch.snapshot,
+        batch.base_metadata,
+        preset,
+        batch.mode,
+        batch.base_link_observations,
+    );
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     let mut totals = Totals::default();
     for (index, proposal) in batch.proposals.iter().enumerate() {
@@ -269,7 +325,24 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 true,
             ),
             Ok(Baseline::Items(baseline)) => {
-                let result = if let Some(provider) = providers[index].as_mut() {
+                let result = if let Some(observations) = &proposal.link_observations {
+                    if let Some(provider) = providers[index].as_mut() {
+                        baseline.evaluate_with_sources_and_link_observations(
+                            &proposal.change,
+                            &proposal.after,
+                            provider,
+                            MAX_CONTENT_INPUT_BYTES,
+                            MAX_TOTAL_CONTENT_BYTES,
+                            observations,
+                        )
+                    } else {
+                        baseline.evaluate_with_link_observations(
+                            &proposal.change,
+                            &proposal.after,
+                            observations,
+                        )
+                    }
+                } else if let Some(provider) = providers[index].as_mut() {
                     baseline.evaluate_with_sources(
                         &proposal.change,
                         &proposal.after,
@@ -283,6 +356,10 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 let unchecked = totals.items(&result);
                 (serde_json::to_value(result)?, unchecked)
             }
+            Ok(Baseline::Collection(_)) if proposal.link_observations.is_some() => (
+                serde_json::json!({"status":"not_checked", "reason":"link observations require a reachability gate"}),
+                true,
+            ),
             Ok(Baseline::Collection(baseline)) => {
                 let result = if let Some(provider) = providers[index].as_mut() {
                     baseline.evaluate_with_sources(
@@ -302,7 +379,24 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 )
             }
             Ok(Baseline::Composed(baseline)) => {
-                let result = if let Some(provider) = providers[index].as_mut() {
+                let result = if let Some(observations) = &proposal.link_observations {
+                    if let Some(provider) = providers[index].as_mut() {
+                        baseline.evaluate_with_sources_and_link_observations(
+                            &proposal.change,
+                            &proposal.after,
+                            provider,
+                            MAX_CONTENT_INPUT_BYTES,
+                            MAX_TOTAL_CONTENT_BYTES,
+                            observations,
+                        )
+                    } else {
+                        baseline.evaluate_with_link_observations(
+                            &proposal.change,
+                            &proposal.after,
+                            observations,
+                        )
+                    }
+                } else if let Some(provider) = providers[index].as_mut() {
                     baseline.evaluate_with_sources(
                         &proposal.change,
                         &proposal.after,
@@ -333,7 +427,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_link_observations_supplied":base_link_observations_supplied, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
         );
     }
     Ok(if totals.not_checked != 0 {

@@ -52,7 +52,7 @@ unobserved HTML and plain text cannot supply complete heading levels and cause
 any item causes `not_checked`, including link or heading checks on plain text.
 Destination checks use the complete per-item source projection and do not fetch links;
 Markdown containing unobserved HTML and plain text remain `not_checked` for this gate.
-Other formats, reachability checks, site, collection and external gates remain unsupported. Item metadata gates require the explicit mode below. Inline before/after
+Other formats, site, collection and external gates remain unsupported. Reachability is supported only through the explicit observation API described below. Item metadata gates require the explicit mode below. Inline before/after
 content and the same complete, host-supplied inventory are still required.
 Route-link projections are not required for these item-local gates; any link
 count is extracted from that item's supplied source, not the host route graph.
@@ -63,6 +63,32 @@ markup is the rendered page. This API does not provide a publication verdict,
 a persistent cache, source freshness, or general site impact evaluation. The
 `evaluated` and `reused` counts remain aggregate work counters rather than a
 performance guarantee; no input text or identifiers are added to telemetry.
+
+## Host-supplied link observations
+
+`IncrementalBaseline::prepare_adapted_with_link_observations` opts into
+`LinkReachability` for adapted Markdown and HTML. Supply exactly one
+`LinkObservationSnapshot` per base identity. Each snapshot must have version 1,
+the source SHA-256, the complete extracted destinations in occurrence order,
+and one observation per destination. The engine checks these against the
+validated source and adapter projection. Unavailable or mismatched inputs
+produce `not_checked`; an explicitly empty list is valid for a document without
+links. Plain text and incomplete link projections remain unavailable.
+
+For each proposal, pass a complete candidate inventory to
+`evaluate_with_link_observations`, or to
+`evaluate_with_sources_and_link_observations` for confined referenced content.
+An unchanged item is reevaluated if its observations change; otherwise its
+baseline report may be reused. Supplying no candidate inventory never reuses an
+old observation implicitly. Item metadata can be supplied at preparation and
+follows the existing replacement rules. These methods do not fetch URLs or
+establish observation provenance, freshness, or publication authority: the host
+must establish those properties. The composed API exposes the same methods while reporting item and collection
+scopes independently. The experimental `content-incremental` batch accepts
+`base_link_observations` and, for each proposal, `link_observations` maps keyed
+by entity ID. Supply the full candidate map, including unchanged items.
+The optional telemetry reports only whether a base map was supplied and the
+number of proposals with a map, without including destinations or content.
 
 ## Item metadata projections
 
