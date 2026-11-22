@@ -199,3 +199,18 @@ metadata, changed resolved policy and changed metadata. They also verify that
 the initial file is unchanged and that opt-in telemetry omits its text. The
 client is scripted; these tests do not claim an autonomous model trial or
 independent editorial evaluation.
+
+## End-to-end revision timing
+
+`scripts/bench-content-revision.js` measures a fresh CLI process evaluating a
+synthetic failing text, accepting one already prepared proposal and reevaluating
+it. It checks both gate results, the stop reason, counts and candidate digest on
+every iteration. The timing includes the CLI's evaluator subprocesses but not
+model generation, user deliberation, network access, CMS integration or build
+time. The benchmark is included in the existing performance-budget check.
+
+On 2026-11-22, 20 local release-build runs averaged 33.0 ms with p50 9.9 ms and
+p95 20.3 ms; one large outlier raised the mean. Filesystem and executable caches
+and machine load were uncontrolled. These observations are neither a guarantee
+nor evidence that editorial quality improved. The generous CI limits guard gross
+regressions across environments rather than promise an interactive latency SLA.

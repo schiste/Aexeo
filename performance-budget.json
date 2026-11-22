@@ -33,6 +33,10 @@
     "max_avg_ms": 2000,
     "max_p95_ms": 4000
   },
+  "content/revision_loop_one_edit": {
+    "max_avg_ms": 2000,
+    "max_p95_ms": 4000
+  },
   "content/markdown_lists_combined": {
     "max_avg_ms": 500,
     "max_p95_ms": 1000
