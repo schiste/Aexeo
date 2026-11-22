@@ -401,7 +401,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "headings": adapted.input.headings.as_ref().map(Vec::len),
                 "link_destinations": adapted.destinations.as_ref().map(Vec::len),
                 "paragraph_list_classification": adapted.paragraph_list_items.is_some(),
-                "source_spans": adapted.source_map.as_ref().map(|map| map.span_count())
+                "source_spans": adapted.source_map.as_ref().map(|map| map.span_count()),
+                "heading_offsets": adapted.source_map.as_ref().map(|map| map.heading_offset_count())
             }));
             host_source_map = adapted.source_map;
             adapter_source = Some(data);
@@ -632,25 +633,36 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         || plain_source.is_some()
         || html_map.is_some()
         || host_source_map.is_some();
-    let host_indexes = host_source_map
-        .as_ref()
-        .zip(input.text.as_deref())
-        .and_then(|(map, text)| {
-            preset
+    let host_has_prose_findings = host_source_map.is_some()
+        && preset
+            .gates
+            .iter()
+            .zip(&report.gates)
+            .any(|(gate, result)| {
+                aexeo_core::source_mapping::prose_gate_has_positions(gate)
+                    && !result.findings.is_empty()
+            });
+    let host_has_heading_findings = host_source_map.as_ref().is_some_and(|map| {
+        map.has_heading_offsets()
+            && preset
                 .gates
                 .iter()
                 .zip(&report.gates)
                 .any(|(gate, result)| {
-                    aexeo_core::source_mapping::prose_gate_has_positions(gate)
-                        && !result.findings.is_empty()
+                    matches!(
+                        gate,
+                        ContentGate::HeadingHierarchy { .. }
+                            | ContentGate::HeadingLength { .. }
+                            | ContentGate::DuplicateHeadings { .. }
+                    ) && !result.findings.is_empty()
                 })
-                .then(|| {
-                    (
-                        aexeo_core::text_index::LineIndex::new(text),
-                        map.source_index(),
-                    )
-                })
-        });
+    });
+    let host_source_index = host_source_map.as_ref().and_then(|map| {
+        (host_has_prose_findings || host_has_heading_findings).then(|| map.source_index())
+    });
+    let host_projected_index = input.text.as_deref().and_then(|text| {
+        host_has_prose_findings.then(|| aexeo_core::text_index::LineIndex::new(text))
+    });
     let plain_index = plain_source
         .filter(|_| {
             preset
@@ -700,6 +712,15 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         };
         let positions = hierarchy_positions
             .or_else(|| {
+                host_source_map.as_ref()?.heading_positions(
+                    host_source_index.as_ref()?,
+                    input.headings.as_deref(),
+                    heading_levels.as_deref(),
+                    gate,
+                    result,
+                )
+            })
+            .or_else(|| {
                 if adapter_json {
                     return None;
                 }
@@ -735,11 +756,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                         )
                     })
                     .or_else(|| {
-                        let (projected_index, source_index) = host_indexes.as_ref()?;
                         host_source_map.as_ref()?.gate_positions(
                             input.text.as_deref()?,
-                            projected_index,
-                            source_index,
+                            host_projected_index.as_ref()?,
+                            host_source_index.as_ref()?,
                             gate,
                             result,
                         )

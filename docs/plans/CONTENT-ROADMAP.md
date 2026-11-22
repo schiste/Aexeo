@@ -100,9 +100,10 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
-- [x] Let host JSON adapters supply partial byte-matched prose source spans.
-  The CLI rejects invalid spans, reports only mapped positions, and marks the
-  source as host-supplied; correspondence and provenance remain host duties.
+- [x] Let host JSON adapters supply partial byte-matched prose spans and
+  heading offsets. The CLI rejects invalid spans and heading offsets, reports
+  only mapped positions, and marks the source as host-supplied; correspondence
+  and provenance remain host duties. List and link positions remain unmapped.
 
 - [x] Capture, export and replay human feedback for host adapter JSON; bind the
   full projection and check cross-split overlap using projected content text.

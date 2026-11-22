@@ -504,12 +504,14 @@ are not joined. Example, including an optional source map:
  "headings":["Introduction"],"heading_levels":[1],
  "paragraphs":[{"start":0,"end":12,"list_item":false}],
  "block_ends":[12],"lists":[],"link_destinations":[],
- "source_map":{"source_text":"Title\nHello world.",
-               "spans":[{"projected_start":0,"projected_end":12,"source_start":6}]}}
+ "source_map":{"source_text":"Introduction\nHello world.",
+               "spans":[{"projected_start":0,"projected_end":12,"source_start":13}],
+               "heading_offsets":[0]}}
 ```
 
-Each supplied array is the host's assertion that this observation is complete;
-an empty array is observed empty, while an omitted or null array is unavailable.
+Each supplied observation array is the host's assertion that the observation is
+complete; an empty array is observed empty, while an omitted or null array is
+unavailable. The optional source-map arrays can describe partial locations.
 Paragraph-list classification is unavailable unless every paragraph has an
 explicit `list_item`. Invalid byte ranges, boundaries, heading levels, duplicate
 JSON keys and unknown fields are rejected. The input is bounded by the CLI's
@@ -521,12 +523,17 @@ them from JSON. Optionally, `source_map` contains `source_text` and `spans` of
 projected ends are exclusive. Both projected and source ranges must be ordered,
 non-overlapping and byte-identical; invalid ranges reject the input. The map may
 cover only part of the projected text. Prose findings in these spans can receive
-separate positions in the supplied `source_text`; other findings remain unmapped.
-The report labels these positions `host_supplied_spans`: matching bytes cannot
+separate positions in the supplied `source_text`. An optional `heading_offsets`
+array supplies one UTF-8 byte offset or null per heading, in heading order.
+Non-null offsets must identify nonempty, byte-identical heading text in ordered,
+nonoverlapping source ranges. Heading-length, duplicate-heading and hierarchy
+findings can then receive positions for those headings; null entries stay
+unmapped. Other structural findings remain unmapped. The report labels these
+positions `host_supplied_spans`: matching bytes cannot
 prove that the host selected the correct occurrence, actual source or snapshot.
 The host must establish that correspondence and provenance. List finding
-positions remain placeholders; finding coordinates always refer to projected
-text, not the JSON file. `--fix` and `--export-adapter-input` are unavailable
+positions remain placeholders; finding coordinates may refer to projected text
+or be placeholders, never to the JSON file. `--fix` and `--export-adapter-input` are unavailable
 for this format. Reports bind the original JSON bytes, including its observations, in their input fingerprint.
 Feedback capture, corpus export and replay accept this format with the exact JSON
 as the example text. Corpus examples must contain a string `text` projection;
