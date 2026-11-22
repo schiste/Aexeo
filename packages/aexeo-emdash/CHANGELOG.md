@@ -8,6 +8,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5]
 
+- Preserve whitespace in nonempty plain-text CMS fields, including whitespace-only values, so character-sensitive gates measure the supplied text. Automatically selected rich content still takes precedence over a whitespace-only fallback.
+
 - Include a synthetic fresh-process Node benchmark for module import, first WASM evaluation and total startup time. Measurements exclude network and CMS access and do not represent browser or workerd cold starts.
 
 - Show the metadata input coverage recorded with CMS save and refresh assessments, including whether the description mapping was observed. Field names are reported without copying metadata values; rendered page metadata remains unverified.
