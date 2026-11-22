@@ -185,8 +185,17 @@ The Rust `content_revision_loop::revise` API now bounds host-supplied revision
 proposals and evaluates every accepted candidate, using actual gate results in
 its regression tests. Tests cover a successful revision, exhaustion, cycles,
 declined proposals, unavailable checks, changed gate identity, advisory scope
-and oversized proposals. This controller is not connected to the CLI, EmDash
-or a model by default. The host must keep the complete policy and inputs fixed;
+and oversized proposals. The CLI now exposes it through the opt-in `content-revise` JSON Lines
+session, using real `content` evaluations. It is not connected to EmDash or a
+model by default. The host must keep the complete policy and inputs fixed;
 reported gate identities cannot establish that. The tests are synthetic and do
 not demonstrate autonomous agent behavior, semantic preservation or independent
 human evaluation. Existing scripted trial observations above remain unchanged.
+
+
+CLI integration tests submit real revisions for plain text, paragraph text,
+Markdown and scoped HTML, and cover exhaustion, cycles, declines, missing
+metadata, changed resolved policy and changed metadata. They also verify that
+the initial file is unchanged and that opt-in telemetry omits its text. The
+client is scripted; these tests do not claim an autonomous model trial or
+independent editorial evaluation.

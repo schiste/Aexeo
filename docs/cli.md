@@ -4,6 +4,51 @@
 
 ## Commands
 
+## `content-revise`
+
+Run a bounded agent-driven content review over a JSON Lines stream
+
+```text
+Run a bounded agent-driven content review over a JSON Lines stream
+
+Usage: content-revise [OPTIONS] --input <input> --preset <preset>
+
+Options:
+      --input <input>
+          Initial UTF-8 draft file; it is never modified
+
+      --preset <preset>
+          Resolved content preset name
+
+      --preset-source <preset-source>
+          Custom preset source as NAME=PATH; repeat for parents
+
+      --input-format <input-format>
+          [default: markdown]
+          [possible values: text, paragraph-text, markdown, html]
+
+      --html-scope <html-scope>
+          HTML scope; requires HTML input
+
+          [possible values: document, main]
+
+      --metadata <metadata>
+          JSON object of metadata string values
+
+      --max-revisions <max-revisions>
+          [default: 3]
+
+      --scope <scope>
+          [default: all]
+          [possible values: all, blocking]
+
+      --telemetry
+          Emit aggregate counts to stderr
+
+  -h, --help
+          Print help
+```
+
 ## `editorial-patch`
 
 Propose, review, or explicitly apply source-bound editorial edits

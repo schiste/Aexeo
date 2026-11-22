@@ -6,6 +6,7 @@ mod content_adapter;
 pub mod content_change;
 pub mod content_impact;
 pub mod content_incremental;
+pub mod content_revision_loop;
 pub mod docs;
 pub mod editorial_patch;
 pub mod exit_code;
