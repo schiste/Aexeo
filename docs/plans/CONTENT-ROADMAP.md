@@ -926,6 +926,10 @@ missing fields retain observed prose but make body capabilities unavailable.
   using the same map as the independent Python verifier and runner. Reject
   missing, extra, duplicate or unconfined mappings and emit aggregate URI counts.
   This does not fetch content or establish snapshot provenance or freshness.
+- [x] Verify bound link observations for file- and URI-referenced candidate
+  states against the independently checked candidate source, as well as inline
+  states. Wrong host bytes and independently supplied bytes are rejected. This
+  does not retrieve URIs or establish source provenance or freshness.
 - [ ] Establish equivalent referenced-content interoperability in other hosts;
   URI fetching, snapshot provenance and publication authorization remain separate
   concerns.
