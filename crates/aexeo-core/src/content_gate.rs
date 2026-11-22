@@ -223,7 +223,13 @@ fn http_url_end(
 ) -> Option<usize> {
     const MAX_URL_BYTES: usize = 2048;
     let tail = text.get(start..)?;
-    if !(tail.starts_with("https://") || tail.starts_with("http://")) {
+    if !tail
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+        && !tail
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+    {
         return None;
     }
     if start > 0
@@ -297,7 +303,7 @@ fn for_each_sentence(
                 after_delimiter = false;
             }
         }
-        if ch == Some('h') && offset >= protected_url_end {
+        if matches!(ch, Some('h' | 'H')) && offset >= protected_url_end {
             let following_block = block_ends[next_block..]
                 .iter()
                 .copied()
@@ -5387,6 +5393,8 @@ mod tests {
             "See https://example.org/a.b?x=1&y=2. Next sentence.",
             "Read (https://www.example.org/v1.2). Next sentence!",
             "Voir https://exemple.fr/école. Suite.",
+            "Read HTTP://example.org/a.b?x=1. Next sentence.",
+            "See HtTpS://example.org/a.b?x=1. Next sentence.",
         ] {
             let report = preset.evaluate(&literal_input(text)).unwrap();
             assert_eq!(report.gates[0].measurements["sentence_count"], 2, "{text}");
@@ -5411,6 +5419,10 @@ mod tests {
         );
         let url = "https://example.org/page";
         assert_eq!(http_url_end(url, 0, None, false), Some(url.len()));
+        let mixed = "HtTpS://example.org/page";
+        assert_eq!(http_url_end(mixed, 0, None, false), Some(mixed.len()));
+        assert_eq!(http_url_end("HTTPS://", 0, None, false), None);
+        assert_eq!(http_url_end("wordHTTP://example.org", 4, None, false), None);
         assert_eq!(http_url_end(url, 0, Some(15), false), Some(15));
         assert_eq!(http_url_end("https://", 0, None, false), None);
         assert_eq!(
