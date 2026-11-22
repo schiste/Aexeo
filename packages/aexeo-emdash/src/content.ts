@@ -1,4 +1,5 @@
-import { addProseVarianceMeasurements, emitTelemetry } from "./telemetry.js";
+import { addProseVarianceMeasurements, emitTelemetry, listReviewMeasurements } from "./telemetry.js";
+import type { ListReviewTelemetry } from "./telemetry.js";
 import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
@@ -48,6 +49,8 @@ export interface ContentEvaluationTelemetry {
   link_reachability?: { checked: number; not_found: number; unchecked: number };
   /** Aggregate counts, omitted when no prose-variance gate was measured. */
   prose_variance?: { measured_gates: number; list_paragraphs_excluded: number; windows_checked: number };
+  /** List observations are summed per gate; measured counts are absent if no gate measured them. */
+  list_review?: ListReviewTelemetry;
 }
 
 /** Exact projected input bound to external extension results; may contain private content. */
@@ -120,6 +123,8 @@ export async function evaluateContent(
       event.source_locations_eligible = report.source_mapping.eligible;
       event.source_locations_unmapped = report.source_mapping.unmapped;
     }
+    const listReview = listReviewMeasurements(report.gates);
+    if (listReview !== undefined) event.list_review = listReview;
     const proseVariance = addProseVarianceMeasurements(report.gates);
     if (proseVariance !== undefined) event.prose_variance = proseVariance;
     for (const gate of report.gates) {

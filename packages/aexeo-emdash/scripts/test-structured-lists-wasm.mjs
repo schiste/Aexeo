@@ -33,6 +33,25 @@ const emptyLists = await assess({ ...document, list_structure_complete: true, bo
 assert.equal(emptyLists.gates[0].status, "passed");
 assert.equal(emptyLists.gates[0].measurements.lists_matching_counts, 0);
 assert.equal(emptyLists.gates[0].measurements.largest_list_items, 0);
+const listEvents = [];
+const listTelemetryPreset = `${preset}
+[[gates]]
+id="private-second-gate"
+kind="list_item_count"
+flagged_counts=[2]
+`;
+const observeLists = doc => evaluateContent(doc, "lists", { lists: listTelemetryPreset }, undefined, event => listEvents.push(event));
+await observeLists({ ...document, route: "/private-route", list_structure_complete: true });
+await observeLists({ ...document, route: "/private-route", list_structure_complete: true, body: [] });
+await observeLists({ ...document, route: "/private-route", list_structure_complete: false });
+assert.deepEqual(listEvents.map(event => event.list_review), [
+  { configured_gates: 2, measured_gates: 2, not_checked_gates: 0, lists_observed: 2, lists_matching_counts: 1 },
+  { configured_gates: 2, measured_gates: 2, not_checked_gates: 0, lists_observed: 0, lists_matching_counts: 0 },
+  { configured_gates: 2, measured_gates: 0, not_checked_gates: 2 },
+]);
+for (const value of ["/private-route", "private-second-gate", "one", "two", "three"]) {
+  assert.ok(!JSON.stringify(listEvents).includes(value), value);
+}
 console.log("WASM structured list completeness test passed");
 
 const prosePreset = `version=1

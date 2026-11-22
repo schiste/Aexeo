@@ -1589,6 +1589,12 @@ observations even when the finding limit truncates the displayed findings; the
 largest count is zero for an observed document without lists. These observed
 measurements are omitted when list structure is unavailable or invalid.
 
+With opt-in content telemetry, CLI and EmDash emit `list_review` counts for
+configured, measured and not-checked list gates. Observed and matching list
+counts are included only when at least one gate measured them; they sum
+observations per gate, so the same list is counted once for each gate. These
+aggregates contain no content, paths, gate identifiers or configured terms.
+
 To opt in through the configured EmDash plugin, set `contentPreset.listStructureCompleteByCollection = ["blog_posts"]` only after verifying that the host projects every list block in those collections in order, including any custom components. A missing body or incomplete existing body capabilities still reports `not_checked`. This assertion defaults to off. Direct WASM hosts can set `list_structure_complete: true` on the document under the same condition.
 ### Repeated transition openings
 
