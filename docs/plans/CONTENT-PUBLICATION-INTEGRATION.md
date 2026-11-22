@@ -30,6 +30,15 @@ unavailable check may become a pass.
 
 ## Aexeo delivery and limits
 
+- [#810](https://github.com/schiste/Aexeo/pull/810) rejects delete and rename
+  candidates in the independent portable comparator while their site impact is
+  not independently established. [#813](https://github.com/schiste/Aexeo/pull/813)
+  applies the same fail-closed restriction to the Rust candidate verifier,
+  verifies all configured item and collection checks and their blocking flags,
+  and rejects unsupported item media in both verifiers. A collection-only policy
+  does not require an item parser. These checks do not authenticate the evaluator,
+  establish a fresh complete inventory, or provide an atomic publication boundary.
+
 - [#604](https://github.com/schiste/Aexeo/pull/604) adds an experimental
   portable v2 draft envelope, strict schema, producer and independent Python
   comparator, with shared vectors and real CLI interoperability. The comparator
