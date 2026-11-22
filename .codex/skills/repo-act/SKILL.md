@@ -272,6 +272,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   fixture when the crawler records the real clock: omit the optional date and
   assert the observed window, or control the clock. Separately test an explicit
   conflicting date and verify orphan eligibility stays withheld end to end.
+- For link graph fixtures expecting internal destinations, declare a valid site
+  origin in the surface identity. A missing origin makes otherwise valid
+  relative links indeterminate; assert the extracted destination before
+  interpreting an inbound count.
 - For link graph locale coverage, test inventory and rendered language as
   matching, conflicting, missing, malformed and differently specific values.
   Include a seeded HTTP crawl and assert both the reconciliation reason and
