@@ -2052,6 +2052,165 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
     )
 }
 
+/// Explicit host-provided sources for each proposed entity. An empty source map
+/// records that no sources were supplied; it does not prove sources do not exist.
+pub type ChangeEvidenceInventory =
+    std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>;
+
+const EVIDENCE_BINDING_EXTENSION: &str = "aexeo.change-evidence-input-binding.v1";
+
+fn validate_change_evidence(
+    change: &Change,
+    inventory: &ChangeEvidenceInventory,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<()> {
+    let ids: std::collections::BTreeSet<_> = change
+        .entries
+        .iter()
+        .filter(|entry| entry.after.is_some())
+        .map(|entry| entry.entity_id.as_str())
+        .collect();
+    if inventory.len() != ids.len() || inventory.keys().any(|id| !ids.contains(id.as_str())) {
+        bail!("evidence inventory must match proposed entity identities");
+    }
+    let mut total = 0usize;
+    for (id, sources) in inventory {
+        total = total
+            .checked_add(id.len())
+            .ok_or_else(|| anyhow::anyhow!("evidence inventory exceeds byte limit"))?;
+        for (name, value) in sources {
+            if name.is_empty() || value.len() > max_entry_bytes {
+                bail!("evidence source name is empty or source exceeds byte limit");
+            }
+            total = total
+                .checked_add(name.len())
+                .and_then(|v| v.checked_add(value.len()))
+                .ok_or_else(|| anyhow::anyhow!("evidence inventory exceeds byte limit"))?;
+        }
+        if total > max_total_bytes {
+            bail!("evidence inventory exceeds byte limit");
+        }
+    }
+    Ok(())
+}
+
+fn evidence_binding_digest(base: String, inventory: &ChangeEvidenceInventory) -> Result<String> {
+    hash_json(&(EVIDENCE_BINDING_EXTENSION, base, inventory))
+}
+
+/// Verify the change and evidence bytes supplied by the host match the verdict.
+/// This does not authenticate sources, establish freshness or validate publication.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_change_evidence_input_binding(
+    verdict: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
+    inventory: &ChangeEvidenceInventory,
+) -> Result<()> {
+    validate_change_evidence(change, inventory, max_entry_bytes, max_total_bytes)?;
+    verify_html_scope_declaration(verdict, html_scope)?;
+    if verdict.validator.name != "aexeo"
+        || verdict.validator.version != env!("CARGO_PKG_VERSION")
+        || verdict.schema != VERDICT_SCHEMA
+        || verdict.subject != Subject::for_change(change)
+    {
+        bail!("evidence binding requires the same engine and change");
+    }
+    let base = scoped_binding_digest(
+        offline_binding_digest(
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            plain_text_paragraphs,
+            collection,
+        )?,
+        html_scope,
+    )?;
+    let expected = evidence_binding_digest(base, inventory)?;
+    let actual = verdict
+        .extensions
+        .as_ref()
+        .and_then(|ext| ext.get(EVIDENCE_BINDING_EXTENSION))
+        .and_then(serde_json::Value::as_str);
+    if actual != Some(expected.as_str()) {
+        bail!("change evidence input binding is missing or does not match");
+    }
+    Ok(())
+}
+
+/// Compare a previous verdict against a fresh evaluation using the same bound
+/// evidence, including any link or custom observation results in the verdict.
+/// The caller must independently obtain the fresh evaluation and sources.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_change_evidence_verdict(
+    previous: &Verdict,
+    fresh: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
+    inventory: &ChangeEvidenceInventory,
+) -> Result<()> {
+    for verdict in [previous, fresh] {
+        verify_change_evidence_input_binding(
+            verdict,
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            plain_text_paragraphs,
+            collection,
+            html_scope,
+            inventory,
+        )?;
+    }
+    let mut prior = previous.clone();
+    prior.evaluated_at.clone_from(&fresh.evaluated_at);
+    if prior != *fresh {
+        bail!("previous verdict differs from the fresh evidence evaluation");
+    }
+    Ok(())
+}
+
+/// Evaluate a change with explicitly supplied per-entity evidence. Callers
+/// independently establish source provenance, freshness and publication safety.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_change_with_evidence<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    host: ChangeEvaluationHost<'_, '_>,
+    collection: Option<ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
+    inventory: &ChangeEvidenceInventory,
+) -> Result<Verdict> {
+    evaluate_change_internal(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        host,
+        collection,
+        html_scope,
+        Some(inventory),
+    )
+}
+
 /// Evaluate with an explicit static HTML projection for every HTML entry.
 /// Main scope requires one observable main element; errors remain not checked.
 /// The scope is bound to the verdict inputs. Existing document-scope verification
@@ -2065,12 +2224,42 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
     evaluated_at: &str,
     max_entry_bytes: usize,
     max_total_bytes: usize,
-    mut host: ChangeEvaluationHost<'_, '_>,
+    host: ChangeEvaluationHost<'_, '_>,
     collection: Option<ChangeCollection<'_>>,
     html_scope: HtmlContentScope,
 ) -> Result<Verdict> {
+    evaluate_change_internal(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        host,
+        collection,
+        html_scope,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn evaluate_change_internal<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    mut host: ChangeEvaluationHost<'_, '_>,
+    collection: Option<ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
+    evidence: Option<&ChangeEvidenceInventory>,
+) -> Result<Verdict> {
     use sha2::{Digest, Sha256};
     preset.validate()?;
+    if let Some(inventory) = evidence {
+        validate_change_evidence(change, inventory, max_entry_bytes, max_total_bytes)?;
+    }
     let has_observer = host.options.link_observer.is_some();
     let external = host.extensions.map(|inner| {
         let mut digest = Sha256::new();
@@ -2080,38 +2269,26 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             digest: std::cell::RefCell::new(digest),
         }
     });
-    let observed_binding = if has_observer || external.is_some() {
-        Some(scoped_binding_digest(
-            offline_binding_digest(
-                change,
-                preset,
-                max_entry_bytes,
-                max_total_bytes,
-                host.options.plain_text_paragraphs,
-                collection.as_ref(),
-            )?,
-            html_scope,
-        )?)
-    } else {
-        None
-    };
+    let base = scoped_binding_digest(
+        offline_binding_digest(
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            host.options.plain_text_paragraphs,
+            collection.as_ref(),
+        )?,
+        html_scope,
+    )?;
+    let bound_base = evidence
+        .map(|inventory| evidence_binding_digest(base.clone(), inventory))
+        .transpose()?;
+    let actual_base = bound_base.as_ref().unwrap_or(&base);
+    let observed_binding = (has_observer || external.is_some()).then(|| actual_base.clone());
     let mut observed_digest = Sha256::new();
     observed_digest.update(OBSERVED_LINK_BINDING_EXTENSION.as_bytes());
-    let offline_binding = if host.options.link_observer.is_none() && host.extensions.is_none() {
-        Some(scoped_binding_digest(
-            offline_binding_digest(
-                change,
-                preset,
-                max_entry_bytes,
-                max_total_bytes,
-                host.options.plain_text_paragraphs,
-                collection.as_ref(),
-            )?,
-            html_scope,
-        )?)
-    } else {
-        None
-    };
+    let offline_binding =
+        (!has_observer && external.is_none() && evidence.is_none()).then_some(base);
     if evaluated_at.is_empty() {
         bail!("evaluation timestamp is empty");
     }
@@ -2290,6 +2467,9 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             }
         };
         input.metadata = entry.metadata.clone();
+        input.evidence_sources = evidence
+            .and_then(|sources| sources.get(&entry.entity_id))
+            .cloned();
         let observations = if preset.gates.iter().any(|gate| {
             matches!(
                 gate,
@@ -2625,6 +2805,12 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 })
             }),
     };
+    if let Some(binding) = bound_base {
+        verdict.extensions.get_or_insert_default().insert(
+            EVIDENCE_BINDING_EXTENSION.into(),
+            serde_json::Value::String(binding),
+        );
+    }
     if html_scope == HtmlContentScope::Main {
         verdict.extensions.get_or_insert_default().insert(
             "aexeo.html-content-scope.v1".into(),
@@ -2706,6 +2892,194 @@ mod tests {
             "entries":[{"entity_id":"article", "operation":"create", "media_type":"text/plain",
                 "after":{"inline":"abc", "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}]
         })).unwrap()
+    }
+
+    #[test]
+    fn change_evidence_is_evaluated_and_bound_per_entity() {
+        use std::collections::BTreeMap;
+        let change = change();
+        let policy = ContentPreset::from_toml("version=1\nname='evidence'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n").unwrap();
+        let mut inventory: ChangeEvidenceInventory =
+            [("article".into(), [("s".into(), "a quote".into())].into())].into();
+        let run = |sources: &ChangeEvidenceInventory| {
+            evaluate_change_with_evidence(
+                &change,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                ChangeEvaluationHost::default(),
+                None,
+                HtmlContentScope::Document,
+                sources,
+            )
+            .unwrap()
+        };
+        let verdict = run(&inventory);
+        assert_eq!(verdict.status, VerdictStatus::Pass);
+        let mut fresh = verdict.clone();
+        fresh.evaluated_at = "2026-01-02T00:00:00Z".into();
+        assert!(
+            verify_change_evidence_verdict(
+                &verdict,
+                &fresh,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Document,
+                &inventory
+            )
+            .is_ok()
+        );
+        fresh.checks[0].status = CheckStatus::Failed;
+        assert!(
+            verify_change_evidence_verdict(
+                &verdict,
+                &fresh,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Document,
+                &inventory
+            )
+            .is_err()
+        );
+        assert!(
+            verify_change_evidence_input_binding(
+                &verdict,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Document,
+                &inventory
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_offline_input_binding(&verdict, &change, &policy, 1024, 1024, false, None)
+                .is_err()
+        );
+        inventory
+            .get_mut("article")
+            .unwrap()
+            .insert("s".into(), "other".into());
+        assert!(
+            verify_change_evidence_input_binding(
+                &verdict,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Document,
+                &inventory
+            )
+            .is_err()
+        );
+        assert_eq!(run(&inventory).status, VerdictStatus::Fail);
+        inventory.insert("article".into(), BTreeMap::new());
+        assert_eq!(run(&inventory).status, VerdictStatus::NotChecked);
+        inventory.clear();
+        assert!(
+            evaluate_change_with_evidence(
+                &change,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                ChangeEvaluationHost::default(),
+                None,
+                HtmlContentScope::Document,
+                &inventory
+            )
+            .is_err()
+        );
+        inventory.insert("article".into(), [("s".into(), "x".repeat(1025))].into());
+        assert!(
+            evaluate_change_with_evidence(
+                &change,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                ChangeEvaluationHost::default(),
+                None,
+                HtmlContentScope::Document,
+                &inventory
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn change_evidence_composes_with_link_observations_without_legacy_binding() {
+        use sha2::{Digest, Sha256};
+        let mut change = change();
+        let source = "[abc](https://example.test)";
+        change.entries[0].media_type = "text/markdown".into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='combined'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n").unwrap();
+        let inventory: ChangeEvidenceInventory =
+            [("article".into(), [("s".into(), "quote".into())].into())].into();
+        let mut observer = |_: &str, destinations: &[String]| {
+            assert_eq!(destinations, &["https://example.test"]);
+            Ok(vec![
+                crate::content_gate::LinkReachabilityObservation::Reachable,
+            ])
+        };
+        let verdict = evaluate_change_with_evidence(
+            &change,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            ChangeEvaluationHost {
+                options: ChangeEvaluationOptions {
+                    link_observer: Some(&mut observer),
+                    plain_text_paragraphs: false,
+                },
+                extensions: None,
+            },
+            None,
+            HtmlContentScope::Document,
+            &inventory,
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::Pass);
+        assert!(
+            verify_change_evidence_input_binding(
+                &verdict,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Document,
+                &inventory
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_observed_link_input_binding(&verdict, &change, &policy, 1024, 1024, false, None)
+                .is_err()
+        );
     }
 
     #[test]

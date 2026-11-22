@@ -93,6 +93,12 @@ unavailable check may become a pass.
   referenced file and URI states using an explicit confined host provider and
   bounded byte comparisons. The default methods still refuse references; this
   does not fetch URIs or establish provenance, freshness or publication safety.
+  The in-process change evaluator also accepts an explicit, size-bounded
+  per-proposed-entity evidence inventory. It binds that inventory separately
+  from legacy offline verdicts and can compose it with host link observers and
+  collection context. Missing source entries remain not checked. This interface
+  does not yet extend the experimental portable candidate protocol or CLI, and
+  the host must establish source authenticity, freshness and publication safety.
   The in-process item and composed baselines and the incremental CLI accept a
   complete per-entity evidence inventory for existing evidence gates,
   re-evaluating an unchanged item when its evidence changes. This does not
