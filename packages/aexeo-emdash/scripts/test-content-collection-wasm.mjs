@@ -170,6 +170,21 @@ assert.equal(linkReport.gates[0].measurements.invalid_destinations, 1);
 assert.deepEqual(linkReport.source_locations, [{ gate_id: "destinations", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
 console.log("WASM link destination smoke test passed");
 
+// Keep malformed-link results aligned with the Markdown and HTML CLI adapters.
+const destinationFixture = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-destinations.json", import.meta.url), "utf8"));
+const destinationTelemetry = [];
+const destinationReport = await evaluateContent(destinationFixture.document, "links", { links: destinationFixture.preset }, undefined, (event) => destinationTelemetry.push(event));
+assert.equal(destinationReport.gates[0].status, "failed");
+assert.equal(destinationReport.gates[0].measurements.checked_destinations, destinationFixture.expected.checked_destinations);
+assert.equal(destinationReport.gates[0].measurements.invalid_destinations, destinationFixture.expected.invalid_destinations);
+assert.deepEqual(destinationReport.source_locations, [{ gate_id: "urls", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
+assert.ok(!JSON.stringify(destinationTelemetry).includes("bad%zz"));
+const unknownDestinations = await evaluateContent({ ...destinationFixture.document, body_capabilities: [] }, "links", { links: destinationFixture.preset });
+assert.equal(unknownDestinations.gates[0].status, "not_checked");
+assert.deepEqual(unknownDestinations.gates[0].findings, []);
+assert.deepEqual(unknownDestinations.source_locations, []);
+
+
 const headingPreset = `version=1
 name="headings"
 [[gates]]
