@@ -35,5 +35,6 @@ describe("component coverage presentation", () => {
     expect(view).toContain("askYourAi (block, 2)");
     expect(view).toContain("additional types omitted");
     expect(view).toContain("verifying the host renderer");
+    expect(view).toContain("Metadata coverage is unknown");
   });
 });

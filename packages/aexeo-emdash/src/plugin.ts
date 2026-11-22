@@ -1,5 +1,5 @@
 import { sandboxListCoverage, SETTINGS_LIST_STRUCTURE_KEY } from "./sandbox-list-coverage.js";
-import { cmsBodyCoverage, hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
+import { cmsBodyCoverage, cmsMetadataCoverage, hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
 import { isDescriptionField, validateMetadataFieldsByCollection, type CustomBlockMappings, type DescriptionField, type MetadataFields } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
@@ -767,6 +767,7 @@ export async function handleAfterSaveConfigured(
     route: document.route,
     findings: filtered,
     body_coverage: cmsBodyCoverage(document),
+    metadata_coverage: cmsMetadataCoverage(document),
     ...(document.body === undefined ? {} : { body_projected_blocks: document.body.length }),
     ...(adapted.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: adapted.meta.unmappedComponents }),
     ...(result.assessments?.[document.route] === undefined ? {} : { assessment: result.assessments[document.route] }),
@@ -1175,7 +1176,7 @@ export async function evaluateAndPersistAll(
     if (stored) countCmsProjection(projectionCounts, stored.document);
     await kv.set(findingsKey(route), {
       route, findings: filtered,
-      ...(stored === undefined ? {} : { body_coverage: cmsBodyCoverage(stored.document) }),
+      ...(stored === undefined ? {} : { body_coverage: cmsBodyCoverage(stored.document), metadata_coverage: cmsMetadataCoverage(stored.document) }),
       ...(stored?.document.body === undefined ? {} : { body_projected_blocks: stored.document.body.length }),
       ...(stored?.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: stored.meta.unmappedComponents }),
       ...(result.fragments?.[route] === undefined ? {} : { fragments: result.fragments[route] }),

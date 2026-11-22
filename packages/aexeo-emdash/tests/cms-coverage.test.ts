@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cmsBodyCoverage, cmsBodyCoverageNotice, hasCompleteBody, isCmsObservableFinding } from "../src/cms-coverage.js";
+import { cmsBodyCoverage, cmsBodyCoverageNotice, cmsMetadataCoverage, cmsMetadataCoverageNotice, hasCompleteBody, isCmsObservableFinding } from "../src/cms-coverage.js";
 import type { Finding } from "../src/types.js";
 
 const finding = (rule_id: string): Finding => ({ rule_id, message: "", path: "/a", line: 1, column: 1, severity: "warning", suggestion: null, scope: "page" });
@@ -20,6 +20,22 @@ describe("CMS observation boundaries", () => {
     expect(cmsBodyCoverageNotice("unavailable", -1)).not.toContain("projected content");
     expect(cmsBodyCoverageNotice("complete", 2)).toBeUndefined();
     expect(cmsBodyCoverageNotice(undefined)).toContain("unknown");
+  });
+
+  it("reports observed metadata independently from supplied values and rendering", () => {
+    const coverage = cmsMetadataCoverage({ route: "/a", title: "Fallback", description: "private value",
+      observed_metadata_fields: ["lang"], unavailable_metadata_fields: ["author"],
+      meta: { reviewed: "private date" }, description_source_observed: false });
+    expect(coverage).toEqual({ observed_fields: ["lang"], supplied_fields: ["reviewed"], unavailable_fields: ["author"],
+      description_source_observed: false, description_value_supplied: true });
+    const notice = cmsMetadataCoverageNotice(coverage);
+    expect(notice).toContain("value supplied; source mapping unverified");
+    expect(notice).toContain("unavailable custom fields: author");
+    expect(notice).not.toContain("private value");
+    expect(notice).not.toContain("private date");
+    expect(notice).toContain("does not establish rendered page metadata");
+    expect(cmsMetadataCoverageNotice({ ...coverage, description_source_observed: true, description_value_supplied: false })).toContain("source observed with no value supplied");
+    expect(cmsMetadataCoverageNotice(undefined)).toContain("unknown");
   });
 
   it("retains body findings only when body coverage is complete", () => {

@@ -272,6 +272,12 @@ not URLs, revision identifiers or provider errors. When called, the report sets
 `assurance.runtime_providers` to `revision_link_observer_invoked`; this does not
 authorize publication or imply other runtime providers ran.
 
+CMS save and refresh assessments record observed and unavailable metadata field
+names and whether the description source was observed or a value supplied.
+These details appear in both editor views without copying field values; older
+assessments report unknown coverage until reassessed. The data describes the
+assessment snapshot, not the rendered page.
+
 New revision reports include `input_coverage`: body coverage and capabilities,
 field-selection mode and configured fields, and whether a description source
 was observed or a value supplied. Configure `contentFieldsByCollection` and

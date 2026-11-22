@@ -28,7 +28,7 @@
 import * as React from "react";
 import { RevisionReviews } from "./RevisionReviews.js";
 import { useCallback, useEffect, useState } from "react";
-import { cmsBodyCoverageNotice, unmappedComponentsNotice } from "../cms-coverage.js";
+import { cmsBodyCoverageNotice, cmsMetadataCoverageNotice, unmappedComponentsNotice } from "../cms-coverage.js";
 import { describeGate, describeSourceMapping, summarizeGates } from "../assessment-display.js";
 import type { FindingsPayload, RouteSummary } from "../data-route.js";
 import type { DocumentAssessment } from "../plugin.js";
@@ -58,10 +58,10 @@ export function ContentAssessmentDetails({ assessment }: { assessment: Extract<D
   </details>;
 }
 
-export function BodyCoverageDetails({ route }: { route: Pick<RouteSummary, "body_coverage" | "body_projected_blocks" | "body_unmapped_components"> }): React.JSX.Element {
+export function BodyCoverageDetails({ route }: { route: Pick<RouteSummary, "body_coverage" | "body_projected_blocks" | "body_unmapped_components" | "metadata_coverage"> }): React.JSX.Element {
   const bodyNotice = cmsBodyCoverageNotice(route.body_coverage, route.body_projected_blocks);
   const componentsNotice = unmappedComponentsNotice(route.body_unmapped_components);
-  return <>{bodyNotice && <p>{bodyNotice}</p>}{componentsNotice && <p>{componentsNotice}</p>}</>;
+  return <>{bodyNotice && <p>{bodyNotice}</p>}{componentsNotice && <p>{componentsNotice}</p>}<p>{cmsMetadataCoverageNotice(route.metadata_coverage)}</p></>;
 }
 
 export function Findings(): React.JSX.Element {

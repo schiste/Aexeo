@@ -772,9 +772,13 @@ blocking=false
   await configured.hooks["content:afterSave"].handler({ content: mapped, collection: "pages", isNew: false }, host.ctx);
   assert.equal(host.store.get("document:/mapped").document.description, "Preferred");
   assert.equal(host.store.get("document:/mapped").document.description_source_observed, true);
+  assert.equal(host.store.get("findings:/mapped").metadata_coverage.description_source_observed, true);
+  assert.equal(host.store.get("findings:/mapped").metadata_coverage.description_value_supplied, true);
   host.items[0] = { ...mapped, data: { ...mapped.data, seo_description: "" } };
   await configured.routes.refresh.handler(host.ctx);
   assert.equal(host.store.get("document:/mapped").document.description, "Fallback");
+  assert.equal(host.store.get("findings:/mapped").metadata_coverage.description_source_observed, true);
+  assert.equal(host.store.get("findings:/mapped").metadata_coverage.description_value_supplied, true);
 }
 
 // Title fallbacks are useful display labels, not observed CMS title metadata.
