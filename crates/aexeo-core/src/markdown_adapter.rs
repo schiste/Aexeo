@@ -1841,6 +1841,32 @@ mod tests {
     }
 
     #[test]
+    fn arabic_reference_digits_preserve_prose_and_source_positions() {
+        for marker in ["[١٧]", "[۱۲، ۳]"] {
+            let source = format!("First.[{marker}](#reference-proof) Next sentence.");
+            let adapted = markdown_input_with_source_map_and_destinations("x", &source).unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            assert!(!text.contains(marker), "{text}");
+            assert_eq!(
+                adapted.source_map.literal_projection(),
+                Some(format!("First.{marker} Next sentence.\n").as_str())
+            );
+            let pos = crate::text_index::LineIndex::new(text)
+                .position(text, text.find("Next").unwrap())
+                .unwrap();
+            assert_eq!(
+                adapted
+                    .source_map
+                    .source_position(&source, text, pos.0, pos.1),
+                crate::text_index::LineIndex::new(&source)
+                    .position(&source, source.find("Next").unwrap())
+            );
+        }
+        let prose = markdown_input("x", "[المصدر ١٧](#reference-proof)").unwrap();
+        assert!(prose.text.unwrap().contains("المصدر ١٧"));
+    }
+
+    #[test]
     fn formatted_reference_labels_keep_source_positions_and_ordinary_links() {
         for source in [
             "In 2025.[*1*](#reference-source) Next sentence.",

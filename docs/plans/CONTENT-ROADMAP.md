@@ -65,6 +65,12 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   builds. Style checks do not establish factual accuracy, currency or translation
   quality; source verification and independent evaluation remain separate work.
 
+Reference markers linked to explicit reference targets can also use Arabic-Indic
+or Persian digits and an Arabic comma. Markdown, HTML and Portable Text preserve
+the literal label and source coordinates while excluding it from sentence
+measurements. This targeted support does not establish general Arabic language
+coverage, source validity, or translation quality.
+
 ### Preview rendered-page spot check, 2026-11-19
 
 Read-only comparison of the current CMS record for the evidence-room article

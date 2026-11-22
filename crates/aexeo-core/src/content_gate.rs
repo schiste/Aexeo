@@ -53,7 +53,7 @@ pub struct ContentContext {
 }
 
 /// Builds an unmasked literal projection only when a numeric reference occurs.
-/// Reference labels are ASCII and retain their byte offsets in the masked text.
+/// Supported reference labels retain their byte and character offsets in the projected text.
 #[derive(Default)]
 pub struct ReferenceLiteralProjection {
     original: Option<String>,
@@ -65,7 +65,13 @@ impl ReferenceLiteralProjection {
         let original = self.original.get_or_insert_with(String::new);
         original.push_str(&projected[self.copied..]);
         original.push_str(label);
-        projected.push_str(&" ".repeat(label.len()));
+        for ch in label.chars() {
+            match ch.len_utf8() {
+                1 => projected.push(' '),
+                2 => projected.push('\u{00a0}'),
+                n => projected.extend(std::iter::repeat_n(' ', n)),
+            }
+        }
         self.copied = projected.len();
     }
 
@@ -77,17 +83,25 @@ impl ReferenceLiteralProjection {
     }
 }
 
-fn literal_projection_matches(projected: &str, literal: &str) -> bool {
-    projected.len() == literal.len()
-        && projected
-            .bytes()
-            .zip(literal.bytes())
-            .all(|(masked, original)| {
-                masked == original
-                    || (masked == b' '
-                        && (original.is_ascii_digit()
-                            || matches!(original, b'[' | b']' | b',' | b'-')))
-            })
+pub(crate) fn literal_projection_matches(projected: &str, literal: &str) -> bool {
+    if projected.len() != literal.len() {
+        return false;
+    }
+    let mut masked = projected.chars();
+    let mut original = literal.chars();
+    loop {
+        match (masked.next(), original.next()) {
+            (None, None) => return true,
+            (Some(a), Some(b)) if a == b => (),
+            (Some(a), Some(b))
+                if reference_label_character(b)
+                    && a == if b.len_utf8() == 2 { '\u{00a0}' } else { ' ' } =>
+            {
+                ()
+            }
+            _ => return false,
+        }
+    }
 }
 
 // Accept only a complete calendar date; timestamps and implicit time zones are
@@ -204,13 +218,31 @@ pub fn numeric_reference_destination(href: &str) -> bool {
             .is_some_and(|suffix| !suffix.is_empty())
 }
 
+fn reference_digit(ch: char) -> bool {
+    ch.is_ascii_digit() || matches!(ch, '\u{0660}'..='\u{0669}' | '\u{06f0}'..='\u{06f9}')
+}
+
+fn reference_label_character(ch: char) -> bool {
+    reference_digit(ch) || matches!(ch, '[' | ']' | ',' | '،' | '-' | ' ')
+}
+
+/// Validate one contiguous fragment of a reference label. `Some` indicates
+/// supported characters; its value records whether the fragment contains a digit.
+/// A complete label must contain a digit across its fragments.
+pub fn numeric_reference_label_fragment(text: &str) -> Option<bool> {
+    let mut has_digit = false;
+    for ch in text.chars() {
+        if !reference_label_character(ch) {
+            return None;
+        }
+        has_digit |= reference_digit(ch);
+    }
+    Some(has_digit)
+}
+
 /// Whether an explicitly linked reference marker can be excluded from prose.
 pub(crate) fn numeric_reference_marker(href: &str, text: &str) -> bool {
-    numeric_reference_destination(href)
-        && text.bytes().any(|byte| byte.is_ascii_digit())
-        && text
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'[' | b']' | b',' | b'-' | b' '))
+    numeric_reference_destination(href) && numeric_reference_label_fragment(text) == Some(true)
 }
 
 // Recognize explicit HTTP(S) URLs without changing their text or crossing an

@@ -991,10 +991,7 @@ fn html_source_map_inner(
     // second time before accepting the same-length substitution so recovered
     // or ambiguous HTML cannot acquire guessed coordinates.
     let reference_mask_matches = output != projected
-        && output.len() == projected.len()
-        && output.bytes().zip(projected.bytes()).all(|(a, b)| {
-            a == b || (b == b' ' && (a.is_ascii_digit() || matches!(a, b'[' | b']' | b',' | b'-')))
-        })
+        && crate::content_gate::literal_projection_matches(projected, &output)
         && html_content_with_scope("", source, scope)
             .is_ok_and(|content| content.input.text.as_deref() == Some(projected));
     if !stack.is_empty()
@@ -1325,6 +1322,33 @@ mod tests {
                     .text
                     .unwrap()
                     .contains("2025")
+            );
+        }
+    }
+
+    #[test]
+    fn arabic_reference_digits_preserve_html_source_positions() {
+        for marker in ["[١٧]", "[۱۲، ۳]"] {
+            let source =
+                format!("<p>First.<a href='#reference-proof'>{marker}</a> Next sentence.</p>");
+            let (adapted, _, _, literal) =
+                html_content_with_literal_projection("x", &source, HtmlContentScope::Document)
+                    .unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            assert!(!text.contains(marker), "{text}");
+            assert_eq!(
+                literal.as_deref(),
+                Some(format!("First.{marker} Next sentence.\n").as_str())
+            );
+            let pos = crate::text_index::LineIndex::new(text)
+                .position(text, text.find("Next").unwrap())
+                .unwrap();
+            assert_eq!(
+                html_source_map(&source, text)
+                    .unwrap()
+                    .source_position(&source, text, pos.0, pos.1),
+                crate::text_index::LineIndex::new(&source)
+                    .position(&source, source.find("Next").unwrap())
             );
         }
     }
