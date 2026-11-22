@@ -157,7 +157,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `CARGO_TARGET_DIR` on a volume with enough free space; do not delete shared
   caches or another session's artifacts. The same wrapper-free retry applies
   when `sccache` fails with `path must be shorter than SUN_LEN` for a long
-  session temporary path. Confirm the retried gate completes.
+  session temporary path, or cannot create its temporary directory because a
+  previously used temporary path no longer exists. Confirm the retried gate
+  completes.
 - When adding a Cargo dependency, inspect the full `Cargo.lock` diff for
   unrelated resolution changes. Restore unrelated entries only after verifying
   a real `cargo check --locked` succeeds with the intended lockfile; metadata
