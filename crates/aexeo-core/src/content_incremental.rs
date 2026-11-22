@@ -2066,6 +2066,102 @@ mod tests {
     }
 
     #[test]
+    fn referenced_incremental_operations_match_inline_and_full_evaluation() {
+        use crate::content_gate_sources::{ConfinedContentFiles, ContentPhase};
+        use std::{io, io::Cursor, path::Path};
+        struct Provider(BTreeMap<(String, bool), Vec<u8>>);
+        impl ConfinedContentFiles for Provider {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &Path, _: &Path) -> io::Result<Self::Reader> {
+                Err(io::ErrorKind::Unsupported.into())
+            }
+            fn open_uri(
+                &mut self,
+                entity: &str,
+                phase: ContentPhase,
+                _: &str,
+            ) -> io::Result<Self::Reader> {
+                self.0
+                    .get(&(entity.to_owned(), phase == ContentPhase::After))
+                    .cloned()
+                    .map(Cursor::new)
+                    .ok_or_else(|| io::ErrorKind::NotFound.into())
+            }
+        }
+        let (snapshot, preset, mut change) = fixture();
+        let updated = item("a", "new source words", Some(vec![]));
+        let created = item("new", "created item", Some(vec![]));
+        let renamed = item("renamed", "renamed entry", Some(vec![]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        ));
+        change.entries.push(entry(
+            "b",
+            Operation::Delete,
+            Some(&snapshot.items[1]),
+            None,
+        ));
+        change
+            .entries
+            .push(entry("new", Operation::Create, None, Some(&created)));
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&snapshot.items[2]),
+            Some(&renamed),
+        );
+        rename.previous_entity_id = Some("c".into());
+        change.entries.push(rename);
+        let after = [updated, created, renamed];
+        let expected = full(
+            &overlay_candidate(&snapshot, &change, &after)
+                .unwrap()
+                .candidate,
+            &preset,
+        );
+        let mut provider = Provider(BTreeMap::new());
+        for entry in &mut change.entries {
+            for (is_after, state) in [(false, &mut entry.before), (true, &mut entry.after)] {
+                if let Some(state) = state {
+                    let source = state.inline.take().unwrap();
+                    provider
+                        .0
+                        .insert((entry.entity_id.clone(), is_after), source.into_bytes());
+                    state.uri = Some(format!(
+                        "https://example.org/{}/{}",
+                        entry.entity_id, is_after
+                    ));
+                }
+            }
+        }
+        let baseline = IncrementalBaseline::prepare(snapshot, preset).unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate_with_sources(&change, &after, &mut provider, 100, 1000)
+        else {
+            panic!("expected verified evaluation")
+        };
+        assert_eq!(
+            serde_json::to_value(reports).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!((evaluated, reused), (3, 2));
+        // Renames bind the before bytes to the old candidate identity but ask
+        // the host for the new change-entry identity and before phase.
+        provider.0.remove(&("renamed".into(), false));
+        assert!(matches!(
+            baseline.evaluate_with_sources(&change, &after, &mut provider, 100, 1000),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
+
+    #[test]
     fn incremental_equals_full_after_update_delete_create_and_rename() {
         let (snapshot, preset, mut change) = fixture();
         let updated = item("a", "new source words", Some(vec!["/c"]));
