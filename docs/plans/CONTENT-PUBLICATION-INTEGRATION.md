@@ -1,6 +1,6 @@
 # Aexeo–Aethyme publication integration
 
-Status snapshot: 20 November 2026. This is an active integration plan, not a
+Status snapshot: 22 November 2026. This is an active integration plan, not a
 claim that the publication design is complete. The v1 runner contract remains
 in force: `0` means pass, `1` means fail, `2` means not checked or invalid
 input, and other codes indicate errors. The runner must cross-check the
@@ -75,7 +75,8 @@ unavailable check may become a pass.
   referenced file and URI states using an explicit confined host provider and
   bounded byte comparisons. The default methods still refuse references; this
   does not fetch URIs or establish provenance, freshness or publication safety.
-  The incremental CLI accepts a host-authorized root and an explicit per-proposal
+  The incremental CLI ([#791](https://github.com/schiste/Aexeo/pull/791))
+  accepts a host-authorized root and an explicit per-proposal
   reference map, with aggregate telemetry and the same bounded verification.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with
@@ -116,7 +117,7 @@ unavailable check may become a pass.
 
 ## Aethyme status
 
-As observed on 20 November 2026,
+As observed on 22 November 2026,
 [Aethyme #1800](https://github.com/schiste/Aethyme/pull/1800) merged the v1
 subject precheck. [#1801](https://github.com/schiste/Aethyme/pull/1801) merged
 the native uncached runner, strict schema and decision-input comparison after
@@ -129,4 +130,11 @@ atomicity at its own boundary. [Aethyme #1865](https://github.com/schiste/Aethym
 requires explicit host-selected blocking check IDs. It is merged after its CI,
 local contract and fast-guard checks passed; tests exercised missing and
 downgraded checks and the real CLI.
-The proposed v2 envelope is not yet consumed by this runner.
+Aethyme also has an experimental v2 path: [#1870](https://github.com/schiste/Aethyme/pull/1870)
+compares independently supplied inputs offline; [#1871](https://github.com/schiste/Aethyme/pull/1871)
+supervises fresh evaluation and before/after snapshots; [#1908](https://github.com/schiste/Aethyme/pull/1908)
+compares host-supplied link evidence; and [#1939](https://github.com/schiste/Aethyme/pull/1939)
+checks resolved-policy coverage. These commands are separate from the v1 broker
+gate, remain experimental, and do not authorize publication. They do not establish
+input authenticity, inventory completeness, source freshness or an atomic
+publication boundary. The host must independently provide those guarantees.
