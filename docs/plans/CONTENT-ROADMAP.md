@@ -844,6 +844,9 @@ is safe or that a heuristic establishes quality. Unavailable inputs remain
    static HTML and EmDash. A configured initial level handles fragments under
    a template heading; unobserved or incomplete levels stay `not_checked`.
    Extend parity and real-host validation before making it a default.
+   A shared malformed-destination fixture exercises Markdown, static HTML and
+   EmDash/WASM findings, source locations and aggregate-only telemetry. The
+   EmDash case also checks that unavailable links remain not checked.
 5. **Make agent loops practical.** Ship discoverable skills and a single-item
    lint workflow with structured diagnostics, localized safe fixes and bounded
    retries. Re-evaluate after changes; do not treat a model's approval as ground

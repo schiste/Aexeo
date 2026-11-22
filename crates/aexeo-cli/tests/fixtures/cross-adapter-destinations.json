@@ -1,0 +1,50 @@
+{
+  "preset": "version=1\nname='links'\n[[gates]]\nid='urls'\nkind='link_destinations'\nallowed_schemes=['https']\n",
+  "markdown": "[bad](/bad%zz) [good](/good%20path)",
+  "html": "<p><a href=\"/bad%zz\">bad</a> <a href=\"/good%20path\">good</a></p>",
+  "document": {
+    "route": "/links",
+    "title": "Links",
+    "body": [
+      {
+        "_type": "block",
+        "children": [
+          {
+            "_type": "span",
+            "text": "bad",
+            "marks": [
+              "bad"
+            ]
+          },
+          {
+            "_type": "span",
+            "text": " "
+          },
+          {
+            "_type": "span",
+            "text": "good",
+            "marks": [
+              "good"
+            ]
+          }
+        ],
+        "markDefs": [
+          {
+            "_key": "bad",
+            "_type": "link",
+            "href": "/bad%zz"
+          },
+          {
+            "_key": "good",
+            "_type": "link",
+            "href": "/good%20path"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "checked_destinations": 2,
+    "invalid_destinations": 1
+  }
+}
