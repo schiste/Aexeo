@@ -278,6 +278,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `EPERM`; do not interpret that alone as proof of a surviving process. Avoid
   signaling a recycled group ID, and never treat ambiguous cleanup as success.
 - For candidate verdicts with link evidence, test both production and independent verification with inline, file and URI states. Check that wrong host bytes, independent bytes and candidate content are rejected; support in the producer alone does not establish verifier interoperability.
+- For cross-process interoperability tests, build each executable from the
+  exact source revision under test, or verify its build provenance before
+  reusing it. A positive case can pass on an older binary that lacks other
+  protocol options; report coverage only for the revisions actually tested.
 - For optional native comparator interoperability tests, confirm the selected Aethyme executable actually supports the experimental command with a valid positive case. If it does not, report native coverage as unavailable separately from the Python comparator results; do not infer a protocol failure or claim native coverage. For a new rejection regression, when a known prior executable is available, also run the same valid and tampered inputs against it: confirm the valid case succeeds and the tampered case fails the test for the expected reason. This negative control shows the regression detects the original defect rather than a setup error.
 - For receipt or manifest comparisons, test a supplied artifact changing
   between verification passes, and ensure different input snapshots are rejected.
