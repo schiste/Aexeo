@@ -237,7 +237,9 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         if let Some(path) = maps.get(&index) {
             let root = root.ok_or_else(|| anyhow::anyhow!("content root is required"))?;
             configure_host_content_map(
-                provider.as_mut().expect("provider for root"),
+                provider
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("content provider unavailable"))?,
                 Path::new(path),
                 Path::new(root),
                 &proposal.change,
