@@ -1069,3 +1069,34 @@ fn evidence_composes_with_confined_file_states() {
         "not_checked"
     );
 }
+
+#[test]
+fn editorial_pacing_incremental_requires_current_composition() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("pacing");
+    input["preset_sources"] = json!({"pacing":"version=1\nname='pacing'\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=4}]}\n"});
+    input["base_evidence"] = json!({"b":{"composition":"{\"hook\":\"abc\"}"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["evidence"] = json!({"a":{"composition":"{\"hook\":\"abc\"}"},"b":{"composition":"{\"hook\":\"abc\"}"}});
+    }
+    input["proposals"][0]["evidence"]["b"]["composition"] = json!("{ \"hook\": \"abc\" }");
+    let output = run(&input, &["--telemetry"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows = lines(&output);
+    assert_eq!(rows[0]["result"]["evaluated"], 2);
+    assert_eq!(rows[1]["result"]["evaluated"], 1);
+    assert_eq!(rows[1]["result"]["reused"], 1);
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["base_evidence_supplied"], true);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("abc"));
+    input["proposals"][0]["evidence"]["b"]["composition"] = json!("{\"hook\":\"stale\"}");
+    let output = run(&input, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(lines(&output)[0]["result"]["status"], "not_checked");
+}

@@ -153,7 +153,8 @@ fn is_item_metadata_gate(gate: &ContentGate) -> bool {
 fn is_evidence_gate(gate: &ContentGate) -> bool {
     matches!(
         gate,
-        ContentGate::EvidenceAnchors { .. }
+        ContentGate::EditorialPacing { .. }
+            | ContentGate::EvidenceAnchors { .. }
             | ContentGate::StructuredFact { .. }
             | ContentGate::EvidenceReview { .. }
             | ContentGate::EvidenceReviewAge { .. }
@@ -1658,6 +1659,89 @@ mod tests {
         missing.remove("b");
         assert!(matches!(
             baseline.evaluate_with_link_observations(&change, &[next], &missing),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
+
+    #[test]
+    fn editorial_pacing_reuses_only_matching_source_bound_snapshots() {
+        let (mut snapshot, _, mut change) = fixture();
+        let a = item("a", "alpha", None);
+        let b = item("b", "alpha", None);
+        snapshot.items = vec![a.clone(), b.clone()];
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='pacing'\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=4}]}\n"
+        ).unwrap();
+        let original = BTreeMap::from([("composition".into(), r#"{"hook":"alpha"}"#.into())]);
+        let mut evidence = BTreeMap::from([
+            ("a".into(), original.clone()),
+            ("b".into(), original.clone()),
+        ]);
+        let baseline = IncrementalBaseline::prepare_adapted_with_evidence(
+            snapshot,
+            preset.clone(),
+            crate::html_content_adapter::HtmlContentScope::Document,
+            None,
+            None,
+            evidence.clone(),
+        )
+        .unwrap();
+        let next = item("a", "bravo", None);
+        change.entries = vec![entry("a", Operation::Update, Some(&a), Some(&next))];
+        evidence
+            .get_mut("a")
+            .unwrap()
+            .insert("composition".into(), r#"{"hook":"bravo"}"#.into());
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate_with_evidence(&change, std::slice::from_ref(&next), None, &evidence)
+        else {
+            panic!("matching snapshots must be assessed")
+        };
+        assert_eq!((evaluated, reused), (1, 1));
+        for item in [&next, &b] {
+            let full = preset
+                .evaluate(&ContentInput {
+                    id: item.entity_id.clone(),
+                    text: Some(item.source.clone()),
+                    source_text: Some(item.source.clone()),
+                    evidence_sources: evidence.get(&item.entity_id).cloned(),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&reports[&item.entity_id]).unwrap(),
+                serde_json::to_value(&full).unwrap(),
+            );
+            assert_eq!(full.gates[0].status, GateStatus::Failed);
+        }
+        // Semantically equivalent but byte-different evidence still invalidates reuse.
+        evidence
+            .get_mut("b")
+            .unwrap()
+            .insert("composition".into(), r#"{ "hook": "alpha" }"#.into());
+        assert!(matches!(
+            baseline.evaluate_with_evidence(&change, std::slice::from_ref(&next), None, &evidence),
+            IncrementalEvaluation::Evaluated {
+                evaluated: 2,
+                reused: 0,
+                ..
+            }
+        ));
+        evidence.get_mut("b").unwrap().clear();
+        assert!(matches!(
+            baseline.evaluate_with_evidence(&change, std::slice::from_ref(&next), None, &evidence),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        evidence
+            .get_mut("b")
+            .unwrap()
+            .insert("composition".into(), r#"{"hook":"stale"}"#.into());
+        assert!(matches!(
+            baseline.evaluate_with_evidence(&change, &[next], None, &evidence),
             IncrementalEvaluation::NotChecked { .. }
         ));
     }
