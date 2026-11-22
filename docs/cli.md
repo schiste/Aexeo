@@ -195,6 +195,9 @@ Options:
       --static-url-map <static-url-map>
           JSON map of static relative paths to public URLs
 
+      --compact
+          Emit compact JSON instead of pretty-printed JSON
+
       --telemetry
           Emit aggregate timings and counts as JSON on stderr
 
