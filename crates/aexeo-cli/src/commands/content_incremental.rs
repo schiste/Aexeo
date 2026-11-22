@@ -1,12 +1,15 @@
 //! Bounded, experimental batch access to the in-process incremental evaluator.
-use super::common::required_arg;
+use super::{
+    common::required_arg,
+    content_change::{HostFiles, configure_host_content_map},
+};
 use aexeo_contracts::{
     content_gate_change_validation::{parse_strict_validated_change, parse_unique_json_value},
     content_gate_protocol::Change,
 };
 use aexeo_core::{
     content_candidate::{CandidateItem, CandidateSnapshot},
-    content_gate::{ContentGate, ContentPreset},
+    content_gate::{ContentGate, ContentPreset, MAX_CONTENT_INPUT_BYTES},
     content_incremental::{
         CollectionBaseline, CollectionEvaluation, ComposedBaseline, IncrementalBaseline,
         IncrementalEvaluation, NotChecked,
@@ -21,11 +24,13 @@ use std::{
     collections::BTreeMap,
     fs::File,
     io::{self, Read, Write},
+    path::Path,
 };
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ITEMS: usize = 256;
 const MAX_PROPOSALS: usize = 16;
+const MAX_TOTAL_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +209,51 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     {
         parse_strict_validated_change(&serde_json::to_vec(&proposal["change"])?)?;
     }
+    // Map paths are host-selected command arguments, never read from the
+    // untrusted batch. Validate all maps before producing any result rows.
+    let root = args.get_one::<String>("content-root").map(String::as_str);
+    let mut maps = BTreeMap::new();
+    if let Some(values) = args.get_many::<String>("host-content-map") {
+        for value in values {
+            let (index, path) = value.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("invalid proposal content map; expected INDEX=PATH")
+            })?;
+            let index: usize = index
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid proposal content map index"))?;
+            if index >= batch.proposals.len()
+                || path.is_empty()
+                || maps.insert(index, path).is_some()
+            {
+                bail!("invalid or duplicate proposal content map index");
+            }
+        }
+    }
+    let mut providers = Vec::with_capacity(batch.proposals.len());
+    for (index, proposal) in batch.proposals.iter().enumerate() {
+        let mut provider = root
+            .map(|root| HostFiles::new(Some(root), None))
+            .transpose()?;
+        if let Some(path) = maps.get(&index) {
+            let root = root.ok_or_else(|| anyhow::anyhow!("content root is required"))?;
+            configure_host_content_map(
+                provider.as_mut().expect("provider for root"),
+                Path::new(path),
+                Path::new(root),
+                &proposal.change,
+                None,
+            )?;
+        }
+        providers.push(provider);
+    }
+    let referenced_states = batch
+        .proposals
+        .iter()
+        .flat_map(|p| &p.change.entries)
+        .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
+        .flatten()
+        .filter(|state| state.inline.is_none())
+        .count();
     let mut sources = builtin_content_presets();
     sources.extend(batch.preset_sources);
     let preset = resolve_content_preset(&batch.preset, &sources)?;
@@ -217,12 +267,32 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 true,
             ),
             Ok(Baseline::Items(baseline)) => {
-                let result = baseline.evaluate(&proposal.change, &proposal.after);
+                let result = if let Some(provider) = providers[index].as_mut() {
+                    baseline.evaluate_with_sources(
+                        &proposal.change,
+                        &proposal.after,
+                        provider,
+                        MAX_CONTENT_INPUT_BYTES,
+                        MAX_TOTAL_CONTENT_BYTES,
+                    )
+                } else {
+                    baseline.evaluate(&proposal.change, &proposal.after)
+                };
                 let unchecked = totals.items(&result);
                 (serde_json::to_value(result)?, unchecked)
             }
             Ok(Baseline::Collection(baseline)) => {
-                let result = baseline.evaluate(&proposal.change, &proposal.after);
+                let result = if let Some(provider) = providers[index].as_mut() {
+                    baseline.evaluate_with_sources(
+                        &proposal.change,
+                        &proposal.after,
+                        provider,
+                        MAX_CONTENT_INPUT_BYTES,
+                        MAX_TOTAL_CONTENT_BYTES,
+                    )
+                } else {
+                    baseline.evaluate(&proposal.change, &proposal.after)
+                };
                 let unchecked = totals.collection(&result);
                 (
                     serde_json::json!({"status":"collection", "collection":result}),
@@ -230,7 +300,17 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 )
             }
             Ok(Baseline::Composed(baseline)) => {
-                let result = baseline.evaluate(&proposal.change, &proposal.after);
+                let result = if let Some(provider) = providers[index].as_mut() {
+                    baseline.evaluate_with_sources(
+                        &proposal.change,
+                        &proposal.after,
+                        provider,
+                        MAX_CONTENT_INPUT_BYTES,
+                        MAX_TOTAL_CONTENT_BYTES,
+                    )
+                } else {
+                    baseline.evaluate(&proposal.change, &proposal.after)
+                };
                 // Evaluate both sides even when one is unchecked: preserve all observed diagnostics.
                 let item_unchecked = totals.items(&result.items);
                 let collection_unchecked = totals.collection(&result.collection);
@@ -251,7 +331,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
         );
     }
     Ok(if totals.not_checked != 0 {

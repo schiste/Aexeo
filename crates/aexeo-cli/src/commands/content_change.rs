@@ -48,17 +48,17 @@ type PlatformProvider = aexeo_core::content_gate_sources::LinuxConfinedContentFi
 #[cfg(target_os = "macos")]
 type PlatformProvider = aexeo_core::content_gate_sources::MacosConfinedContentFiles;
 
-struct HostFiles {
+pub(super) struct HostFiles {
     uri_root: Option<PathBuf>,
     uri_paths: BTreeMap<(String, bool, String), PathBuf>,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    verdict_path: PathBuf,
+    verdict_path: Option<PathBuf>,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     provider: Option<PlatformProvider>,
 }
 
 impl HostFiles {
-    fn new(root: Option<&str>, verdict_path: &Path) -> Result<Self> {
+    pub(super) fn new(root: Option<&str>, verdict_path: Option<&Path>) -> Result<Self> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let provider = root
@@ -67,7 +67,7 @@ impl HostFiles {
                 .user_context("opening authorized content root")?;
             Ok(Self {
                 provider,
-                verdict_path: verdict_path.to_owned(),
+                verdict_path: verdict_path.map(Path::to_owned),
                 uri_root: None,
                 uri_paths: BTreeMap::new(),
             })
@@ -92,8 +92,9 @@ impl ConfinedContentFiles for HostFiles {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(provider) = &mut self.provider {
             let file = provider.open(root, relative)?;
-            if paths_alias(&root.join(relative), &self.verdict_path)
-                || metadata_aliases(&file.metadata()?, &self.verdict_path)
+            if let Some(output) = &self.verdict_path
+                && (paths_alias(&root.join(relative), output)
+                    || metadata_aliases(&file.metadata()?, output))
             {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -141,15 +142,17 @@ enum HostContentMapPhase {
     After,
 }
 
-fn configure_host_content_map(
+pub(super) fn configure_host_content_map(
     provider: &mut HostFiles,
     map_path: &Path,
     root: &Path,
     change: &aexeo_contracts::content_gate_protocol::Change,
-    output: &Path,
+    output: Option<&Path>,
 ) -> Result<()> {
     use std::path::Component;
-    protect_input(map_path, output, "host content map")?;
+    if let Some(output) = output {
+        protect_input(map_path, output, "host content map")?;
+    }
     if !root.is_absolute() {
         user_bail!("content root must be absolute");
     }
@@ -206,7 +209,9 @@ fn configure_host_content_map(
         {
             user_bail!("invalid host content map path");
         }
-        protect_input(&item.path, output, "host content")?;
+        if let Some(output) = output {
+            protect_input(&item.path, output, "host content")?;
+        }
         if let Some(file) = &state.file {
             if change.content_root.as_deref().map(Path::new) != Some(root)
                 || relative != Path::new(file)
@@ -392,7 +397,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         .transpose()?;
     let mut provider = HostFiles::new(
         args.get_one::<String>("content-root").map(String::as_str),
-        Path::new(&verdict_path),
+        Some(Path::new(&verdict_path)),
     )?;
     if let Some(path) = args.get_one::<String>("host-content-map") {
         let root = args
@@ -403,7 +408,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             Path::new(path),
             Path::new(root),
             &change,
-            Path::new(&verdict_path),
+            Some(Path::new(&verdict_path)),
         )?;
     }
     let snapshots = args
@@ -1382,7 +1387,7 @@ fn export_link_observations(
     )?;
     let mut provider = HostFiles::new(
         args.get_one::<String>("content-root").map(String::as_str),
-        output,
+        Some(output),
     )?;
     evaluate_change_with_collection_and_html_scope(
         change,
