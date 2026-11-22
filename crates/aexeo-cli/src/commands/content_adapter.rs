@@ -112,13 +112,13 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
             "invalid block boundaries"
         );
     }
-    let index = projection.paragraphs.as_ref().map(|_| LineIndex::new(text));
     let mut previous_end = 0;
     let mut classified = Vec::new();
     let mut all_classified = true;
     let paragraphs = projection
         .paragraphs
         .map(|items| -> Result<_> {
+            let index = LineIndex::new(text);
             let mut result = Vec::with_capacity(items.len());
             for item in items {
                 ensure!(
@@ -129,8 +129,6 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
                     .get(item.start..item.end)
                     .ok_or_else(|| anyhow::anyhow!("invalid paragraph range"))?;
                 let (line, column) = index
-                    .as_ref()
-                    .expect("paragraph index")
                     .position(text, item.start)
                     .ok_or_else(|| anyhow::anyhow!("invalid paragraph position"))?;
                 previous_end = item.end;
