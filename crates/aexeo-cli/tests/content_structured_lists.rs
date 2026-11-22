@@ -52,6 +52,79 @@ fn structured_list_gate_checks_markdown_and_withholds_unknown_structure() {
 }
 
 #[test]
+fn list_measurements_are_reported_only_for_observed_structure() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='lists'\n[[gates]]\nid='review'\nkind='list_item_count'\nflagged_counts=[3]\n").unwrap();
+    let article = dir.path().join("article");
+    for (format, content, expected) in [
+        (
+            "markdown",
+            "- one\n- two\n- three\n\nBetween.\n\n- a\n- b\n",
+            Some((2, 1, 3)),
+        ),
+        ("markdown", "Only prose.", Some((0, 0, 0))),
+        ("text", "Only prose.", None),
+    ] {
+        fs::write(&article, content).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--input-format",
+                format,
+                "--preset",
+                "custom",
+                "--preset-source",
+                &format!("custom={}", preset.display()),
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let metrics = &report["gates"][0]["measurements"];
+        match expected {
+            Some((observed, matching, largest)) => {
+                assert_eq!(metrics["lists_observed"], observed);
+                assert_eq!(metrics["lists_matching_counts"], matching);
+                assert_eq!(metrics["largest_list_items"], largest);
+                let text = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+                    .args([
+                        "content",
+                        article.to_str().unwrap(),
+                        "--input-format",
+                        format,
+                        "--preset",
+                        "custom",
+                        "--preset-source",
+                        &format!("custom={}", preset.display()),
+                        "--format",
+                        "text",
+                    ])
+                    .output()
+                    .unwrap();
+                assert_eq!(text.status.code(), Some(0));
+                let text = String::from_utf8(text.stdout).unwrap();
+                assert!(text.contains(&format!("lists_matching_counts: {matching}")));
+                assert!(text.contains(&format!("largest_list_items: {largest}")));
+            }
+            None => {
+                assert_eq!(report["gates"][0]["status"], "not_checked");
+                assert!(metrics.get("lists_matching_counts").is_none());
+                assert!(metrics.get("largest_list_items").is_none());
+            }
+        }
+    }
+}
+
+#[test]
 fn list_findings_identify_each_offending_markdown_list() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");

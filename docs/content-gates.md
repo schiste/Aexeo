@@ -1583,6 +1583,12 @@ blocking = false
 
 The Markdown CLI and content-change evaluator supply observations when the list structure is fully visible. The single-content CLI also observes supported static HTML lists in the selected document or main scope; it checks the source structure against the parsed HTML projection and reports `not_checked` when it cannot establish complete list structure. Embedded HTML in Markdown, plain text, unsupported adapters and incomplete snapshots remain `not_checked`; a host adapter JSON can supply explicit complete list observations; an observed document without lists passes. Markdown and supported HTML CLI source locations, and Markdown content-change finding locations, identify the original list openings. Static HTML does not establish browser-rendered visibility or page completeness. Hosts may supply complete observations through the additive `evaluate_with_structured_lists` API. For Rust EmDash hosts, `evaluate_content_with_list_completeness` accepts an explicit `list_structure_complete` assertion; set it only when all list blocks, including custom components, are represented in order. Existing CMS calls make no such assertion and therefore report this gate as `not_checked`. Observations are advisory. The projected finding coordinates still use a placeholder; inspect the separate CLI source locations or change-verdict locations for precise list openings. EmDash reports can identify the first nonempty span of the list-opening block; when that block has no text, the finding remains unmapped. These coordinates refer only to the evaluated snapshot.
 
+When complete list structure is observed, the gate reports `lists_observed`,
+`lists_matching_counts` and `largest_list_items`. Matching counts include all
+observations even when the finding limit truncates the displayed findings; the
+largest count is zero for an observed document without lists. These observed
+measurements are omitted when list structure is unavailable or invalid.
+
 To opt in through the configured EmDash plugin, set `contentPreset.listStructureCompleteByCollection = ["blog_posts"]` only after verifying that the host projects every list block in those collections in order, including any custom components. A missing body or incomplete existing body capabilities still reports `not_checked`. This assertion defaults to off. Direct WASM hosts can set `list_structure_complete: true` on the document under the same condition.
 ### Repeated transition openings
 

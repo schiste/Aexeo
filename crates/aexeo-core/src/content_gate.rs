@@ -2549,8 +2549,12 @@ impl ContentPreset {
                             }) =>
                     {
                         measurements.insert("lists_observed".into(), lists.len());
+                        let mut matching = 0;
+                        let mut largest = 0;
                         for (index, list) in lists.iter().enumerate() {
+                            largest = largest.max(list.item_count);
                             if flagged_counts.contains(&list.item_count) {
+                                matching += 1;
                                 emit(
                                     format!(
                                         "List {} has {} direct items; review whether this structure suits the content",
@@ -2562,6 +2566,8 @@ impl ContentPreset {
                                 );
                             }
                         }
+                        measurements.insert("lists_matching_counts".into(), matching);
+                        measurements.insert("largest_list_items".into(), largest);
                     }
                     Some(_) => {
                         reason = Some("list observations are invalid or exceed the limit".into())
@@ -4780,6 +4786,94 @@ impl ContentPreset {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn list_measurements_cover_all_observations_without_fabricating_unavailable_counts() {
+        use crate::markdown_adapter::StructuredList;
+        let preset = ContentPreset::from_toml("version=1\nname='lists'\n[[gates]]\nid='list'\nkind='list_item_count'\nflagged_counts=[3,5]\n").unwrap();
+        let input = ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        };
+        let capabilities = ContentEvaluationContext::default();
+        let evaluate = |lists: Option<&[StructuredList]>| {
+            preset
+                .evaluate_with_structured_lists(
+                    &input,
+                    &capabilities,
+                    None,
+                    None,
+                    true,
+                    None,
+                    lists,
+                )
+                .unwrap()
+        };
+        let unavailable = evaluate(None);
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            !unavailable.gates[0]
+                .measurements
+                .contains_key("lists_matching_counts")
+        );
+        assert!(
+            !unavailable.gates[0]
+                .measurements
+                .contains_key("largest_list_items")
+        );
+
+        let invalid_lists = [StructuredList {
+            item_count: 0,
+            depth: 1,
+            line: 1,
+            column: 1,
+        }];
+        let invalid = evaluate(Some(&invalid_lists));
+        assert_eq!(invalid.gates[0].status, GateStatus::NotChecked);
+        assert!(!invalid.gates[0].measurements.contains_key("lists_observed"));
+        assert!(
+            !invalid.gates[0]
+                .measurements
+                .contains_key("lists_matching_counts")
+        );
+        assert!(
+            !invalid.gates[0]
+                .measurements
+                .contains_key("largest_list_items")
+        );
+
+        let empty = evaluate(Some(&[]));
+        assert_eq!(empty.gates[0].status, GateStatus::Passed);
+        assert_eq!(empty.gates[0].measurements["lists_observed"], 0);
+        assert_eq!(empty.gates[0].measurements["lists_matching_counts"], 0);
+        assert_eq!(empty.gates[0].measurements["largest_list_items"], 0);
+
+        let mut lists = vec![
+            StructuredList {
+                item_count: 3,
+                depth: 1,
+                line: 1,
+                column: 1
+            };
+            MAX_FINDINGS_PER_GATE + 3
+        ];
+        lists.push(StructuredList {
+            item_count: 8,
+            depth: 1,
+            line: 1,
+            column: 1,
+        });
+        let report = evaluate(Some(&lists));
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["lists_observed"], lists.len());
+        assert_eq!(
+            report.gates[0].measurements["lists_matching_counts"],
+            MAX_FINDINGS_PER_GATE + 3
+        );
+        assert_eq!(report.gates[0].measurements["largest_list_items"], 8);
+        assert_eq!(report.gates[0].findings.len(), MAX_FINDINGS_PER_GATE);
+        assert_eq!(report.gates[0].total_findings(), MAX_FINDINGS_PER_GATE + 3);
+    }
+
     #[test]
     fn structured_list_gate_requires_complete_observations() {
         let preset = ContentPreset::from_toml("version=1\nname='lists'\n[[gates]]\nid='list'\nkind='list_item_count'\nflagged_counts=[3]\n").unwrap();
