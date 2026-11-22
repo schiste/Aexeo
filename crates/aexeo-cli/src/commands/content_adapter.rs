@@ -57,6 +57,15 @@ pub(super) struct HostSourceMap {
     heading_offsets: Option<Vec<Option<usize>>>,
     #[serde(default)]
     link_offsets: Option<Vec<Option<usize>>>,
+    #[serde(default)]
+    list_anchors: Option<Vec<Option<HostListAnchor>>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostListAnchor {
+    source_start: usize,
+    text: String,
 }
 
 #[derive(Deserialize)]
@@ -73,6 +82,7 @@ impl HostSourceMap {
         projected: &str,
         headings: Option<&[String]>,
         destinations: Option<&[String]>,
+        lists: Option<&[List]>,
     ) -> Result<()> {
         ensure!(
             self.spans.len() <= MAX_OBSERVATIONS,
@@ -146,7 +156,68 @@ impl HostSourceMap {
                 }
             }
         }
+        if let Some(anchors) = &self.list_anchors {
+            let lists = lists.ok_or_else(|| anyhow::anyhow!("list anchors require lists"))?;
+            ensure!(
+                anchors.len() == lists.len(),
+                "list anchors must match lists"
+            );
+            let mut previous_end = 0;
+            for anchor in anchors.iter().flatten() {
+                let end = anchor
+                    .source_start
+                    .checked_add(anchor.text.len())
+                    .ok_or_else(|| anyhow::anyhow!("invalid list anchor range"))?;
+                ensure!(
+                    !anchor.text.is_empty()
+                        && anchor.source_start >= previous_end
+                        && self.source_text.get(anchor.source_start..end)
+                            == Some(anchor.text.as_str()),
+                    "list anchors must be ordered, nonoverlapping and match source bytes"
+                );
+                previous_end = end;
+            }
+        }
         Ok(())
+    }
+
+    pub(super) fn list_positions(
+        &self,
+        source_index: &LineIndex,
+        lists: Option<&[StructuredList]>,
+        gate: &aexeo_core::content_gate::ContentGate,
+        result: &aexeo_core::content_gate::ContentGateResult,
+    ) -> Option<Vec<Option<(usize, usize)>>> {
+        if result.findings.is_empty() {
+            return None;
+        }
+        let anchors = self.list_anchors.as_deref()?;
+        let lists = lists?;
+        if anchors.len() != lists.len() {
+            return None;
+        }
+        let indices = aexeo_core::markdown_adapter::list_finding_indices(lists, gate, result)?;
+        Some(
+            indices
+                .into_iter()
+                .take(result.findings.len())
+                .map(|index| {
+                    source_index.position(
+                        &self.source_text,
+                        anchors.get(index)?.as_ref()?.source_start,
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub(super) fn has_list_anchors(&self) -> bool {
+        self.list_anchors.is_some()
+    }
+    pub(super) fn list_anchor_count(&self) -> usize {
+        self.list_anchors
+            .as_ref()
+            .map_or(0, |anchors| anchors.iter().flatten().count())
     }
 
     pub(super) fn link_positions(
@@ -349,6 +420,7 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
             text,
             projection.headings.as_deref(),
             projection.link_destinations.as_deref(),
+            projection.lists.as_deref(),
         )?;
     }
     if let Some(ends) = &projection.block_ends {

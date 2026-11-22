@@ -528,11 +528,10 @@ array supplies one UTF-8 byte offset or null per heading, in heading order.
 Non-null offsets must identify nonempty, byte-identical heading text in ordered,
 nonoverlapping source ranges. Heading-length, duplicate-heading and hierarchy
 findings can then receive positions for those headings; null entries stay
-unmapped. An optional `link_offsets` array similarly supplies one UTF-8 byte offset or null per link destination, in occurrence order. Non-null offsets must match the nonempty destination bytes in ordered, nonoverlapping source ranges. Invalid-destination and externally observed unreachable-link findings can then receive positions; null entries remain unmapped. Encoded or otherwise different source bytes must be left null. Other structural findings remain unmapped. The report labels these
+unmapped. An optional `link_offsets` array similarly supplies one UTF-8 byte offset or null per link destination, in occurrence order. Non-null offsets must match the nonempty destination bytes in ordered, nonoverlapping source ranges. Invalid-destination and externally observed unreachable-link findings can then receive positions; null entries remain unmapped. Encoded or otherwise different source bytes must be left null. Optional `list_anchors` supplies one null or `{source_start, text}` per observed list, including nested lists, in occurrence order. Non-null anchors must be nonempty, ordered, nonoverlapping and byte-identical to `source_text` at the UTF-8 byte offset `source_start`. List-count findings then receive positions for mapped lists. The host must select an appropriate anchor within each corresponding list; the byte check does not establish list membership. The report labels these
 positions `host_supplied_source_text`: matching bytes cannot
 prove that the host selected the correct occurrence, actual source or snapshot.
-The host must establish that correspondence and provenance. List finding
-positions remain placeholders; finding coordinates may refer to projected text
+The host must establish that correspondence and provenance. Finding coordinates may refer to projected text
 or be placeholders, never to the JSON file. `--fix` and `--export-adapter-input` are unavailable
 for this format. Reports bind the original JSON bytes, including its observations, in their input fingerprint.
 Feedback capture, corpus export and replay accept this format with the exact JSON

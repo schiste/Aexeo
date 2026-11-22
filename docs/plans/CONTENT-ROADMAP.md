@@ -862,7 +862,7 @@ findings eligible for source positions, including when no trustworthy mapping is
 available. Text reports summarize coverage when positional findings exist. The same aggregate counts appear in opt-in CLI telemetry; they omit
 truncated findings and carry no source content. EmDash uses the same gate
 eligibility definition. A mapped position identifies only the evaluated snapshot.
-Host adapter JSON can optionally map byte-identical link destinations, including partial coverage; the host is responsible for the source snapshot and occurrence identity.
+Host adapter JSON can optionally map byte-identical link destinations and list anchors, including partial coverage; the host is responsible for the source snapshot and occurrence identity.
 For scoped HTML, simple complete documents with a doctype and head can map
 positions within `main`, including conservative comments, linked head resources
 and raw-text head elements with literal `<` when no ambiguous HTML escape or
