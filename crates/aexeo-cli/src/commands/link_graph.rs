@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{self, Write};
 use std::time::Instant;
 
 use aexeo_core::error::UserContext;
@@ -71,8 +72,27 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
     if matches.get_flag("telemetry") {
         emit_link_graph_telemetry(&report, started);
     }
-    println!("{}", serde_json::to_string_pretty(&report)?);
+    let stdout = io::stdout();
+    let writer = io::BufWriter::new(stdout.lock());
+    write_graph_json(writer, &report, matches.get_flag("compact"))?;
     Ok(0)
+}
+
+// Stream directly to the output instead of allocating another report-sized
+// string. Flush explicitly so buffered write failures reach the caller.
+fn write_graph_json<W: Write, T: serde::Serialize>(
+    mut writer: W,
+    value: &T,
+    compact: bool,
+) -> Result<()> {
+    if compact {
+        serde_json::to_writer(&mut writer, value)?;
+    } else {
+        serde_json::to_writer_pretty(&mut writer, value)?;
+    }
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
 }
 
 /// Read an audit link context file, for `link-graph --audit --context` and
@@ -179,4 +199,77 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         telemetry["static_mapping_unused_count"] = mapping.unused_paths.len().into();
     }
     eprintln!("{telemetry}");
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::write_graph_json;
+    use std::io::{self, Write};
+
+    #[test]
+    fn streamed_output_matches_existing_json_and_compact_json() {
+        let value = serde_json::json!({"pages": [{"name": "café", "values": [1, 2]}]});
+        for compact in [false, true] {
+            let mut output = Vec::new();
+            write_graph_json(&mut output, &value, compact).unwrap();
+            let expected = if compact {
+                serde_json::to_string(&value).unwrap()
+            } else {
+                serde_json::to_string_pretty(&value).unwrap()
+            };
+            assert_eq!(output, format!("{expected}\n").as_bytes());
+        }
+    }
+
+    #[test]
+    fn large_report_is_written_incrementally() {
+        struct BoundedWrites(usize);
+        impl Write for BoundedWrites {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if buf.len() > 8192 {
+                    return Err(io::Error::other("oversized write"));
+                }
+                self.0 += buf.len();
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let value = vec!["link evidence"; 20_000];
+        let mut output = BoundedWrites(0);
+        write_graph_json(&mut output, &value, false).unwrap();
+        assert!(output.0 > 200_000);
+    }
+
+    #[test]
+    fn output_write_failure_is_reported() {
+        struct WriteFailure;
+        impl Write for WriteFailure {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("write failed"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let error = write_graph_json(WriteFailure, &serde_json::json!({}), true).unwrap_err();
+        assert!(error.to_string().contains("write failed"));
+    }
+
+    struct FlushFailure;
+    impl Write for FlushFailure {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("flush failed"))
+        }
+    }
+
+    #[test]
+    fn output_flush_failure_is_reported() {
+        let error = write_graph_json(FlushFailure, &serde_json::json!({}), false).unwrap_err();
+        assert!(error.to_string().contains("flush failed"));
+    }
 }
