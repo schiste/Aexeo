@@ -361,7 +361,9 @@ identity. This comparison is not a complete BCP 47 validator.
   A subsequent read-only inspection downloaded that run’s existing candidate
   artifact. The archive and release-input file match the SHA-256 values in its
   candidate metadata; the archive hash, candidate ID, source SHA and run ID
-  also match the CMS candidate status. These are matching observations, not
+  also match the CMS candidate status. All 503 artifact manifest entries match
+  the CMS frozen entries on collection, ID, inclusion, native status, update
+  time, content version, revision ID and version. These are matching observations, not
   independent proof of authenticity, deployed bytes or transactional CMS
   inventory completeness. A local static graph run against its 1,718 HTML
   files, using caller-inferred paths under the canonical www origin, mapped all
