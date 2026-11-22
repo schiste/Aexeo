@@ -319,11 +319,10 @@ impl BoundVerdict {
     }
 
     fn validate_evidence_profile(&self, inputs: &CurrentInputs<'_>) -> Result<(), &'static str> {
-        let observed =
-            self.verdict.extensions.as_ref().is_some_and(|extensions| {
-                extensions.contains_key("aexeo.observed-link-binding.v1")
-                    || extensions.contains_key("aexeo.change-evidence-input-binding.v1")
-            });
+        let observed = self.verdict.extensions.as_ref().is_some_and(|extensions| {
+            extensions.contains_key("aexeo.observed-link-binding.v1")
+                || extensions.contains_key("aexeo.change-evidence-input-binding.v1")
+        });
         if observed != inputs.artifacts.external_evidence.is_some() {
             return Err("external evidence does not match the verdict profile");
         }
@@ -501,12 +500,18 @@ mod tests {
         );
         assert!(BoundVerdict::new(source.clone(), &current).is_ok());
         source.extensions.as_mut().unwrap().insert(
-            "aexeo.offline-input-binding.v1".into(), serde_json::json!("a".repeat(64)),
+            "aexeo.offline-input-binding.v1".into(),
+            serde_json::json!("a".repeat(64)),
         );
         assert!(BoundVerdict::new(source.clone(), &current).is_err());
-        source.extensions.as_mut().unwrap().remove("aexeo.offline-input-binding.v1");
+        source
+            .extensions
+            .as_mut()
+            .unwrap()
+            .remove("aexeo.offline-input-binding.v1");
         source.extensions.as_mut().unwrap().insert(
-            "aexeo.change-evidence-input-binding.v1".into(), serde_json::json!("INVALID"),
+            "aexeo.change-evidence-input-binding.v1".into(),
+            serde_json::json!("INVALID"),
         );
         assert!(BoundVerdict::new(source, &current).is_err());
     }
