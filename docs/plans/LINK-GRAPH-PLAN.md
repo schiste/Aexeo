@@ -344,6 +344,20 @@ identity. This comparison is not a complete BCP 47 validator.
   release identity could not be matched to this CMS listing. The exercise does
   not validate the deployed surface, indexability, locale fallback or orphans;
   the item remains open.
+  On 2026-11-22, read-only Preview MCP calls supplied both the current static
+  publication list and a frozen candidate manifest. The list contained 503
+  records across collections; 471 currently reported static status scheduled
+  and included, all matching the corresponding frozen included record by
+  collection, ID and content version. Of 497 included records in the frozen
+  manifest, the remaining 26 were currently reported as draft and had different
+  content versions. These are observations from separate, non-atomic calls,
+  not proof that the candidate is stale or that the listing is exhaustive.
+  They do show why native CMS published status and today's content version
+  cannot alone establish a matching static candidate inventory. The candidate
+  referenced [build run 44261894621](https://github.com/Aeptus/website-and-content/actions/runs/44261894621)
+  and declared an artifact digest, but this exercise did not independently
+  inspect those artifact bytes, resolve all rendered routes, or bind the crawl
+  to that artifact. Orphan eligibility and this validation item remain open.
 - [x] Mark links with `hidden` on themselves or an ancestor as conditional
   observations, including redirect credit; expose evidence and aggregate opt-in
   telemetry. HTML alone does not establish CSS or script visibility.
