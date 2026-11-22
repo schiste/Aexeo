@@ -38,6 +38,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   clear a lock. If concurrent broker operations report a lock, wait for each
   command to finish, check the broker and any external action's actual state,
   then retry only the unfinished operations sequentially.
+- Before an npm release, query the registry for the published versions and
+  dist-tags; a version in the manifest or changelog does not establish that it
+  was published. Build and test the archive from the release source tree, then
+  verify the registry version and artifact integrity after publication.
 - Before a guarded PR merge, fetch the full live `headRefOid` directly from
   `gh pr view --json headRefOid` and pass that exact value to
   `--match-head-commit`; never reconstruct a full SHA from an abbreviated log.
