@@ -142,7 +142,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 raise VerificationError('resolved policy check is missing or has inconsistent blocking')
             if kind in {'custom', 'site_group', 'site_audit'} and check.get('status') != 'not_checked':
                 raise VerificationError('candidate evaluator cannot execute site or custom gates')
-            if kind in {'evidence_anchors', 'structured_fact', 'evidence_review', 'evidence_review_age'}:
+            if kind in {'editorial_pacing', 'evidence_anchors', 'structured_fact', 'evidence_review', 'evidence_review_age'}:
                 required = ['source'] + (['review'] if kind in {'evidence_review', 'evidence_review_age'} else [])
                 item_sources = sources.get(entity, {}) if sources is not None else {}
                 if any(not isinstance(gate.get(key), str) or gate[key] not in item_sources for key in required):

@@ -276,7 +276,7 @@ class PortableComparison(unittest.TestCase):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])
         verdict = copy.deepcopy(self.previous['verdict'])
-        for kind in ('custom', 'site_group', 'site_audit', 'link_reachability', 'evidence_anchors',
+        for kind in ('editorial_pacing', 'custom', 'site_group', 'site_audit', 'link_reachability', 'evidence_anchors',
                      'structured_fact', 'evidence_review', 'evidence_review_age'):
             policy['gates'][0]['kind'] = kind
             for blocking in (True, False):
@@ -300,6 +300,12 @@ class PortableComparison(unittest.TestCase):
         policy = json.loads(self.artifacts['resolved_policy'])
         verdict = copy.deepcopy(self.previous['verdict'])
         gate = policy['gates'][0]
+        gate.update(kind='editorial_pacing', source='source')
+        require_policy_coverage(policy, change, False, verdict, False, sources)
+        incomplete = copy.deepcopy(sources)
+        del incomplete['article']['source']
+        with self.assertRaisesRegex(VerificationError, 'without its sources'):
+            require_policy_coverage(policy, change, False, verdict, False, incomplete)
         gate.update(kind='evidence_review', source='source', review='review')
         require_policy_coverage(policy, change, False, verdict, False, sources)
         for missing in ('source', 'review'):
@@ -380,11 +386,9 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaisesRegex(VerificationError, 'contradicts'):
             self.check()
 
-    def test_rebound_verdict_cannot_claim_missing_evidence_was_checked(self):
+    def assert_rebound_verdict_rejects_missing_source(self, gate):
         policy = json.loads(self.artifacts['resolved_policy'])
-        policy['gates'].append({'id': 'source', 'kind': 'evidence_anchors',
-                                'source': 's', 'claim': 'abc', 'quote': 'q',
-                                'severity': 'warning', 'blocking': False})
+        policy['gates'].append(gate)
         self.artifacts['resolved_policy'] = self.encoded(policy)
         change = json.loads(self.artifacts['change'])
         candidate = overlay(self.fixture['base'], change, self.fixture['after'])
@@ -407,6 +411,18 @@ class PortableComparison(unittest.TestCase):
             envelope['verdict']['summary']['passed'] += 1
         with self.assertRaisesRegex(VerificationError, 'cannot execute'):
             self.check()
+
+    def test_rebound_verdict_cannot_claim_missing_evidence_was_checked(self):
+        self.assert_rebound_verdict_rejects_missing_source({
+            'id': 'source', 'kind': 'evidence_anchors', 'source': 's',
+            'claim': 'abc', 'quote': 'q', 'severity': 'warning', 'blocking': False})
+
+    def test_rebound_verdict_cannot_claim_missing_composition_was_checked(self):
+        self.assert_rebound_verdict_rejects_missing_source({
+            'id': 'source', 'kind': 'editorial_pacing', 'source': 's',
+            'profile': {'version': 1, 'name': 'short',
+                        'fields': [{'name': 'hook', 'max_characters': 3}]},
+            'severity': 'warning', 'blocking': False})
 
     def test_fresh_process_must_complete_successfully(self):
         for code, timed_out in ((1, False), (2, False), (None, False), (True, False),
