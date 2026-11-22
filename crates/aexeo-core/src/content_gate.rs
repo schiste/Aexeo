@@ -399,7 +399,18 @@ fn for_each_sentence(
                                 ch.is_whitespace()
                                     || matches!(
                                         ch,
-                                        ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '»' | '”'
+                                        ',' | ';'
+                                            | ':'
+                                            | '!'
+                                            | '?'
+                                            | ')'
+                                            | ']'
+                                            | '}'
+                                            | '»'
+                                            | '”'
+                                            | '’'
+                                            | '\''
+                                            | '"'
                                     )
                             })
                 })
@@ -5568,6 +5579,26 @@ mod tests {
             count, 2,
             "an abbreviation suffix inside a word is not a token"
         );
+    }
+
+    #[test]
+    fn configured_multi_period_abbreviation_before_closing_quote_stays_in_sentence() {
+        let abbreviations = vec!["e.g.".to_owned()];
+        for text in [
+            "Use \"e.g.\", then explain. Next.",
+            "Use 'e.g.', then explain. Next.",
+            "Use ‘e.g.’, then explain. Next.",
+            "Use “e.g.”, then explain. Next.",
+        ] {
+            let mut sentences = Vec::new();
+            for_each_sentence(text, 1, 1, &[], ".!?", &abbreviations, |segment, _, _| {
+                if !segment.trim().is_empty() {
+                    sentences.push(segment.trim().to_owned());
+                }
+            });
+            assert_eq!(sentences.len(), 2, "{text}: {sentences:?}");
+            assert_eq!(sentences[1], "Next", "{text}");
+        }
     }
 
     #[test]
