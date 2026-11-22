@@ -8,6 +8,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5]
 
+- Allow authorized MCP clients to audit an unsaved, explicitly configured fragment against a CMS revision without writing content. Reports identify the candidate and do not reuse revision-only link observations or list-completeness attestations.
+
 - Preserve whitespace in nonempty plain-text CMS fields, including whitespace-only values, so character-sensitive gates measure the supplied text. Automatically selected rich content still takes precedence over a whitespace-only fallback.
 
 - Include a synthetic fresh-process Node benchmark for module import, first WASM evaluation and total startup time. Measurements exclude network and CMS access and do not represent browser or workerd cold starts.
