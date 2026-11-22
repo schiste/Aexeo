@@ -89,6 +89,85 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertIn('policy check is missing', native_bad.stdout)
                 self.assertFalse(json.loads(native_bad.stdout)['publication_authorized'])
 
+    def test_unavailable_link_gate_across_real_cli_and_comparators(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        source = '[reference](https://example.org/source)'
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        change = json.loads(fixture['artifacts']['change'])
+        change['entries'][0]['media_type'] = 'text/markdown'
+        change['entries'][0]['after'] = {'sha256': digest, 'inline': source}
+        fixture['after'][0].update(media_type='text/markdown', sha256=digest, source=source)
+        binary = os.environ.get('AEXEO_CLI_BIN')
+        executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+        for blocking in (False, True):
+            with self.subTest(blocking=blocking), tempfile.TemporaryDirectory(prefix='aexeo-v2-unavailable-') as directory:
+                root = Path(directory)
+                for name in ('base', 'after'):
+                    (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+                (root / 'change').write_text(json.dumps(change), encoding='utf-8')
+                (root / 'preset').write_text(
+                    "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"
+                    "[[gates]]\nid='links'\nkind='link_reachability'\nblocking=" + str(blocking).lower() + "\n",
+                    encoding='utf-8')
+                common = executable + ['content-change', '--preset', 'test', '--preset-source',
+                    'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build']
+                env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+                export = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+                self.assertEqual(export.returncode, 2 if blocking else 0, export.stderr)
+                bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+                for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                    (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+                command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                    '--candidate-after', str(root / 'after'), '--draft-portable-verdict']
+                run = subprocess.run(command, cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'previous')), capture_output=True, text=True)
+                self.assertEqual(run.returncode, 2 if blocking else 0, run.stderr)
+                portable = json.loads((root / 'previous').read_text(encoding='utf-8'))
+                verdict = portable['verdict']
+                check = next(check for check in verdict['checks'] if check['id'] == 'gate:7:article:links')
+                self.assertEqual((check['status'], check['blocking']), ('not_checked', blocking))
+                self.assertEqual(verdict['status'], 'not_checked' if blocking else 'pass')
+                self.assertEqual(verdict['summary']['blocking_not_checked'], int(blocking))
+                (root / 'fresh').write_text(json.dumps(portable), encoding='utf-8')
+                verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+                for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                    verify += ['--' + name.replace('_', '-'), str(root / name)]
+                verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
+                    '--validator-version', '0.0.24', '--fresh-exit-code', str(run.returncode), '--fresh-timed-out', 'false']
+                result = subprocess.run(verify, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2 if blocking else 0, result.stdout + result.stderr)
+                self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+                # A forged successful process exit cannot turn an unavailable
+                # blocking check into a passing verdict.
+                if blocking:
+                    forged = verify.copy()
+                    forged[forged.index('--fresh-exit-code') + 1] = '0'
+                    rejected = subprocess.run(forged, capture_output=True, text=True)
+                    self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+                    self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+                native = os.environ.get('AETHYME_CLI_BIN')
+                if native:
+                    manifest = {name: str(root / name) for name in
+                        ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
+                    manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
+                        validator_name='aexeo', validator_version='0.0.24',
+                        required_checks=['gate:7:article:words'], fresh_exit_code=run.returncode, fresh_timed_out=False)
+                    (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
+                    native_env = dict(os.environ)
+                    native_env.pop('AETHYME_GATE_WORKER_ID', None)
+                    result = subprocess.run([native, 'content-gate', 'compare-v2', str(root / 'native-manifest')],
+                        env=native_env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2 if blocking else 0, result.stdout + result.stderr)
+                    self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+                    if blocking:
+                        manifest['fresh_exit_code'] = 0
+                        (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
+                        rejected = subprocess.run([native, 'content-gate', 'compare-v2', str(root / 'native-manifest')],
+                            env=native_env, capture_output=True, text=True)
+                        self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+                        self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+
     def test_file_backed_candidate_with_real_cli_and_independent_runner(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         change = json.loads(fixture['artifacts']['change'])
