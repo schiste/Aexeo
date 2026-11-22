@@ -78,6 +78,9 @@ pub struct IncrementalBaseline {
     reports: BTreeMap<String, ContentReport>,
     mode: ProjectionMode,
     metadata_dependent: bool,
+    base_metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
+    link_observations:
+        Option<BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -195,6 +198,7 @@ fn validate_preset(
                     | ContentGate::ListItemCount { .. }
                     | ContentGate::LinkCount { .. }
                     | ContentGate::LinkDestinations { .. }
+                    | ContentGate::LinkReachability { .. }
                     | ContentGate::RequiredHeadings { .. }
                     | ContentGate::HeadingLength { .. }
                     | ContentGate::HeadingHierarchy { .. }
@@ -215,6 +219,7 @@ fn evaluate_item(
     item: &CandidateItem,
     mode: ProjectionMode,
     metadata: Option<&BTreeMap<String, String>>,
+    link_snapshot: Option<&crate::content_gate_verdict::LinkObservationSnapshot>,
 ) -> Result<ContentReport, NotChecked> {
     let classify_prose = preset
         .gates
@@ -224,10 +229,12 @@ fn evaluate_item(
         .gates
         .iter()
         .any(|gate| matches!(gate, ContentGate::HeadingHierarchy { .. }));
-    let wants_destinations = preset
-        .gates
-        .iter()
-        .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }));
+    let wants_destinations = preset.gates.iter().any(|gate| {
+        matches!(
+            gate,
+            ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+        )
+    });
     let wants_literal = preset.gates.iter().any(|gate| {
         matches!(
             gate,
@@ -340,7 +347,18 @@ fn evaluate_item(
         }
     };
     input.metadata = metadata.cloned();
+    if let Some(snapshot) = link_snapshot
+        && (snapshot.version != 1
+            || snapshot.source_sha256 != item.sha256
+            || destinations.as_ref() != Some(&snapshot.destinations)
+            || snapshot.destinations.len() != snapshot.observations.len())
+        {
+            return Err(unavailable(
+                "link observation snapshot does not match the item",
+            ));
+        }
     let capabilities = ContentEvaluationContext {
+        link_reachability: link_snapshot.map(|snapshot| snapshot.observations.as_slice()),
         adapter: context.as_ref(),
         link_count,
         ..Default::default()
@@ -372,7 +390,7 @@ impl IncrementalBaseline {
     /// Evaluate all base entities once. A host's completeness and link
     /// projection claims are prerequisites, not independently proven facts.
     pub fn prepare(snapshot: CandidateSnapshot, preset: ContentPreset) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Plain, None)
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Plain, None, None)
     }
 
     /// Interpret blank-line-separated plain text as paragraphs using the same
@@ -382,7 +400,7 @@ impl IncrementalBaseline {
         snapshot: CandidateSnapshot,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::ParagraphText, None)
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::ParagraphText, None, None)
     }
 
     /// Project Markdown and static HTML using the shared adapters; plain text
@@ -422,7 +440,13 @@ impl IncrementalBaseline {
         preset: ContentPreset,
         html_scope: crate::html_content_adapter::HtmlContentScope,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Adapted(html_scope), None)
+        Self::prepare_with_mode(
+            snapshot,
+            preset,
+            ProjectionMode::Adapted(html_scope),
+            None,
+            None,
+        )
     }
 
     /// Select an HTML scope together with host-provided per-item metadata.
@@ -437,6 +461,25 @@ impl IncrementalBaseline {
             preset,
             ProjectionMode::Adapted(html_scope),
             Some(metadata),
+            None,
+        )
+    }
+
+    /// Prepare an adapted baseline with explicit source-bound observations for every item.
+    /// The host is responsible for their provenance and freshness.
+    pub fn prepare_adapted_with_link_observations(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
+        observations: BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode(
+            snapshot,
+            preset,
+            ProjectionMode::Adapted(html_scope),
+            metadata,
+            Some(observations),
         )
     }
 
@@ -445,6 +488,9 @@ impl IncrementalBaseline {
         preset: ContentPreset,
         mode: ProjectionMode,
         metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
+        link_observations: Option<
+            BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
     ) -> Result<Self, NotChecked> {
         let snapshot = ValidatedCandidateSnapshot::new(snapshot).map_err(unavailable)?;
         validate_scope(&snapshot, mode)?;
@@ -459,6 +505,26 @@ impl IncrementalBaseline {
                 "metadata inventory does not match base identities",
             ));
         }
+        let needs_links = preset
+            .gates
+            .iter()
+            .any(|g| matches!(g, ContentGate::LinkReachability { .. }));
+        if needs_links != link_observations.is_some() {
+            return Err(unavailable(
+                "link observations must be supplied exactly when the reachability gate is selected",
+            ));
+        }
+        if let Some(observations) = &link_observations
+            && (observations.len() != snapshot.items.len()
+                || snapshot
+                    .items
+                    .iter()
+                    .any(|item| !observations.contains_key(&item.entity_id)))
+            {
+                return Err(unavailable(
+                    "link observation inventory does not match base identities",
+                ));
+            }
         validate_preset(&preset, mode, metadata.is_some())?;
         let metadata_dependent = preset.gates.iter().any(is_item_metadata_gate);
         let mut reports = BTreeMap::new();
@@ -469,7 +535,15 @@ impl IncrementalBaseline {
                 .and_then(Option::as_ref);
             reports.insert(
                 item.entity_id.clone(),
-                evaluate_item(&preset, item, mode, fields)?,
+                evaluate_item(
+                    &preset,
+                    item,
+                    mode,
+                    fields,
+                    link_observations
+                        .as_ref()
+                        .and_then(|map| map.get(&item.entity_id)),
+                )?,
             );
         }
         Ok(Self {
@@ -478,6 +552,8 @@ impl IncrementalBaseline {
             reports,
             mode,
             metadata_dependent,
+            base_metadata: metadata,
+            link_observations,
         })
     }
 
@@ -517,13 +593,61 @@ impl IncrementalBaseline {
                     max_total_bytes,
                 )
             })
-            .and_then(|overlay| self.evaluate_overlay(change, &overlay));
+            .and_then(|overlay| self.evaluate_overlay(change, &overlay, None));
         match result {
             Ok(result) => result,
             Err(error) => IncrementalEvaluation::NotChecked {
                 reason: error.reason,
             },
         }
+    }
+
+    /// Evaluate using an explicit complete candidate observation inventory. A changed
+    /// observation forces reevaluation even when the content itself is unchanged.
+    pub fn evaluate_with_link_observations(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+    ) -> IncrementalEvaluation {
+        let result = self
+            .validate_change_media(change)
+            .and_then(|()| checked_overlay(&self.snapshot, change, after))
+            .and_then(|overlay| self.evaluate_overlay(change, &overlay, Some(observations)));
+        result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
+            reason: error.reason,
+        })
+    }
+
+    /// Evaluate source-referenced changes with an explicit candidate observation inventory.
+    /// The provider verifies referenced content; it does not verify the observations.
+    pub fn evaluate_with_sources_and_link_observations<
+        P: crate::content_gate_sources::ConfinedContentFiles,
+    >(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+    ) -> IncrementalEvaluation {
+        let result = self
+            .validate_change_media(change)
+            .and_then(|()| {
+                checked_overlay_with_sources(
+                    &self.snapshot,
+                    change,
+                    after,
+                    provider,
+                    max_state_bytes,
+                    max_total_bytes,
+                )
+            })
+            .and_then(|overlay| self.evaluate_overlay(change, &overlay, Some(observations)));
+        result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
+            reason: error.reason,
+        })
     }
 
     fn evaluate_checked(
@@ -533,7 +657,7 @@ impl IncrementalBaseline {
     ) -> Result<IncrementalEvaluation, NotChecked> {
         self.validate_change_media(change)?;
         let overlay = checked_overlay(&self.snapshot, change, after)?;
-        self.evaluate_overlay(change, &overlay)
+        self.evaluate_overlay(change, &overlay, None)
     }
 
     fn validate_change_media(&self, change: &Change) -> Result<(), NotChecked> {
@@ -553,8 +677,28 @@ impl IncrementalBaseline {
         &self,
         change: &Change,
         overlay: &CandidateOverlay,
+        observations: Option<
+            &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
     ) -> Result<IncrementalEvaluation, NotChecked> {
         validate_scope(&overlay.candidate, self.mode)?;
+        if self.link_observations.is_some() != observations.is_some() {
+            return Err(unavailable(
+                "candidate link observation inventory is required",
+            ));
+        }
+        if let Some(map) = observations
+            && (map.len() != overlay.candidate.items.len()
+                || overlay
+                    .candidate
+                    .items
+                    .iter()
+                    .any(|item| !map.contains_key(&item.entity_id)))
+            {
+                return Err(unavailable(
+                    "link observation inventory does not match candidate identities",
+                ));
+            }
         // The accepted gates depend only on the item's own projected content.
         // Changed identities come from the validated change, not link coverage.
         let changed: BTreeSet<&str> = overlay.impact.changed.iter().map(String::as_str).collect();
@@ -586,27 +730,53 @@ impl IncrementalBaseline {
         for item in &overlay.candidate.items {
             let report = if baseline_items.get(item.entity_id.as_str()).copied() == Some(item)
                 && (!self.metadata_dependent || !changed.contains(item.entity_id.as_str()))
-            {
+                && match (&self.link_observations, observations) {
+                    (Some(base), Some(candidate)) => {
+                        let a = &base[&item.entity_id];
+                        let b = &candidate[&item.entity_id];
+                        a.version == b.version
+                            && a.source_sha256 == b.source_sha256
+                            && a.destinations == b.destinations
+                            && a.observations == b.observations
+                    }
+                    (None, None) => true,
+                    _ => false,
+                } {
                 reused += 1;
                 self.reports
                     .get(&item.entity_id)
                     .ok_or_else(|| unavailable("baseline report is unavailable"))?
                     .clone()
             } else {
-                if !changed.contains(item.entity_id.as_str()) {
+                if !changed.contains(item.entity_id.as_str())
+                    && baseline_items.get(item.entity_id.as_str()).copied() != Some(item)
+                {
                     return Err(unavailable(
                         "baseline item differs from candidate outside the change set",
                     ));
                 }
                 evaluated += 1;
                 let fields = if self.metadata_dependent {
-                    changed_entries
-                        .get(item.entity_id.as_str())
-                        .and_then(|entry| entry.metadata.as_ref())
+                    if changed.contains(item.entity_id.as_str()) {
+                        changed_entries
+                            .get(item.entity_id.as_str())
+                            .and_then(|entry| entry.metadata.as_ref())
+                    } else {
+                        self.base_metadata
+                            .as_ref()
+                            .and_then(|map| map.get(&item.entity_id))
+                            .and_then(Option::as_ref)
+                    }
                 } else {
                     None
                 };
-                evaluate_item(&self.preset, item, self.mode, fields)?
+                evaluate_item(
+                    &self.preset,
+                    item,
+                    self.mode,
+                    fields,
+                    observations.and_then(|map| map.get(&item.entity_id)),
+                )?
             };
             reports.insert(item.entity_id.clone(), report);
         }
@@ -1002,7 +1172,7 @@ impl ComposedBaseline {
             .items
             .validate_change_media(change)
             .and_then(|()| overlay.as_ref().map_err(Clone::clone))
-            .and_then(|overlay| self.items.evaluate_overlay(change, overlay));
+            .and_then(|overlay| self.items.evaluate_overlay(change, overlay, None));
         let collection_result = overlay
             .as_ref()
             .map_err(Clone::clone)
@@ -1038,6 +1208,146 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     #[test]
+    fn link_observations_are_bound_and_refresh_unchanged_items() {
+        use crate::content_gate::LinkReachabilityObservation::{
+            NotChecked as Unknown, NotFound, Reachable,
+        };
+        use crate::content_gate_verdict::LinkObservationSnapshot;
+        let (mut snapshot, _, mut change) = fixture();
+        let mut a = item("a", "[A](https://a.example)", None);
+        a.media_type = "text/markdown".into();
+        let mut b = item("b", "[B](https://b.example)", None);
+        b.media_type = "text/markdown".into();
+        snapshot.items = vec![a.clone(), b.clone()];
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='link'\nkind='link_reachability'\n[[gates]]\nid='metadata'\nkind='required_metadata'\nfields=['description']\n").unwrap();
+        let observation = |item: &CandidateItem, url: &str, value| LinkObservationSnapshot {
+            version: 1,
+            source_sha256: item.sha256.clone(),
+            destinations: vec![url.into()],
+            observations: vec![value],
+        };
+        let base = BTreeMap::from([
+            ("a".into(), observation(&a, "https://a.example", Reachable)),
+            ("b".into(), observation(&b, "https://b.example", Reachable)),
+        ]);
+        let fields = BTreeMap::from([("description".into(), "observed".into())]);
+        let metadata = BTreeMap::from([
+            ("a".into(), Some(fields.clone())),
+            ("b".into(), Some(fields.clone())),
+        ]);
+        let baseline = IncrementalBaseline::prepare_adapted_with_link_observations(
+            snapshot,
+            preset,
+            crate::html_content_adapter::HtmlContentScope::Document,
+            Some(metadata),
+            base.clone(),
+        )
+        .unwrap();
+        let mut next = item("a", "[new](https://new.example)", None);
+        next.media_type = "text/markdown".into();
+        let mut update = entry("a", Operation::Update, Some(&a), Some(&next));
+        update.media_type = "text/markdown".into();
+        update.metadata = Some(fields);
+        change.entries = vec![update];
+        let candidate = BTreeMap::from([
+            (
+                "a".into(),
+                observation(&next, "https://new.example", Reachable),
+            ),
+            ("b".into(), observation(&b, "https://b.example", NotFound)),
+        ]);
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate_with_link_observations(&change, &[next.clone()], &candidate)
+        else {
+            panic!("candidate must be evaluated")
+        };
+        assert_eq!((evaluated, reused), (2, 0));
+        assert_eq!(reports["b"].gates[0].status, GateStatus::Failed);
+        assert_eq!(reports["b"].gates[1].status, GateStatus::Passed);
+        let mut same = candidate.clone();
+        same.insert("b".into(), base["b"].clone());
+        assert!(matches!(
+            baseline.evaluate_with_link_observations(&change, &[next.clone()], &same),
+            IncrementalEvaluation::Evaluated {
+                evaluated: 1,
+                reused: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            baseline.evaluate(&change, &[next.clone()]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        for alteration in 0..4 {
+            let mut bad = candidate.clone();
+            let evidence = bad.get_mut("a").unwrap();
+            match alteration {
+                0 => evidence.source_sha256 = "wrong".into(),
+                1 => evidence.destinations[0] = "https://wrong.example".into(),
+                2 => evidence.observations.clear(),
+                _ => evidence.observations[0] = Unknown,
+            }
+            assert!(
+                matches!(
+                    baseline.evaluate_with_link_observations(&change, &[next.clone()], &bad),
+                    IncrementalEvaluation::NotChecked { .. }
+                ),
+                "alteration {alteration}"
+            );
+        }
+        struct Provider(Vec<u8>);
+        impl crate::content_gate_sources::ConfinedContentFiles for Provider {
+            type Reader = std::io::Cursor<Vec<u8>>;
+            fn open(
+                &mut self,
+                _: &std::path::Path,
+                _: &std::path::Path,
+            ) -> std::io::Result<Self::Reader> {
+                Ok(std::io::Cursor::new(self.0.clone()))
+            }
+        }
+        let mut referenced = change.clone();
+        referenced.content_root = Some("/trusted".into());
+        let state = referenced.entries[0].after.as_mut().unwrap();
+        state.inline = None;
+        state.file = Some("next.md".into());
+        let mut provider = Provider(next.source.as_bytes().to_vec());
+        assert!(matches!(
+            baseline.evaluate_with_sources_and_link_observations(
+                &referenced,
+                &[next.clone()],
+                &mut provider,
+                1024,
+                1024,
+                &candidate
+            ),
+            IncrementalEvaluation::Evaluated { .. }
+        ));
+        provider.0 = b"wrong bytes".to_vec();
+        assert!(matches!(
+            baseline.evaluate_with_sources_and_link_observations(
+                &referenced,
+                &[next.clone()],
+                &mut provider,
+                1024,
+                1024,
+                &candidate
+            ),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        let mut missing = candidate.clone();
+        missing.remove("b");
+        assert!(matches!(
+            baseline.evaluate_with_link_observations(&change, &[next], &missing),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
+
+    #[test]
     fn adapted_literal_terms_see_reference_labels() {
         let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['[17]']\n").unwrap();
         for (media, source) in [
@@ -1053,6 +1363,7 @@ mod tests {
                 &preset,
                 &candidate,
                 ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+                None,
                 None,
             )
             .unwrap();
