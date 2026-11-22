@@ -171,6 +171,11 @@ changes. The default environment is inherited except for the verdict path; the
 host must set the evaluator's change file and other options explicitly. The
 command and its executable must be trusted. Standard input, output and error for
 the child are discarded; the runner reports aggregate telemetry only when asked.
+On POSIX platforms with `waitid`, `WNOWAIT` and process groups, the runner
+starts the evaluator in a separate session, signals its process group on exit or
+timeout, and refuses to match if the group remains or cannot be inspected.
+Platforms without these capabilities fail closed. A group can remain temporarily
+visible after its members exit, so the check may reject an otherwise valid run.
 
 For example, after independently obtaining the artifacts described below:
 
@@ -186,9 +191,10 @@ CONTENT_GATE_CHANGE_FILE=change.json python3 run_portable_verdict.py \
 ```
 
 The host must ensure that the selected preset, identity and artifacts actually
-correspond. The runner observes only the direct child's completion; it is not a
-sandbox, does not authenticate execution or stop all descendant processes, and
-checks neither freshness nor provenance. Its before/after comparison cannot
+correspond. The runner observes the direct child's completion and attempts to
+stop its original process group. It is not a sandbox, does not authenticate
+execution, cannot contain descendants that leave the group, and checks neither
+freshness nor provenance. Its before/after comparison cannot
 prevent ABA changes, prove an atomic multi-file snapshot, or protect the period
 between verification and publication. Matching still returns
 `publication_authorized: false`. The experimental profile remains unsuitable as

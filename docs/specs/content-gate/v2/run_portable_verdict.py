@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import signal
 from pathlib import Path
 import subprocess
 import stat
@@ -85,6 +86,62 @@ def verify_executable(path, expected):
     return identity(after)
 
 
+def run_process(command, env, timeout):
+    """Stop the evaluator's POSIX process group before accepting its output.
+
+    Keep the group leader unreaped while signaling so its PID cannot be reused
+    for an unrelated process group. A descendant can still leave the group;
+    this is containment hygiene, not a sandbox or proof of process identity.
+    """
+    if not all(hasattr(os, name) for name in ('waitid', 'WNOWAIT', 'killpg')) or os.name != 'posix':
+        raise VerificationError('safe evaluator process-group cleanup is unavailable')
+    try:
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env=env, start_new_session=True)
+    except OSError as error:
+        raise VerificationError('fresh evaluator did not start') from error
+    timed_out = False
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            if os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            time.sleep(min(0.01, remaining))
+    finally:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            # macOS can report EPERM when only the exited leader remains.
+            # Probe again after reaping; any surviving group remains unchecked.
+            if timed_out:
+                try:
+                    os.kill(child.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired as error:
+            raise VerificationError('evaluator process could not be stopped') from error
+    # Any remaining group member, including an unreaped zombie, makes the
+    # observation unsafe. Do not signal again after the leader was reaped.
+    try:
+        os.killpg(child.pid, 0)
+    except ProcessLookupError:
+        pass
+    except PermissionError as error:
+        raise VerificationError('evaluator process group could not be checked') from error
+    else:
+        raise VerificationError('evaluator process group did not terminate')
+    if timed_out or child.returncode != 0:
+        raise VerificationError('fresh evaluator did not complete successfully')
+    return child.returncode
+
+
 def run(paths, command, timeout, required_checks, expected_validator, content_files=None,
         executable_sha256=None):
     """Observe one direct process and compare independently supplied inputs."""
@@ -102,17 +159,10 @@ def run(paths, command, timeout, required_checks, expected_validator, content_fi
         output = Path(directory) / 'fresh.json'
         env = os.environ.copy()
         env['CONTENT_GATE_VERDICT_FILE'] = str(output)
-        try:
-            completed = subprocess.run(command, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                env=env, timeout=timeout, check=False)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise VerificationError('fresh evaluator did not complete successfully') from error
+        exit_code = run_process(command, env, timeout)
         if (executable_sha256 is not None and
                 verify_executable(command[0], executable_sha256) != executable_identity):
             raise VerificationError('pinned executable changed during evaluation')
-        if completed.returncode != 0:
-            raise VerificationError('fresh evaluator did not complete successfully')
         fresh = read_fresh(output)
         if inputs != read_inputs(paths):
             raise VerificationError('inputs changed during evaluation')
@@ -126,7 +176,7 @@ def run(paths, command, timeout, required_checks, expected_validator, content_fi
                 artifacts[name] = inputs[name]
         return compare(inputs['previous'], fresh, inputs['base'], inputs['after'],
                        artifacts, required_checks, expected_validator,
-                       completed.returncode, False, content_bytes)
+                       exit_code, False, content_bytes)
 
 
 def main():
@@ -168,6 +218,7 @@ def main():
                  'collection_supplied': args.collection is not None,
                  'content_files_supplied': args.content_files is not None,
                  'executable_pin_supplied': args.executable_sha256 is not None,
+                 'process_group_cleanup_required': True,
                  'external_evidence_supplied': args.external_evidence is not None}
         print(json.dumps(event, separators=(',', ':')), file=sys.stderr)
     return code
