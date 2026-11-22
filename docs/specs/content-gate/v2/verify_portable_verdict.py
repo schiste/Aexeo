@@ -159,6 +159,10 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     html_scope = validate_host_options(host_options)
     change = parse(artifacts['change'])
     validate_change_semantics(change)
+    # The current producer never evaluates site impact for these operations.
+    # A matching binding or a fabricated passing check cannot establish it.
+    if any(entry['operation'] in ('delete', 'rename') for entry in change['entries']):
+        raise VerificationError('delete or rename impact is not independently assessed')
     # V1 has open objects. The draft cannot understand extra change inputs or
     # arbitrary change extensions; reject them instead of silently discarding.
     _reject_unknown_change_fields(change)
