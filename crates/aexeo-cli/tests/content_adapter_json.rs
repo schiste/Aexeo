@@ -525,3 +525,68 @@ fn host_link_offsets_map_bound_unreachable_observations() {
         ])
     );
 }
+
+#[test]
+fn host_list_anchors_map_partial_nested_findings_without_exposing_source() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let source = "Préface\n✨ outer\n  nested\n✨ another\n";
+    let projection = json!({"schema":"aexeo.content-adapter/v1","text":"Body",
+        "lists":[{"item_count":3,"depth":1},{"item_count":2,"depth":2},{"item_count":3,"depth":1}],
+        "source_map":{"source_text":source,"spans":[],"list_anchors":[
+            {"source_start":source.find("outer").unwrap(),"text":"outer"},null,null]}});
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let output = run(&file, &preset, &["--telemetry"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_mapping"],
+        json!({"eligible":2,"mapped":1,"unmapped":1})
+    );
+    assert_eq!(
+        report["source_locations"],
+        json!([
+            {"gate_id":"lists","finding_index":0,"source":"host_supplied_source_text","line":2,"column":3}
+        ])
+    );
+    let telemetry = String::from_utf8(output.stderr).unwrap();
+    assert!(telemetry.contains("\"list_anchors\":1"), "{telemetry}");
+    assert!(!telemetry.contains("outer"));
+}
+
+#[test]
+fn host_list_anchors_reject_wrong_bytes_order_and_utf8_boundaries() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let base = json!({"schema":"aexeo.content-adapter/v1","text":"Body",
+        "lists":[{"item_count":3,"depth":1},{"item_count":3,"depth":1}],
+        "source_map":{"source_text":"é é","spans":[],"list_anchors":[{"source_start":0,"text":"é"},{"source_start":3,"text":"é"}]}});
+    for anchors in [
+        json!([null]),
+        json!([{"source_start":1,"text":"é"},null]),
+        json!([{"source_start":3,"text":"é"},{"source_start":0,"text":"é"}]),
+        json!([{"source_start":0,"text":"é"},{"source_start":0,"text":"é"}]),
+        json!([{"source_start":0,"text":""},null]),
+        json!([{"source_start":usize::MAX,"text":"é"},null]),
+        json!([{"source_start":0,"text":"x"},null]),
+    ] {
+        let mut input = base.clone();
+        input["source_map"]["list_anchors"] = anchors;
+        fs::write(&file, serde_json::to_vec(&input).unwrap()).unwrap();
+        assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+    }
+    let mut missing = base;
+    missing.as_object_mut().unwrap().remove("lists");
+    fs::write(&file, serde_json::to_vec(&missing).unwrap()).unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+}

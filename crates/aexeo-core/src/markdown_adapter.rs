@@ -564,24 +564,34 @@ pub fn list_source_positions(
     gate: &crate::content_gate::ContentGate,
     result: &crate::content_gate::ContentGateResult,
 ) -> Option<Vec<Option<(usize, usize)>>> {
+    let indices = list_finding_indices(lists, gate, result)?;
+    Some(
+        indices
+            .into_iter()
+            .take(result.findings.len())
+            .map(|index| Some((lists[index].line, lists[index].column)))
+            .collect(),
+    )
+}
+
+/// Return the observed list indices corresponding to emitted findings, in order.
+pub fn list_finding_indices(
+    lists: &[StructuredList],
+    gate: &crate::content_gate::ContentGate,
+    result: &crate::content_gate::ContentGateResult,
+) -> Option<Vec<usize>> {
     let crate::content_gate::ContentGate::ListItemCount { flagged_counts, .. } = gate else {
         return None;
     };
     if result.status != crate::content_gate::GateStatus::Failed {
         return None;
     }
-    let matching = lists
+    let indices: Vec<_> = lists
         .iter()
-        .filter(|list| flagged_counts.contains(&list.item_count));
-    if matching.clone().count() != result.total_findings() {
-        return None;
-    }
-    Some(
-        matching
-            .take(result.findings.len())
-            .map(|list| Some((list.line, list.column)))
-            .collect(),
-    )
+        .enumerate()
+        .filter_map(|(index, list)| flagged_counts.contains(&list.item_count).then_some(index))
+        .collect();
+    (indices.len() == result.total_findings()).then_some(indices)
 }
 
 /// Extract prose and headings from Markdown, excluding code and front matter.

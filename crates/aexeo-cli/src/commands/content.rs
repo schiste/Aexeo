@@ -403,7 +403,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "paragraph_list_classification": adapted.paragraph_list_items.is_some(),
                 "source_spans": adapted.source_map.as_ref().map(|map| map.span_count()),
                 "heading_offsets": adapted.source_map.as_ref().map(|map| map.heading_offset_count()),
-                "link_offsets": adapted.source_map.as_ref().map(|map| map.link_offset_count())
+                "link_offsets": adapted.source_map.as_ref().map(|map| map.link_offset_count()),
+                "list_anchors": adapted.source_map.as_ref().map(|map| map.list_anchor_count())
             }));
             host_source_map = adapted.source_map;
             adapter_source = Some(data);
@@ -671,8 +672,21 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     ) && !result.findings.is_empty()
                 })
     });
+    let host_has_list_findings = host_source_map.as_ref().is_some_and(|map| {
+        map.has_list_anchors()
+            && preset
+                .gates
+                .iter()
+                .zip(&report.gates)
+                .any(|(gate, result)| {
+                    matches!(gate, ContentGate::ListItemCount { .. }) && !result.findings.is_empty()
+                })
+    });
     let host_source_index = host_source_map.as_ref().and_then(|map| {
-        (host_has_prose_findings || host_has_heading_findings || host_has_link_findings)
+        (host_has_prose_findings
+            || host_has_heading_findings
+            || host_has_link_findings
+            || host_has_list_findings)
             .then(|| map.source_index())
     });
     let host_projected_index = input.text.as_deref().and_then(|text| {
@@ -740,6 +754,14 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     host_source_index.as_ref()?,
                     destinations.as_deref(),
                     link_observations.as_deref(),
+                    gate,
+                    result,
+                )
+            })
+            .or_else(|| {
+                host_source_map.as_ref()?.list_positions(
+                    host_source_index.as_ref()?,
+                    structured_lists.as_deref(),
                     gate,
                     result,
                 )
