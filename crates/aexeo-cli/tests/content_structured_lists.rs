@@ -125,6 +125,69 @@ fn list_measurements_are_reported_only_for_observed_structure() {
 }
 
 #[test]
+fn list_review_telemetry_distinguishes_unchecked_and_observed() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='lists'\n[[gates]]\nid='private-gate'\nkind='list_item_count'\nflagged_counts=[3]\n[[gates]]\nid='other-gate'\nkind='list_item_count'\nflagged_counts=[2]\n").unwrap();
+    let article = dir.path().join("private-route.md");
+    for (format, content, expected) in [
+        (
+            "markdown",
+            "- private-one\n- private-two\n- private-three\n",
+            serde_json::json!({
+                "configured_gates": 2, "measured_gates": 2, "not_checked_gates": 0,
+                "lists_observed": 2, "lists_matching_counts": 1
+            }),
+        ),
+        (
+            "markdown",
+            "private prose",
+            serde_json::json!({
+                "configured_gates": 2, "measured_gates": 2, "not_checked_gates": 0,
+                "lists_observed": 0, "lists_matching_counts": 0
+            }),
+        ),
+        (
+            "text",
+            "private prose",
+            serde_json::json!({
+                "configured_gates": 2, "measured_gates": 0, "not_checked_gates": 2
+            }),
+        ),
+    ] {
+        fs::write(&article, content).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--input-format",
+                format,
+                "--preset",
+                "custom",
+                "--preset-source",
+                &format!("custom={}", preset.display()),
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(telemetry["list_review"], expected);
+        let serialized = telemetry.to_string();
+        for private in ["private-route", "private-one", "private-gate", "other-gate"] {
+            assert!(!serialized.contains(private));
+        }
+    }
+}
+
+#[test]
 fn list_findings_identify_each_offending_markdown_list() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");

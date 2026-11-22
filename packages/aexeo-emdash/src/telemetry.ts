@@ -24,3 +24,32 @@ export function addProseVarianceMeasurements(
   }
   return totals;
 }
+
+/** Aggregate list observations are counted per measured gate. */
+export interface ListReviewTelemetry {
+  configured_gates: number;
+  measured_gates: number;
+  not_checked_gates: number;
+  lists_observed?: number;
+  lists_matching_counts?: number;
+}
+
+/** Aggregate list gate coverage without retaining identifiers or content. */
+export function listReviewMeasurements(
+  gates: ReadonlyArray<{ required_capability: string; status: string; measurements?: Record<string, number> }>,
+): ListReviewTelemetry | undefined {
+  let totals: ListReviewTelemetry | undefined;
+  for (const gate of gates) {
+    if (gate.required_capability !== "structured_lists") continue;
+    totals ??= { configured_gates: 0, measured_gates: 0, not_checked_gates: 0 };
+    totals.configured_gates += 1;
+    if (gate.status === "not_checked") totals.not_checked_gates += 1;
+    const observed = gate.measurements?.lists_observed;
+    const matching = gate.measurements?.lists_matching_counts;
+    if (observed === undefined || matching === undefined) continue;
+    totals.measured_gates += 1;
+    totals.lists_observed = (totals.lists_observed ?? 0) + observed;
+    totals.lists_matching_counts = (totals.lists_matching_counts ?? 0) + matching;
+  }
+  return totals;
+}

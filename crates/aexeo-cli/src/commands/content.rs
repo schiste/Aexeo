@@ -1226,6 +1226,40 @@ fn print_telemetry(
             "exceedances": length_exceedances,
         });
     }
+    let mut list_gates = 0usize;
+    let mut list_measured = 0usize;
+    let mut list_unchecked = 0usize;
+    let mut lists_observed = 0usize;
+    let mut lists_matching = 0usize;
+    for (result, gate) in report.gates.iter().zip(&preset.gates) {
+        if !matches!(gate, ContentGate::ListItemCount { .. }) {
+            continue;
+        }
+        list_gates += 1;
+        if result.status == GateStatus::NotChecked {
+            list_unchecked += 1;
+        }
+        if let (Some(&observed), Some(&matching)) = (
+            result.measurements.get("lists_observed"),
+            result.measurements.get("lists_matching_counts"),
+        ) {
+            list_measured += 1;
+            lists_observed = lists_observed.saturating_add(observed);
+            lists_matching = lists_matching.saturating_add(matching);
+        }
+    }
+    if list_gates > 0 {
+        let mut list_review = serde_json::json!({
+            "configured_gates": list_gates,
+            "measured_gates": list_measured,
+            "not_checked_gates": list_unchecked,
+        });
+        if list_measured > 0 {
+            list_review["lists_observed"] = serde_json::json!(lists_observed);
+            list_review["lists_matching_counts"] = serde_json::json!(lists_matching);
+        }
+        event["list_review"] = list_review;
+    }
     let mut prose_gates = 0usize;
     let mut prose_excluded = 0usize;
     let mut prose_windows = 0usize;
