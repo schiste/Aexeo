@@ -357,7 +357,7 @@ snapshot and destination order. Aexeo does not authenticate those observations.
 ### CLI host observations
 
 A trusted host can instead supply `--link-observations observations.json` for a
-single Markdown or HTML document, without network access. Generate a template
+single Markdown, HTML or adapter JSON document, without network access. Generate a template
 with `aexeo-cli content article.md --input-format markdown --export-link-observations`;
 it contains the digest and extracted destinations with every observation set to
 `not_checked`. The output can contain private URLs. A trusted host may fill in
@@ -374,7 +374,10 @@ The strict UTF-8 JSON snapshot has this shape:
 ```
 
 The source digest, destination values and occurrence order, and observation
-count must all match the document currently evaluated. Duplicate and unknown JSON
+count must all match the document currently evaluated. For adapter JSON the
+digest covers the exact supplied JSON bytes, including structure and source maps,
+not just projected text. Regenerate snapshots made by earlier versions for this
+format; formatting changes also require a new snapshot. Duplicate and unknown JSON
 fields are rejected. Valid observations are `reachable`, `not_found`,
 `not_checked`, and `not_applicable`. A mismatch is an error; incomplete
 observations retain any observed findings but leave the gate `not_checked`.

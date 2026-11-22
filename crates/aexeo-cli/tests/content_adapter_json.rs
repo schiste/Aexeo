@@ -524,6 +524,19 @@ fn host_link_offsets_map_bound_unreachable_observations() {
             {"gate_id":"online","finding_index":0,"source":"host_supplied_source_text","line":3,"column":1}
         ])
     );
+
+    // The same text and destinations with a changed source map are a different
+    // host snapshot; old observations must not be reused for its findings.
+    let mut changed = projection;
+    changed["source_map"]["link_offsets"] = json!([null, null]);
+    fs::write(&file, serde_json::to_vec(&changed).unwrap()).unwrap();
+    let stale = run(
+        &file,
+        &preset,
+        &["--link-observations", snapshot_file.to_str().unwrap()],
+    );
+    assert_eq!(stale.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("does not match"));
 }
 
 #[test]
