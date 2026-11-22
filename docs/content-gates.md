@@ -1851,8 +1851,9 @@ uses schema `aexeo.content-incremental-batch/v1-experimental`, with `snapshot`
 `paragraph_text`, `adapted`, or `adapted_main`), and `proposals` (an array of
 objects with `change` and `after`, as in `content-impact`). The batch is limited
 to 16 MiB, 256 base items or changed projections per proposal, and 16 proposals.
-Only inline change content is supported. Site, source and external gates remain
-unsupported and are `not_checked`. A complete synthetic example is
+Inline change content works by default. Referenced states require explicit host
+access as described below. Site, source and external gates remain unsupported
+and are `not_checked`. A complete synthetic example is
 [`incremental-batch.json`](../crates/aexeo-cli/tests/fixtures/incremental-batch.json);
 it exercises a composed item and collection preset and is tested through the
 CLI. The example is illustrative; it does not establish a real site's inventory.
@@ -1864,6 +1865,23 @@ cat crates/aexeo-cli/tests/fixtures/incremental-batch.json | aexeo-cli content-i
 
 Both file and stdin input use the same byte limit and strict duplicate-key
 validation. Results stream to stdout; telemetry, when enabled, goes to stderr.
+
+For referenced file states, explicitly authorize an absolute `--content-root`;
+its value must match the change's `content_root`. For URI states, also supply
+`--host-content-map INDEX=PATH` for the zero-based proposal index. Each map is a
+JSON array of `{ "entry": 0, "state": "after", "path": "/absolute/root/file" }`
+records and must cover *all* referenced before and after states of that proposal
+exactly once. Repeat the option for other proposals. Paths must be confined under
+the authorized root, and file entries must match their declared file paths. The
+host supplies local URI bytes; Aexeo does not fetch URIs. Unsupported platforms,
+missing mappings, unavailable files, or mismatched bytes are not assessed.
+Mappings are checked before results are written. As output goes to stdout, the
+caller must ensure shell redirection does not overwrite an input file.
+
+Each referenced state is limited to 16 MiB, and each proposal to 64 MiB of
+referenced bytes. These checks do not establish source provenance, freshness,
+snapshot completeness, or publication safety. Telemetry adds aggregate counts
+of referenced states and mapped proposals, without paths, URIs or content.
 
 An optional `base_metadata` object maps every base entity ID to a complete map
 of string fields, or to `null` if its metadata was not observed. An empty map

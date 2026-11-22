@@ -75,6 +75,8 @@ unavailable check may become a pass.
   referenced file and URI states using an explicit confined host provider and
   bounded byte comparisons. The default methods still refuse references; this
   does not fetch URIs or establish provenance, freshness or publication safety.
+  The incremental CLI accepts a host-authorized root and an explicit per-proposal
+  reference map, with aggregate telemetry and the same bounded verification.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with
   explicit rename bridging; [#533](https://github.com/schiste/Aexeo/pull/533)

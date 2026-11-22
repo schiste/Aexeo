@@ -376,3 +376,273 @@ fn stdin_rejects_duplicate_keys_and_oversize_without_results() {
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("size limit"));
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn referenced_states_are_confined_to_their_proposal_and_reported_without_leaking_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let first = root.join("first.txt");
+    let second = root.join("second.txt");
+    fs::write(&first, "abc").unwrap();
+    fs::write(&second, "abc").unwrap();
+    let map0 = root.join("map0.json");
+    let map1 = root.join("map1.json");
+    fs::write(
+        &map0,
+        serde_json::to_vec(&json!([{"entry":0,"state":"after","path":first}])).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &map1,
+        serde_json::to_vec(&json!([{"entry":0,"state":"after","path":second}])).unwrap(),
+    )
+    .unwrap();
+    let mut b = batch();
+    b["proposals"][0]["change"]["content_root"] = json!(root);
+    let state0 = b["proposals"][0]["change"]["entries"][0]["after"]
+        .as_object_mut()
+        .unwrap();
+    state0.remove("inline");
+    state0.insert("file".into(), json!("first.txt"));
+    let state1 = b["proposals"][1]["change"]["entries"][0]["after"]
+        .as_object_mut()
+        .unwrap();
+    state1.remove("inline");
+    state1.insert("uri".into(), json!("https://example.org/private"));
+    let root_arg = root.to_str().unwrap();
+    let map_arg0 = format!("0={}", map0.display());
+    let map_arg1 = format!("1={}", map1.display());
+    let output = run(
+        &b,
+        &[
+            "--content-root",
+            root_arg,
+            "--host-content-map",
+            &map_arg0,
+            "--host-content-map",
+            &map_arg1,
+            "--telemetry",
+        ],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        lines(&output)
+            .iter()
+            .all(|v| v["result"]["status"] == "evaluated")
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let telemetry: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(telemetry["referenced_states"], 2);
+    assert_eq!(telemetry["mapped_proposals"], 2);
+    assert!(!stderr.contains(root_arg));
+    assert!(!stderr.contains("example.org"));
+    let missing = run(
+        &b,
+        &["--content-root", root_arg, "--host-content-map", &map_arg0],
+    );
+    assert_eq!(missing.status.code(), Some(2));
+    assert_eq!(lines(&missing)[1]["result"]["status"], "not_checked");
+    fs::write(&second, "wrong").unwrap();
+    let changed = run(
+        &b,
+        &[
+            "--content-root",
+            root_arg,
+            "--host-content-map",
+            &map_arg0,
+            "--host-content-map",
+            &map_arg1,
+        ],
+    );
+    assert_eq!(changed.status.code(), Some(2));
+    assert_eq!(lines(&changed)[1]["result"]["status"], "not_checked");
+    let duplicate = run(
+        &b,
+        &[
+            "--content-root",
+            root_arg,
+            "--host-content-map",
+            &map_arg0,
+            "--host-content-map",
+            &map_arg0,
+        ],
+    );
+    assert!(!duplicate.status.success());
+    assert!(duplicate.stdout.is_empty());
+    let wrong_proposal = format!("1={}", map0.display());
+    let rejected = run(
+        &b,
+        &[
+            "--content-root",
+            root_arg,
+            "--host-content-map",
+            &map_arg0,
+            "--host-content-map",
+            &wrong_proposal,
+        ],
+    );
+    // Mapping a URI to the same file is legal if its bytes match the URI state;
+    // a file mapping to the wrong declared path is not.
+    assert_eq!(rejected.status.code(), Some(0));
+    let invalid_file = format!("0={}", map1.display());
+    let rejected = run(
+        &b,
+        &[
+            "--content-root",
+            root_arg,
+            "--host-content-map",
+            &invalid_file,
+        ],
+    );
+    assert!(!rejected.status.success());
+    assert!(rejected.stdout.is_empty());
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn referenced_collections_and_composed_reports_match_inline_evaluation() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let source_path = root.join("content.txt");
+    let map_path = root.join("map.json");
+    fs::write(&source_path, "abc").unwrap();
+    fs::write(
+        &map_path,
+        serde_json::to_vec(&json!([{"entry":0,"state":"after","path":source_path}])).unwrap(),
+    )
+    .unwrap();
+    let map_arg = format!("0={}", map_path.display());
+    for preset in [
+        "version=1\nname='custom'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n",
+        "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n",
+    ] {
+        let mut b = metadata_batch(preset);
+        b["proposals"].as_array_mut().unwrap().truncate(1);
+        let expected = run(&b, &[]);
+        let state = b["proposals"][0]["change"]["entries"][0]["after"]
+            .as_object_mut()
+            .unwrap();
+        state.remove("inline");
+        state.insert("uri".into(), json!("https://example.org/private"));
+        let actual = run(
+            &b,
+            &[
+                "--content-root",
+                root.to_str().unwrap(),
+                "--host-content-map",
+                &map_arg,
+            ],
+        );
+        assert_eq!(
+            actual.status.code(),
+            expected.status.code(),
+            "{}",
+            String::from_utf8_lossy(&actual.stderr)
+        );
+        assert_eq!(lines(&actual), lines(&expected));
+        fs::write(&source_path, "wrong").unwrap();
+        let rejected = run(
+            &b,
+            &[
+                "--content-root",
+                root.to_str().unwrap(),
+                "--host-content-map",
+                &map_arg,
+            ],
+        );
+        assert_eq!(rejected.status.code(), Some(2));
+        let result = &lines(&rejected)[0]["result"];
+        assert!(result["collection"]["status"] == "not_checked");
+        if result["status"] == "composed" {
+            assert_eq!(result["items"]["status"], "not_checked");
+        }
+        fs::write(&source_path, "abc").unwrap();
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn referenced_content_symlink_outside_root_is_not_checked() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("source"), "abc").unwrap();
+    symlink(outside.path().join("source"), root.path().join("link")).unwrap();
+    let mut b = batch();
+    b["proposals"].as_array_mut().unwrap().truncate(1);
+    b["proposals"][0]["change"]["content_root"] = json!(root.path());
+    let state = b["proposals"][0]["change"]["entries"][0]["after"]
+        .as_object_mut()
+        .unwrap();
+    state.remove("inline");
+    state.insert("file".into(), json!("link"));
+    let output = run(&b, &["--content-root", root.path().to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(lines(&output)[0]["result"]["status"], "not_checked");
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn referenced_rename_requires_both_before_and_after_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let old = root.join("old.txt");
+    let new = root.join("new.txt");
+    fs::write(&old, "abc").unwrap();
+    fs::write(&new, "abc").unwrap();
+    let map = root.join("map.json");
+    fs::write(
+        &map,
+        serde_json::to_vec(&json!([
+            {"entry":0,"state":"before","path":old},
+            {"entry":0,"state":"after","path":new}
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+    let source = "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n";
+    let mut b = metadata_batch(source);
+    b["proposals"].as_array_mut().unwrap().truncate(1);
+    let hash = b["snapshot"]["items"][0]["sha256"].clone();
+    let state = json!({"sha256":hash,"inline":"abc"});
+    let new_item = json!({"entity_id":"c","public_path":"/c","media_type":"text/plain","revision":null,"sha256":hash,"source":"abc","links":[]});
+    b["proposals"][0]["change"]["entries"] = json!([{"entity_id":"c","previous_entity_id":"b","operation":"rename","media_type":"text/plain","public_path":"/c","before":state,"after":state,"metadata":{"slug":"renamed"}}]);
+    b["proposals"][0]["after"] = json!([new_item]);
+    let expected = run(&b, &[]);
+    b["proposals"][0]["change"]["content_root"] = json!(root);
+    b["proposals"][0]["change"]["entries"][0]["before"] = json!({"sha256":hash,"file":"old.txt"});
+    b["proposals"][0]["change"]["entries"][0]["after"] =
+        json!({"sha256":hash,"uri":"https://example.org/private"});
+    let map_arg = format!("0={}", map.display());
+    let args = [
+        "--content-root",
+        root.to_str().unwrap(),
+        "--host-content-map",
+        &map_arg,
+    ];
+    let actual = run(&b, &args);
+    assert_eq!(
+        actual.status.code(),
+        expected.status.code(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(lines(&actual), lines(&expected));
+    fs::write(old, "changed").unwrap();
+    let rejected = run(&b, &args);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(
+        lines(&rejected)[0]["result"]["items"]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&rejected)[0]["result"]["collection"]["status"],
+        "not_checked"
+    );
+}

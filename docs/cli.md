@@ -258,6 +258,12 @@ Options:
       --input <input>
           Versioned JSON batch file, or - for stdin; may contain private content
 
+      --content-root <content-root>
+          Authorize an absolute content root for referenced file states
+
+      --host-content-map <host-content-map>
+          Map all referenced states for one proposal as INDEX=PATH; may be repeated. URIs are not fetched
+
       --telemetry
           Emit aggregate timing and counts to stderr
 
