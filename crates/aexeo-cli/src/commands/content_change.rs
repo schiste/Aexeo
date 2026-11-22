@@ -11,9 +11,11 @@ use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, ContentPhase, SourceError},
     content_gate_verdict::{
-        ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions, ChangeLinkSnapshots,
-        ScopedBindingKind, evaluate_change_with_collection_and_html_scope,
-        verify_scoped_change_input_binding, verify_scoped_change_verdict,
+        ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions, ChangeEvidenceInventory,
+        ChangeLinkSnapshots, ScopedBindingKind, evaluate_change_with_collection_and_html_scope,
+        evaluate_change_with_evidence, verify_change_evidence_input_binding,
+        verify_change_evidence_verdict, verify_scoped_change_input_binding,
+        verify_scoped_change_verdict,
     },
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
@@ -395,6 +397,26 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             }
         })
         .transpose()?;
+    let evidence: Option<ChangeEvidenceInventory> = args
+        .get_one::<String>("evidence-inventory")
+        .map(|path| -> Result<_> {
+            protect_input(
+                Path::new(path),
+                Path::new(&verdict_path),
+                "evidence inventory",
+            )?;
+            let mut data = Vec::new();
+            File::open(path)
+                .user_context("opening evidence inventory")?
+                .take(MAX_CHANGE_BYTES + 1)
+                .read_to_end(&mut data)
+                .user_context("reading evidence inventory")?;
+            if data.len() as u64 > MAX_CHANGE_BYTES {
+                user_bail!("evidence inventory exceeds the size limit");
+            }
+            parse_lossless_json(&data).user_context("invalid evidence inventory")
+        })
+        .transpose()?;
     let mut provider = HostFiles::new(
         args.get_one::<String>("content-root").map(String::as_str),
         Some(Path::new(&verdict_path)),
@@ -494,7 +516,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         .as_ref()
         .map(|host| host.fingerprint())
         .transpose()?;
-    if (check_links || snapshots.is_some() || external.is_some())
+    if (check_links || snapshots.is_some() || external.is_some() || evidence.is_some())
         && let Some(previous) = &previous_verdict
     {
         let kind = if external.is_some() {
@@ -502,18 +524,32 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         } else {
             ScopedBindingKind::ObservedLinks
         };
-        let preflight = verify_scoped_change_input_binding(
-            previous,
-            &change,
-            &preset,
-            MAX_CONTENT_INPUT_BYTES,
-            MAX_TOTAL_CONTENT_BYTES,
-            args.get_flag("plain-text-paragraphs"),
-            collection_ref.as_ref(),
-            html_scope,
-            kind,
-        )
-        .and_then(|()| {
+        let binding = if let Some(inventory) = &evidence {
+            verify_change_evidence_input_binding(
+                previous,
+                &change,
+                &preset,
+                MAX_CONTENT_INPUT_BYTES,
+                MAX_TOTAL_CONTENT_BYTES,
+                args.get_flag("plain-text-paragraphs"),
+                collection_ref.as_ref(),
+                html_scope,
+                inventory,
+            )
+        } else {
+            verify_scoped_change_input_binding(
+                previous,
+                &change,
+                &preset,
+                MAX_CONTENT_INPUT_BYTES,
+                MAX_TOTAL_CONTENT_BYTES,
+                args.get_flag("plain-text-paragraphs"),
+                collection_ref.as_ref(),
+                html_scope,
+                kind,
+            )
+        };
+        let preflight = binding.and_then(|()| {
             let extensions = previous.extensions.as_ref();
             let previous_options =
                 extensions.and_then(|values| values.get("aexeo.cli-link-options.v1"));
@@ -537,8 +573,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         if preflight.is_err() {
             report_revalidation(false);
         }
-        preflight
-            .user_context("previous verdict does not match the current link evaluation inputs")?;
+        preflight.user_context("previous verdict does not match the current evaluation inputs")?;
     }
     let mut link_session = None;
     let mut observe = |entity: &str, values: &[String]| -> Result<_> {
@@ -567,29 +602,48 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
-    let mut verdict = match evaluate_change_with_collection_and_html_scope(
-        &change,
-        &mut provider,
-        &preset,
-        &iso_now(),
-        MAX_CONTENT_INPUT_BYTES,
-        MAX_TOTAL_CONTENT_BYTES,
-        ChangeEvaluationHost {
-            options: ChangeEvaluationOptions {
-                link_observer: observer,
-                plain_text_paragraphs: args.get_flag("plain-text-paragraphs"),
-            },
-            extensions: external
-                .as_ref()
-                .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
+    let host = ChangeEvaluationHost {
+        options: ChangeEvaluationOptions {
+            link_observer: observer,
+            plain_text_paragraphs: args.get_flag("plain-text-paragraphs"),
         },
-        collection.as_ref().map(|snapshot| ChangeCollection {
-            change_id: &snapshot.change_id,
-            items: &snapshot.items,
-            complete: snapshot.complete,
-        }),
-        html_scope,
-    ) {
+        extensions: external
+            .as_ref()
+            .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
+    };
+    let collection_arg = collection.as_ref().map(|snapshot| ChangeCollection {
+        change_id: &snapshot.change_id,
+        items: &snapshot.items,
+        complete: snapshot.complete,
+    });
+    let result = if let Some(inventory) = &evidence {
+        evaluate_change_with_evidence(
+            &change,
+            &mut provider,
+            &preset,
+            &iso_now(),
+            MAX_CONTENT_INPUT_BYTES,
+            MAX_TOTAL_CONTENT_BYTES,
+            host,
+            collection_arg,
+            html_scope,
+            inventory,
+        )
+        .user_context("content change with evidence could not be evaluated")
+    } else {
+        evaluate_change_with_collection_and_html_scope(
+            &change,
+            &mut provider,
+            &preset,
+            &iso_now(),
+            MAX_CONTENT_INPUT_BYTES,
+            MAX_TOTAL_CONTENT_BYTES,
+            host,
+            collection_arg,
+            html_scope,
+        )
+    };
+    let mut verdict = match result {
         Ok(verdict) => verdict,
         Err(error) if error.downcast_ref::<SourceError>().is_some() => {
             return Err(error).user_context("content change could not be evaluated");
@@ -661,18 +715,33 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         } else {
             ScopedBindingKind::Offline
         };
-        let comparison = verify_scoped_change_verdict(
-            &previous,
-            &verdict,
-            &change,
-            &preset,
-            MAX_CONTENT_INPUT_BYTES,
-            MAX_TOTAL_CONTENT_BYTES,
-            args.get_flag("plain-text-paragraphs"),
-            collection_ref.as_ref(),
-            html_scope,
-            kind,
-        );
+        let comparison = if let Some(inventory) = &evidence {
+            verify_change_evidence_verdict(
+                &previous,
+                &verdict,
+                &change,
+                &preset,
+                MAX_CONTENT_INPUT_BYTES,
+                MAX_TOTAL_CONTENT_BYTES,
+                args.get_flag("plain-text-paragraphs"),
+                collection_ref.as_ref(),
+                html_scope,
+                inventory,
+            )
+        } else {
+            verify_scoped_change_verdict(
+                &previous,
+                &verdict,
+                &change,
+                &preset,
+                MAX_CONTENT_INPUT_BYTES,
+                MAX_TOTAL_CONTENT_BYTES,
+                args.get_flag("plain-text-paragraphs"),
+                collection_ref.as_ref(),
+                html_scope,
+                kind,
+            )
+        };
         report_revalidation(comparison.is_ok());
         comparison
             .user_context("previous verdict does not match the current inputs or evaluation")?;
@@ -721,6 +790,13 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     }
     if telemetry {
         report_html_scope(&change, html_scope);
+    }
+    if telemetry && let Some(inventory) = &evidence {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"content_change_evidence", "version":1,
+            "entities":inventory.len(), "sources":inventory.values().map(|sources| sources.len()).sum::<usize>()})
+        );
     }
     if telemetry && let Some(snapshot) = &collection {
         eprintln!(

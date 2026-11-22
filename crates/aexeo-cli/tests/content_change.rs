@@ -44,6 +44,258 @@ fn html_change(source: &str, digest: &str) -> serde_json::Value {
 }
 
 #[test]
+fn change_evidence_cli_evaluates_and_revalidates_without_exposing_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n";
+    let path = dir.path().join("evidence.json");
+    fs::write(&path, r#"{"article":{"s":"private quote"}}"#).unwrap();
+    let evidence = path.to_str().unwrap();
+    let result = run(
+        dir.path(),
+        &input(),
+        policy,
+        &["--evidence-inventory", evidence, "--telemetry"],
+    );
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    let event: serde_json::Value = serde_json::from_str(stderr.trim()).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"event":"content_change_evidence", "version":1, "entities":1, "sources":1})
+    );
+    assert!(!stderr.contains("private quote"));
+    let output = dir.path().join("verdict.json");
+    let previous = dir.path().join("previous.json");
+    fs::copy(&output, &previous).unwrap();
+    let valid = run(
+        dir.path(),
+        &input(),
+        policy,
+        &[
+            "--evidence-inventory",
+            evidence,
+            "--verify-verdict",
+            previous.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(
+        valid.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&valid.stderr)
+    );
+    let before = fs::read(&output).unwrap();
+    fs::write(&path, r#"{"article":{"s":"different"}}"#).unwrap();
+    let rejected = run(
+        dir.path(),
+        &input(),
+        policy,
+        &[
+            "--evidence-inventory",
+            evidence,
+            "--verify-verdict",
+            previous.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("previous verdict"));
+    assert_eq!(fs::read(&output).unwrap(), before);
+    let failed = run(
+        dir.path(),
+        &input(),
+        policy,
+        &["--evidence-inventory", evidence],
+    );
+    assert_eq!(failed.status.code(), Some(1));
+    fs::write(&path, r#"{"article":{}}"#).unwrap();
+    let unavailable = run(
+        dir.path(),
+        &input(),
+        policy,
+        &["--evidence-inventory", evidence],
+    );
+    assert_eq!(unavailable.status.code(), Some(2));
+    let verdict: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "not_checked");
+}
+
+#[test]
+fn change_evidence_cli_rejects_ambiguous_or_mismatched_inventory_without_overwriting_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n";
+    let path = dir.path().join("evidence.json");
+    let output = dir.path().join("verdict.json");
+    let evidence = path.to_str().unwrap();
+    for invalid in [
+        r#"{"article":{"s":"quote","s":"other"}}"#,
+        r#"{"other":{"s":"quote"}}"#,
+        r#"{"article":null}"#,
+    ] {
+        fs::write(&path, invalid).unwrap();
+        fs::write(&output, "keep").unwrap();
+        let result = run(
+            dir.path(),
+            &input(),
+            policy,
+            &["--evidence-inventory", evidence],
+        );
+        assert_eq!(
+            result.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
+    }
+    let same_file = run(
+        dir.path(),
+        &input(),
+        policy,
+        &["--evidence-inventory", output.to_str().unwrap()],
+    );
+    assert_eq!(same_file.status.code(), Some(2));
+    assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
+}
+
+#[test]
+fn change_evidence_cli_composes_with_link_snapshots_and_revalidation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[x](/x)", "sha256":"f0028e4ca25f0bd43662926fcd36d300576e7e7b3d49045cc6f89a409eaf971e"});
+    let policy = "version=1\nname='test'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='x'\nquote='quote'\nblocking=true\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n";
+    let evidence = dir.path().join("evidence.json");
+    let links = dir.path().join("links.json");
+    fs::write(&evidence, r#"{"article":{"s":"quote"}}"#).unwrap();
+    let mut snapshot = serde_json::json!({"version":1,"change_id":"example","entries":{"article":{
+        "version":1,"source_sha256":change["entries"][0]["after"]["sha256"],
+        "destinations":["/x"],"observations":["not_applicable"]}}});
+    fs::write(&links, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let options = [
+        "--evidence-inventory",
+        evidence.to_str().unwrap(),
+        "--link-observations",
+        links.to_str().unwrap(),
+    ];
+    let result = run(dir.path(), &change, policy, &options);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let previous = dir.path().join("previous.json");
+    let output = dir.path().join("verdict.json");
+    fs::copy(&output, &previous).unwrap();
+    let args = [
+        options[0],
+        options[1],
+        options[2],
+        options[3],
+        "--verify-verdict",
+        previous.to_str().unwrap(),
+    ];
+    let result = run(dir.path(), &change, policy, &args);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let saved = fs::read(&output).unwrap();
+    snapshot["entries"]["article"]["observations"][0] = "not_checked".into();
+    fs::write(&links, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let rejected = run(dir.path(), &change, policy, &args);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(fs::read(&output).unwrap(), saved);
+}
+
+#[test]
+fn change_evidence_cli_composes_with_collection_and_rejects_changed_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["metadata"] = serde_json::json!({"slug":"article"});
+    let policy = "version=1\nname='test'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\nblocking=true\n";
+    let evidence = dir.path().join("evidence.json");
+    let collection = dir.path().join("collection.json");
+    fs::write(&evidence, r#"{"article":{"s":"quote"}}"#).unwrap();
+    fs::write(&collection, r#"{"change_id":"example","complete":true,"items":[{"id":"article","text":null,"metadata":{"slug":"article"}}]}"#).unwrap();
+    let options = [
+        "--evidence-inventory",
+        evidence.to_str().unwrap(),
+        "--collection-snapshot",
+        collection.to_str().unwrap(),
+    ];
+    let result = run(dir.path(), &change, policy, &options);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let previous = dir.path().join("previous.json");
+    let output = dir.path().join("verdict.json");
+    fs::copy(&output, &previous).unwrap();
+    let args = [
+        options[0],
+        options[1],
+        options[2],
+        options[3],
+        "--verify-verdict",
+        previous.to_str().unwrap(),
+    ];
+    assert_eq!(
+        run(dir.path(), &change, policy, &args).status.code(),
+        Some(0)
+    );
+    let saved = fs::read(&output).unwrap();
+    fs::write(&collection, r#"{"change_id":"example","complete":false,"items":[{"id":"article","text":null,"metadata":{"slug":"article"}}]}"#).unwrap();
+    assert_eq!(
+        run(dir.path(), &change, policy, &args).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+}
+
+#[test]
+fn change_evidence_cli_rejects_unsupported_receipt_modes() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let evidence = dir.path().join("evidence.json");
+    let output = dir.path().join("verdict.json");
+    fs::write(&evidence, r#"{"article":{}}"#).unwrap();
+    fs::write(&output, "keep").unwrap();
+    for extra in [
+        vec![
+            "--evidence-inventory",
+            evidence.to_str().unwrap(),
+            "--offline-receipt",
+            "--evaluator-identity",
+            "build",
+        ],
+        vec![
+            "--evidence-inventory",
+            evidence.to_str().unwrap(),
+            "--export-link-observations",
+        ],
+    ] {
+        let result = run(dir.path(), &input(), policy, &extra);
+        assert_eq!(
+            result.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
+    }
+}
+
+#[test]
 fn html_image_alt_finding_has_a_source_position_in_change_verdict() {
     let dir = tempfile::tempdir().unwrap();
     let source = "<main>\n<p>Before <img alt='bad'> after bad</p>\n</main>";

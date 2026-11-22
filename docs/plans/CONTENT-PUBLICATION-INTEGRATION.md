@@ -97,7 +97,8 @@ unavailable check may become a pass.
   per-proposed-entity evidence inventory. It binds that inventory separately
   from legacy offline verdicts and can compose it with host link observers and
   collection context. Missing source entries remain not checked. This interface
-  does not yet extend the experimental portable candidate protocol or CLI, and
+  is also exposed to the change CLI with bounded JSON loading and revalidation;
+  it does not yet extend the experimental portable candidate protocol, and
   the host must establish source authenticity, freshness and publication safety.
   The in-process item and composed baselines and the incremental CLI accept a
   complete per-entity evidence inventory for existing evidence gates,
