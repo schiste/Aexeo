@@ -103,6 +103,59 @@ class PortableComparison(unittest.TestCase):
             with self.assertRaises(VerificationError):
                 check(supplied)
 
+    def test_rebound_rename_cannot_bypass_unchecked_impact(self):
+        # Matching artifacts and outputs cannot establish the missing site-impact
+        # check, even if an evaluator omits it or falsely reports a pass.
+        change = json.loads(self.artifacts['change'])
+        entry = change['entries'][0]
+        entry.update(operation='rename', previous_entity_id='old', before=copy.deepcopy(entry['after']))
+        base = copy.deepcopy(self.fixture['base'])
+        old = copy.deepcopy(self.fixture['after'][0])
+        old.update(entity_id='old', public_path='/old')
+        base['items'] = [old]
+        self.artifacts['change'] = self.encoded(change)
+        candidate = overlay(base, change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        for result in (self.previous, self.fresh):
+            result['binding_sha256'] = binding(inputs)
+        for include_impact in (False, True):
+            with self.subTest(include_impact=include_impact):
+                if include_impact:
+                    for result in (self.previous, self.fresh):
+                        result['verdict']['checks'].append({
+                            'id': 'system:7:article:change_impact',
+                            'blocking': True, 'status': 'passed'})
+                        result['verdict']['summary']['passed'] += 1
+                        result['verdict']['summary']['checks'] += 1
+                with self.assertRaisesRegex(VerificationError, 'impact'):
+                    compare(self.encoded(self.previous), self.encoded(self.fresh),
+                            self.encoded(base), self.encoded(self.fixture['after']),
+                            self.artifacts, self.required, self.identity, 0, False)
+
+    def test_delete_cannot_bypass_unchecked_impact(self):
+        change = json.loads(self.artifacts['change'])
+        entry = change['entries'][0]
+        entry['operation'] = 'delete'
+        entry['before'] = entry.pop('after')
+        base = copy.deepcopy(self.fixture['base'])
+        base['items'] = copy.deepcopy(self.fixture['after'])
+        self.artifacts['change'] = self.encoded(change)
+        candidate = overlay(base, change, [])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        for result in (self.previous, self.fresh):
+            result['binding_sha256'] = binding(inputs)
+            result['verdict']['subject']['entries'][0]['sha256'] = None
+        with self.assertRaisesRegex(VerificationError, 'impact'):
+            compare(self.encoded(self.previous), self.encoded(self.fresh),
+                    self.encoded(base), self.encoded([]), self.artifacts,
+                    [], self.identity, 0, False)
+
     def test_policy_coverage_rejects_rebound_omitted_gate(self):
         # Both verdicts agree and the binding matches the expanded policy; a
         # host-supplied list containing only the first check is insufficient.
