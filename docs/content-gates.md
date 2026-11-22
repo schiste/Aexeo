@@ -1852,8 +1852,9 @@ uses schema `aexeo.content-incremental-batch/v1-experimental`, with `snapshot`
 objects with `change` and `after`, as in `content-impact`). The batch is limited
 to 16 MiB, 256 base items or changed projections per proposal, and 16 proposals.
 Inline change content works by default. Referenced states require explicit host
-access as described below. Site, source and external gates remain unsupported
-and are `not_checked`. A complete synthetic example is
+access as described below. The `final_newline` source gate also runs in plain
+mode against each complete supplied source. Other source-dependent, site and
+external gates remain unsupported and are `not_checked`. A complete synthetic example is
 [`incremental-batch.json`](../crates/aexeo-cli/tests/fixtures/incremental-batch.json);
 it exercises a composed item and collection preset and is tested through the
 CLI. The example is illustrative; it does not establish a real site's inventory.

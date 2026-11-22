@@ -57,7 +57,9 @@ unavailable check may become a pass.
   a persistent cache or a general incremental site evaluator.
   An explicit adapted mode also compares mixed Markdown, static HTML and
   paragraph text for supported independent item gates, with reuse and full
-  evaluation regression tests. Adapted Markdown and HTML also support the
+  evaluation regression tests. Plain mode also supports the `final_newline`
+  source gate using each complete supplied source. Adapted Markdown and HTML
+  also support the
   independent heading-hierarchy gate using complete ordered levels; mixed
   presets can compose it with prose-only rhythm checks. Missing heading
   observations remain not checked. Markdown and conservatively observed static
