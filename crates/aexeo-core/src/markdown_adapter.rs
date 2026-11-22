@@ -940,6 +940,7 @@ fn reference_label(mut children: &[Node]) -> Option<&str> {
 #[derive(Default)]
 struct Projection {
     text: String,
+    pending_footnote_boundary: bool,
     headings: Vec<String>,
     ranges: Vec<(usize, usize, bool)>,
     list_item_depth: usize,
@@ -951,6 +952,17 @@ struct Projection {
 }
 
 impl Projection {
+    fn before_text(&mut self, next: &str) {
+        if next.is_empty() {
+            return;
+        }
+        if self.pending_footnote_boundary && next.chars().next().is_some_and(char::is_alphanumeric)
+        {
+            self.text.push(' ');
+        }
+        self.pending_footnote_boundary = false;
+    }
+
     fn image_alt(
         &mut self,
         alt: &str,
@@ -958,6 +970,7 @@ impl Projection {
         source: &str,
         source_map: &mut MarkdownSourceMap,
     ) {
+        self.before_text(alt);
         let start = self.text.len();
         self.text.push_str(alt);
         if source_map.enabled
@@ -982,6 +995,7 @@ impl Projection {
     fn visit(&mut self, node: &Node, source: &str, source_map: &mut MarkdownSourceMap) {
         match node {
             Node::Text(item) => {
+                self.before_text(&item.value);
                 let start = self.text.len();
                 self.text.push_str(&item.value);
                 if let Some(pos) = item.position.as_ref().filter(|_| source_map.enabled) {
@@ -992,6 +1006,7 @@ impl Projection {
                 }
             }
             Node::InlineCode(item) => {
+                self.before_text(&item.value);
                 let start = self.text.len();
                 self.text.push_str(&item.value);
                 if let Some(pos) = item.position.as_ref().filter(|_| source_map.enabled) {
@@ -1027,6 +1042,7 @@ impl Projection {
             {
                 self.link_count += 1;
                 if let Some(label) = reference_label(&link.children) {
+                    self.before_text(" ");
                     self.literal_projection.push_masked(&mut self.text, label);
                 }
             }
@@ -1041,30 +1057,26 @@ impl Projection {
             {
                 self.link_count += 1;
                 if let Some(label) = reference_label(&link.children) {
+                    self.before_text(" ");
                     self.literal_projection.push_masked(&mut self.text, label);
                 }
             }
-            // Removing a reference between adjacent word characters must not
-            // merge those words. Do not insert a token before punctuation.
-            Node::FootnoteReference(item) => {
-                if self
-                    .text
-                    .chars()
-                    .next_back()
-                    .is_some_and(char::is_alphanumeric)
-                    && item
-                        .position
-                        .as_ref()
-                        .and_then(|position| source.get(position.end.offset..))
-                        .and_then(|remaining| remaining.chars().next())
-                        .is_some_and(char::is_alphanumeric)
-                {
-                    self.text.push(' ');
-                }
+            // Delay the separator until the next projected text is known;
+            // formatting nodes may intervene between a note and the next word.
+            Node::FootnoteReference(_) => {
+                self.pending_footnote_boundary = self.text.chars().next_back().is_some_and(|ch| {
+                    ch.is_alphanumeric() || unicode_normalization::char::is_combining_mark(ch)
+                });
             }
-            Node::Break(_) => self.text.push('\n'),
+            Node::Break(_) => {
+                self.pending_footnote_boundary = false;
+                self.text.push('\n');
+            }
             Node::Html(html) => match observed_html_break(&html.value) {
-                Some(HtmlBreak::Line) => self.text.push('\n'),
+                Some(HtmlBreak::Line) => {
+                    self.pending_footnote_boundary = false;
+                    self.text.push('\n');
+                }
                 Some(HtmlBreak::Opportunity) => {}
                 None => {
                     source_map.heading_levels_complete = false;
@@ -1114,6 +1126,7 @@ impl Projection {
     }
 
     fn end_block(&mut self) {
+        self.pending_footnote_boundary = false;
         self.block_ends.push(self.text.len());
         self.text.push('\n');
     }
@@ -1138,6 +1151,7 @@ fn extract_markdown_from_root(
     projection.visit(root, source, &mut source_map);
     let Projection {
         text,
+        pending_footnote_boundary: _,
         headings,
         ranges,
         list_item_depth: _,
@@ -1217,6 +1231,40 @@ mod tests {
             let text = input.text.unwrap();
             assert!(!text.contains("Onetwo"), "{text:?}");
         }
+    }
+
+    #[test]
+    fn footnote_boundaries_follow_inline_projection() {
+        for markup in [
+            "**beta**",
+            "*beta*",
+            "`beta`",
+            "[beta](/path)",
+            "![beta](/image)",
+        ] {
+            let source = format!("Alpha[^n]{markup}. Next.\n\n[^n]: Note.");
+            let (input, _, _, map) = markdown_input_with_source_map("x", &source).unwrap();
+            let text = input.text.unwrap();
+            assert!(text.starts_with("Alpha beta. Next."), "{markup}: {text:?}");
+            let expected = crate::text_index::LineIndex::new(&source)
+                .position(&source, source.find("beta").unwrap());
+            assert_eq!(
+                map.source_position(&source, &text, 1, 7),
+                expected,
+                "{markup}"
+            );
+        }
+        for (markup, expected) in [("`!`", "Alpha!"), (" **beta**", "Alpha beta")] {
+            let source = format!("Alpha[^n]{markup}\n\n[^n]: Note.");
+            let (input, _, _, _) = markdown_input_with_source_map("x", &source).unwrap();
+            assert!(input.text.unwrap().starts_with(expected), "{markup}");
+        }
+        let source = "Cafe\u{301}[^n]**beta**.\n\n[^n]: Note.";
+        let (input, _, _, _) = markdown_input_with_source_map("x", source).unwrap();
+        assert!(input.text.unwrap().starts_with("Cafe\u{301} beta."));
+        let source = "Alpha[^n]\n\nBeta.\n\n[^n]: Note.";
+        let (input, _, _, _) = markdown_input_with_source_map("x", source).unwrap();
+        assert!(input.text.unwrap().starts_with("Alpha\nBeta."));
     }
 
     #[test]

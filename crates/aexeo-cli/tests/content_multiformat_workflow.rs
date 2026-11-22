@@ -398,16 +398,24 @@ fn markdown_footnote_markers_keep_separate_words_for_editorial_checks() {
     let draft = dir.path().join("example.md");
     let preset = dir.path().join("workflow.toml");
     fs::write(&preset, "version=1\nname='t'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\nblocking=false\n").unwrap();
-    fs::write(&draft, "Alpha[^note]beta. Next sentence.\n\n[^note]: A.").unwrap();
-    let (report, _) = evaluate(&draft, &preset, "markdown");
-    assert_eq!(report["gates"][0]["measurements"]["sentence_count"], 3);
-    assert_eq!(
-        report["gates"][0]["findings"].as_array().unwrap().len(),
-        2,
-        "{report}"
-    );
-    assert_eq!(report["source_locations"][0]["column"], 1);
-    assert_eq!(report["source_locations"][1]["column"], 19);
+    for source in [
+        "Alpha[^note]beta. Next sentence.\n\n[^note]: A.",
+        "Alpha[^note]**beta**. Next sentence.\n\n[^note]: A.",
+    ] {
+        fs::write(&draft, source).unwrap();
+        let (report, _) = evaluate(&draft, &preset, "markdown");
+        assert_eq!(report["gates"][0]["measurements"]["sentence_count"], 3);
+        assert_eq!(
+            report["gates"][0]["findings"].as_array().unwrap().len(),
+            2,
+            "{report}"
+        );
+        assert_eq!(report["source_locations"][0]["column"], 1);
+        assert_eq!(
+            report["source_locations"][1]["column"],
+            source.find("Next").unwrap() + 1
+        );
+    }
 }
 
 #[test]
