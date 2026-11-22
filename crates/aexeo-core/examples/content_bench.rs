@@ -1,6 +1,10 @@
 //! Reproducible content evaluation and adapter benchmarks.
 use aexeo_core::{
-    content_gate::{ContentEvaluationContext, ContentInput, ContentPreset, MAX_FINDINGS_PER_GATE},
+    content_gate::{
+        ContentEvaluationContext, ContentGate, ContentInput, ContentPreset, GateStatus,
+        MAX_FINDINGS_PER_GATE, Severity,
+    },
+    editorial_pacing::{CompositionProfile, CompositionProfileRef},
     html_content_adapter::html_content,
     markdown_adapter::{
         MarkdownProjectionOptions, markdown_input, markdown_input_with_links,
@@ -8,7 +12,7 @@ use aexeo_core::{
         markdown_link_destinations, markdown_project, markdown_structured_lists,
     },
 };
-use std::{hint::black_box, time::Instant};
+use std::{collections::BTreeMap, hint::black_box, time::Instant};
 
 fn main() -> anyhow::Result<()> {
     let source = format!(
@@ -119,6 +123,46 @@ headings = ["Summary"]
             && dense_check.gates[0].findings.len() == MAX_FINDINGS_PER_GATE,
         "dense benchmark lost matches"
     );
+    // Exercise parsing, validation, assembly and snapshot binding on a single
+    // synthetic structured draft; this is not an authoring-quality benchmark.
+    let composition_profile = CompositionProfile::from_toml(
+        "version=1\nname='bench'\n[[fields]]\nname='paragraphs'\nallowed_counts=[{min=1}]\n",
+    )?;
+    let composition_value = serde_json::json!({
+        "paragraphs": vec!["A concise paragraph with an example and practical details. ".repeat(3); 100]
+    });
+    let composition_text = composition_profile.assemble(&composition_value)?;
+    let composition_snapshot = serde_json::to_string(&composition_value)?;
+    let composition_input = ContentInput {
+        id: "composition-benchmark".into(),
+        source_text: Some(composition_text.clone()),
+        evidence_sources: Some(BTreeMap::from([(
+            "composition".into(),
+            composition_snapshot.clone(),
+        )])),
+        ..Default::default()
+    };
+    let composition_preset = ContentPreset {
+        version: 1,
+        name: "composition-benchmark".into(),
+        gates: vec![ContentGate::EditorialPacing {
+            id: "pacing".into(),
+            severity: Severity::Warning,
+            blocking: false,
+            source: "composition".into(),
+            profile: CompositionProfileRef::Inline(composition_profile),
+            projection_separator: None,
+        }],
+    };
+    let composition_check = composition_preset.evaluate(&composition_input)?;
+    anyhow::ensure!(
+        composition_check.gates[0].status == GateStatus::Passed
+            && composition_check.gates[0].measurements["issue_count"] == 0
+            && composition_check.gates[0].findings.is_empty(),
+        "composition benchmark did not assess the bound snapshot"
+    );
+    let composition_input_bytes = composition_text.len() + composition_snapshot.len();
+    let mut composition_eval = Vec::new();
     let mut html_projection = Vec::new();
     let mut html_eval = Vec::new();
     let mut openings_eval = Vec::new();
@@ -133,6 +177,9 @@ headings = ["Summary"]
     let mut list_combined = Vec::new();
     let mut list_two_parses = Vec::new();
     for _ in 0..100 {
+        let start = Instant::now();
+        black_box(composition_preset.evaluate(black_box(&composition_input))?);
+        composition_eval.push(start.elapsed().as_micros());
         let start = Instant::now();
         black_box(
             html_content("benchmark.html", black_box(&html_source)).map_err(anyhow::Error::msg)?,
@@ -242,6 +289,7 @@ headings = ["Summary"]
         )?);
         links_two_parses.push(start.elapsed().as_micros());
     }
+    composition_eval.sort_unstable();
     html_projection.sort_unstable();
     html_eval.sort_unstable();
     openings_eval.sort_unstable();
@@ -257,6 +305,7 @@ headings = ["Summary"]
     list_two_parses.sort_unstable();
     if std::env::args().any(|arg| arg == "--json") {
         for (name, samples) in [
+            ("content/composition_bound_snapshot", &composition_eval),
             ("content/html_projection", &html_projection),
             ("content/html_projection_and_evaluation", &html_eval),
             ("content/repeated_paragraph_openings", &openings_eval),
@@ -282,11 +331,15 @@ headings = ["Summary"]
             let avg_ms = samples.iter().sum::<u128>() as f64 / samples.len() as f64 / 1000.0;
             println!(
                 "{}",
-                serde_json::json!({"name": name, "avg_ms": avg_ms, "p50_ms": samples[49] as f64 / 1000.0, "p95_ms": samples[94] as f64 / 1000.0, "iterations": samples.len(), "input_bytes": if name == "content/repeated_sentence_openings" { sentence_source.len() } else if name == "content/dense_forbidden_terms" { dense_source.len() } else if name.starts_with("content/html_") { html_source.len() } else if name.starts_with("content/markdown_links_") { link_source.len() } else if name.starts_with("content/markdown_lists_") { list_source.len() } else { source.len() }})
+                serde_json::json!({"name": name, "avg_ms": avg_ms, "p50_ms": samples[49] as f64 / 1000.0, "p95_ms": samples[94] as f64 / 1000.0, "iterations": samples.len(), "input_bytes": if name == "content/composition_bound_snapshot" { composition_input_bytes } else if name == "content/repeated_sentence_openings" { sentence_source.len() } else if name == "content/dense_forbidden_terms" { dense_source.len() } else if name.starts_with("content/html_") { html_source.len() } else if name.starts_with("content/markdown_links_") { link_source.len() } else if name.starts_with("content/markdown_lists_") { list_source.len() } else { source.len() }})
             );
         }
         return Ok(());
     }
+    println!(
+        "composition_input_bytes={} evaluation_us p50={} p95={}",
+        composition_input_bytes, composition_eval[49], composition_eval[94]
+    );
     println!("input_bytes={} iterations=100", source.len());
     println!(
         "html_input_bytes={} projection_us p50={} p95={} projection_and_evaluation_us p50={} p95={}",
