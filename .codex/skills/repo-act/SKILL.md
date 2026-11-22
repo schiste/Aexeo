@@ -141,6 +141,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   isolate each case: some tag names cause the HTML parser to leave SVG or
   MathML, so source nesting alone does not establish the resulting DOM.
 - For partial HTML projections, validate source positions against the selected subtree and the corresponding ordered elements; matching extracted text alone does not prove that surrounding links or headings map to the same source nodes. Withhold locations when that correspondence cannot be established. When extending the lexical subset, test full tag-name boundaries (including custom elements such as `script-widget`), malformed comments and raw-text delimiters; a tag-name prefix or ambiguous parser recovery must not produce a trusted location.
+- For HTML source mapping, test ASCII whitespace before the first tag separately from whitespace inside the document: the HTML parser can discard the former. Verify original source coordinates and retain conservative handling of hidden or malformed markup.
 - For host-provided source maps, check text and JSON reports with source bytes
   distinct from the projection file. Label coordinates as referring to the
   supplied source, never the projection file; byte equality alone does not prove
