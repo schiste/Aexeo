@@ -54,6 +54,23 @@ class PortableCliInterop(unittest.TestCase):
             self.assertEqual((event['policy_gate_count'], event['policy_check_count']), (2, 2))
             self.assertNotIn('article', matched.stderr)
             self.assertNotIn(str(root), matched.stderr)
+            # Optional cross-process comparator built and selected independently
+            # by the host. Both the valid and tampered verdict use real Aexeo output.
+            native = os.environ.get('AETHYME_CLI_BIN')
+            if native:
+                native_manifest = {name: str(root / name) for name in
+                    ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
+                native_manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
+                    validator_name='aexeo', validator_version='0.0.24',
+                    required_checks=['gate:7:article:words'], fresh_exit_code=0, fresh_timed_out=False)
+                (root / 'native-manifest').write_text(json.dumps(native_manifest), encoding='utf-8')
+                native_command = [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')]
+                native_env = dict(os.environ)
+                native_env.pop('AETHYME_GATE_WORKER_ID', None)
+                native_ok = subprocess.run(native_command, env=native_env, capture_output=True, text=True)
+                self.assertEqual(native_ok.returncode, 0, native_ok.stdout + native_ok.stderr)
+                self.assertEqual(json.loads(native_ok.stdout)['status'], 'match')
+                self.assertFalse(json.loads(native_ok.stdout)['publication_authorized'])
             # Keep the verdict internally consistent while omitting the advisory
             # check in both copies; the independently selected policy is unchanged.
             verdict = previous['verdict']
@@ -66,6 +83,11 @@ class PortableCliInterop(unittest.TestCase):
             self.assertEqual(rejected.returncode, 2, rejected.stderr)
             self.assertIn('policy check is missing', rejected.stderr)
             self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+            if native:
+                native_bad = subprocess.run(native_command, env=native_env, capture_output=True, text=True)
+                self.assertEqual(native_bad.returncode, 2, native_bad.stdout + native_bad.stderr)
+                self.assertIn('policy check is missing', native_bad.stdout)
+                self.assertFalse(json.loads(native_bad.stdout)['publication_authorized'])
 
     def test_file_backed_candidate_with_real_cli_and_independent_runner(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
