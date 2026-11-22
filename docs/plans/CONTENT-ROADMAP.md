@@ -540,6 +540,12 @@ registry before considering the release delivered.
   observations, and compare fresh Rust verdicts. The CLI additionally binds the
   full supplied external-result snapshot and checks it before network work.
   Callers must provide trusted, current data; hashes do not authenticate it.
+- [x] In the independent draft Python comparator, require every understood
+  resolved-policy gate's item or collection check and the configured blocking
+  flag. Matching bindings and a narrow host-required check list cannot hide an
+  omitted advisory or blocking gate. This does not validate all gate parameters,
+  authenticate the evaluator, establish freshness or authorize publication;
+  the Aethyme native comparator has not yet adopted the check.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject
