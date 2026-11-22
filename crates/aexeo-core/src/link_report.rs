@@ -1658,6 +1658,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn foreign_metadata_does_not_hide_incoming_article_links() {
+        let page = |url: &str, html: &str| RenderedPage {
+            url: url.into(),
+            html: html.into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: None,
+            redirect_chain: Vec::new(),
+            redirected_arrivals: Vec::new(),
+        };
+        let report = build_link_report(&LinkReportInput {
+            version: 1,
+            identity: Some(SurfaceIdentity { origin: "https://example.org".into(), release: "r1".into(), surface: "public".into(), snapshot: "s1".into() }),
+            snapshot_date: Some("2026-11-06".into()), crawl_complete: false,
+            pages: vec![
+                page("https://example.org/source", r#"<svg><base href="https://foreign.example/"/><link rel="canonical" href="https://foreign.example/"/></svg><main><a href="/target">Article</a></main>"#),
+                page("https://example.org/target", "<main>Target</main>"),
+            ],
+            inventory: None,
+        }).unwrap();
+        assert!(report.pages[0].canonical_hrefs.is_empty());
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|issue| issue == "canonical_target_unresolved")
+        );
+        assert_eq!(report.pages[1].distinct_source_pages, 1);
+        assert_eq!(
+            report.pages[1].source_pages_by_context[&LinkContext::Body],
+            1
+        );
+    }
+
+    #[test]
     fn matches_observed_pages_using_resolved_url_serialization() {
         let report = build_link_report(&LinkReportInput {
             version: 1,

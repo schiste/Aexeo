@@ -213,7 +213,7 @@ fn children_with_template_contents(node: &Handle) -> Vec<Handle> {
 }
 
 fn is_element(node: &Handle, tag: &str) -> bool {
-    matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == tag)
+    matches!(&node.data, NodeData::Element { name, .. } if name.ns == ns!(html) && name.local.as_ref() == tag)
 }
 
 /// Extract link evidence and document-level metadata in the same DOM parse.
@@ -246,12 +246,10 @@ pub fn extract_document(
             metadata.document_language =
                 attribute(&node, "lang").filter(|lang| !lang.trim().is_empty());
         }
-        if base.is_none()
-            && matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "base")
-        {
+        if base.is_none() && is_element(&node, "base") {
             base = attribute(&node, "href");
         }
-        let robots_content = if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "meta")
+        let robots_content = if is_element(&node, "meta")
             && attribute(&node, "name").is_some_and(|name| {
                 name.eq_ignore_ascii_case("robots") || name.eq_ignore_ascii_case("googlebot")
             }) {
@@ -262,7 +260,7 @@ pub fn extract_document(
         if let Some(content) = robots_content {
             metadata.robots_directives.push(content);
         }
-        let canonical = if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "link")
+        let canonical = if is_element(&node, "link")
             && attribute(&node, "rel").is_some_and(|rel| {
                 rel.split_ascii_whitespace()
                     .any(|part| part.eq_ignore_ascii_case("canonical"))
@@ -499,6 +497,57 @@ mod tests {
             .into_iter()
             .map(|link| link.route)
             .collect()
+    }
+
+    #[test]
+    fn foreign_metadata_names_do_not_change_html_link_resolution() {
+        for (root, namespace) in [("svg", ns!(svg)), ("math", ns!(mathml))] {
+            let html = format!(
+                r#"<{root}><base href="https://foreign.example/"/><link rel="canonical" href="https://foreign.example/"/></{root}><main><a href="article">Article</a></main>"#
+            );
+            let dom = parse_document(RcDom::default(), ParseOpts::default()).one(html.as_str());
+            let mut stack = vec![dom.document.clone()];
+            let mut foreign = Vec::new();
+            while let Some(node) = stack.pop() {
+                if let NodeData::Element { name, .. } = &node.data
+                    && name.ns == namespace
+                    && matches!(name.local.as_ref(), "base" | "link")
+                {
+                    foreign.push(name.local.to_string());
+                }
+                stack.extend(node.children.borrow().iter().cloned());
+            }
+            foreign.sort();
+            assert_eq!(foreign, ["base", "link"], "{root}");
+            let (links, metadata) = extract_document(
+                &html,
+                "https://example.com/path/",
+                "https://example.com",
+                None,
+            );
+            assert_eq!(metadata.base_href, None, "{root}");
+            assert!(metadata.canonical_hrefs.is_empty(), "{root}");
+            assert!(
+                matches!(&links[0].resolution, LinkResolution::Internal { url } if url == "https://example.com/path/article"),
+                "{root}"
+            );
+        }
+    }
+
+    #[test]
+    fn html_metadata_remains_effective_after_foreign_metadata() {
+        let html = r#"<svg><base href="https://foreign.example/"/><link rel="canonical" href="https://foreign.example/"/></svg><base href="/chosen/"><link rel="canonical" href="/article"><main><a href="next">Next</a></main>"#;
+        let (links, metadata) = extract_document(
+            html,
+            "https://example.com/path/",
+            "https://example.com",
+            None,
+        );
+        assert_eq!(metadata.base_href.as_deref(), Some("/chosen/"));
+        assert_eq!(metadata.canonical_hrefs, ["/article"]);
+        assert!(
+            matches!(&links[0].resolution, LinkResolution::Internal { url } if url == "https://example.com/chosen/next")
+        );
     }
 
     #[test]

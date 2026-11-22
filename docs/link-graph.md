@@ -82,6 +82,10 @@ produced from this input, even with a matching inventory; only a report built
 from an audit qualifies that audit's orphan findings (see
 [Legacy inbound-link findings](#legacy-inbound-link-findings)).
 
+Document base, canonical and robots metadata are taken only from HTML-namespace
+elements. Homonymous elements in SVG or MathML do not change URL resolution or
+page metadata; links within those structures can still be observed.
+
 When any observed reference has an indeterminate destination, the report raises
 `indeterminate_links` and makes inventory reconciliation not comparable. Such a
 reference may target an observed page, so zero known incoming links cannot confirm

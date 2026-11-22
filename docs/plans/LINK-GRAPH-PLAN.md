@@ -32,6 +32,10 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- Restrict document base, canonical and robots metadata to HTML-namespace
+  elements. Homonymous SVG elements cannot redirect relative-link resolution
+  or introduce a false canonical; report tests cover incoming body-link counts.
+
 - Restrict implicit landmark, paragraph and conditional-element semantics to
   the HTML namespace. SVG or MathML elements with matching names no longer invent
   body or navigation context; links retain an enclosing HTML context when present.
