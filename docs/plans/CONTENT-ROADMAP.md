@@ -292,6 +292,11 @@ registry before considering the release delivered.
 - [x] Report the number of sentence and paragraph length violations even when
   findings are capped; emit opt-in anonymous aggregate length-check telemetry
   ([PR #137](https://github.com/schiste/Aexeo/pull/137)).
+- [x] Measure an in-process, bound structured-composition gate separately with
+  a synthetic 100-paragraph snapshot. The benchmark validates its passing result
+  and reports input bytes plus average, p50 and p95 over 100 iterations; CI
+  enforces conservative average and p95 budgets. It excludes startup and host
+  adaptation and does not measure editorial quality or representative latency.
 - [x] CI benchmarks and conservative budgets for evaluation, Markdown adaptation,
   HTML projection and evaluation, 50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
   processes do not imply cold operating-system caches.

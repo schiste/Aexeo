@@ -17,6 +17,10 @@
     "max_avg_ms": 100,
     "max_p95_ms": 200
   },
+  "content/composition_bound_snapshot": {
+    "max_avg_ms": 2,
+    "max_p95_ms": 5
+  },
   "content/markdown_and_evaluation": {
     "max_avg_ms": 500,
     "max_p95_ms": 1000
