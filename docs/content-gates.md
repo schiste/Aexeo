@@ -137,6 +137,36 @@ The [built-in TOML files](../crates/aexeo-core/presets) are embedded in native a
 
 Use `--explain` to print the resolved preset as TOML, or add `--format json` for JSON.
 
+## Bounded host-driven revision loop
+
+Rust hosts can use `aexeo_core::content_revision_loop::revise` to coordinate
+an opt-in evaluation and revision loop. The host provides callbacks that evaluate
+exactly the supplied candidate and propose a full replacement or decline. Select
+`ReviewScope::All` to include advisory gates or `ReviewScope::Blocking` for only
+blocking gates; a scope with no gates is an error. The selected checks must all
+pass to return `Satisfied`, which is not publication approval. An unavailable
+selected check returns `Incomplete` without requesting another proposal.
+
+A caller chooses a revision budget from zero to 32. The controller evaluates
+once initially and at most once after each proposal. A declined proposal,
+repeated draft, exhausted budget, evaluation error or changed gate identity
+stops the loop. Drafts and proposals are limited to 16 MiB each. The result
+contains the last evaluated candidate and report, the stop reason, and aggregate
+evaluation and proposal counts; it does not write or publish anything. Callers
+can use those counts in opt-in telemetry without logging content. Callback
+execution time, network use and costs are controlled by the host; the controller
+does not interrupt a callback or run an LLM itself.
+
+The host must use the same complete resolved policy, content scope, adapter and
+current external inputs for each evaluation. The controller rejects changes in
+reported preset, input ID, gate order, ID, scope, capability or blocking flag,
+but a report does not bind the complete policy parameters or authenticate the
+callbacks. The host must verify those inputs independently. A cycle check
+compares candidate bytes, not semantic equivalence. Evaluation and patch quality,
+factual correctness, authorship, reviewer identity and publication safety
+remain outside this API. The standalone CLI, EmDash plugin and agent skill do not
+yet invoke it; integration requires an explicitly configured host.
+
 ## Editorial starter profiles
 
 `article-quality`, `glossary-quality`, and `product-editorial` compose the

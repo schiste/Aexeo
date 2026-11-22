@@ -13,6 +13,7 @@ pub mod content_gate_sources;
 pub mod content_gate_verdict;
 pub mod content_incremental;
 pub mod content_presets;
+pub mod content_revision_loop;
 pub mod content_rules;
 pub mod docs;
 pub mod editorial_pacing;
