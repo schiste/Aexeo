@@ -561,11 +561,12 @@ registry before considering the release delivered.
   flag. Matching bindings and a narrow host-required check list cannot hide an
   omitted advisory or blocking gate. This does not validate all gate parameters,
   authenticate the evaluator, establish freshness or authorize publication;
-  the Aethyme native comparator has not yet adopted the check. A native
-  implementation is under review in [Aethyme PR #1939](https://github.com/schiste/Aethyme/pull/1939),
-  on top of its unmerged parent; the real cross-process regression in
-  [Aexeo PR #778](https://github.com/schiste/Aexeo/pull/778) is opt-in and
-  detects the omission against the prior comparator. It is not publication authorization.
+  Aethyme's native comparator adopted the check in
+  [PR #1939](https://github.com/schiste/Aethyme/pull/1939). On 2026-11-22,
+  nine offline interoperability tests passed using an Aexeo CLI built from
+  commit `d50546f6` and Aethyme 0.8.155 (build `3bdff6a5`), including
+  rejection of a deliberately omitted advisory check. These checks do not
+  authenticate the evaluator or inputs, establish freshness or authorize publication.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject
