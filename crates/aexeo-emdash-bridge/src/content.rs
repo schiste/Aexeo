@@ -267,14 +267,27 @@ pub fn portable_text_structured_lists(
     document: &EmdashDocument,
     complete: bool,
 ) -> Option<Vec<aexeo_core::markdown_adapter::StructuredList>> {
+    portable_text_list_projection(document, complete).map(|(lists, _)| lists)
+}
+
+type ListProjection = (
+    Vec<aexeo_core::markdown_adapter::StructuredList>,
+    Vec<Option<(usize, usize)>>,
+);
+
+fn portable_text_list_projection(
+    document: &EmdashDocument,
+    complete: bool,
+) -> Option<ListProjection> {
     use aexeo_core::markdown_adapter::StructuredList;
     if !complete || document.body.len() > 100_000 {
         return None;
     }
     let mut result: Vec<StructuredList> = Vec::new();
     let mut stack: Vec<(crate::ListItem, usize)> = Vec::new();
+    let mut locations = Vec::new();
     let mut line = 1;
-    for block in &document.body {
+    for (block_index, block) in document.body.iter().enumerate() {
         if let Some(kind) = &block.list_item {
             let depth = usize::try_from(block.level.unwrap_or(1)).ok()?;
             if depth == 0 || depth > 100 || depth > stack.len() + 1 {
@@ -291,6 +304,15 @@ pub fn portable_text_structured_lists(
                     line,
                     column: 1,
                 });
+                locations.push(
+                    block
+                        .children
+                        .iter()
+                        .position(|child| match child {
+                            PortableTextChild::Span(span) => !span.text.is_empty(),
+                        })
+                        .map(|span_index| (block_index, span_index)),
+                );
                 stack.push((kind.clone(), result.len() - 1));
             }
             result[stack[depth - 1].1].item_count += 1;
@@ -305,7 +327,7 @@ pub fn portable_text_structured_lists(
             })
             .sum::<usize>();
     }
-    Some(result)
+    Some((result, locations))
 }
 
 /// Classify projected paragraphs by list membership, in projection order.
@@ -401,7 +423,7 @@ impl Utf16Index {
     }
 }
 
-/// Map prose, heading and invalid link findings to spans. Synthetic block
+/// Map prose, heading, list and invalid link findings to spans. Synthetic block
 /// separators have no location. Heading locations identify the first non-empty
 /// span of the block; link locations identify the first span of the occurrence.
 /// Indices apply only to this exact document snapshot.
@@ -446,7 +468,14 @@ pub fn source_locations_with_reachability(
                 ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
             ) && !result.findings.is_empty()
         });
-    if !needs_prose && !needs_headings && !needs_links {
+    let needs_lists = preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .any(|(gate, result)| {
+            matches!(gate, ContentGate::ListItemCount { .. }) && !result.findings.is_empty()
+        });
+    if !needs_prose && !needs_headings && !needs_links && !needs_lists {
         return Vec::new();
     }
     let mut projection = String::new();
@@ -502,8 +531,34 @@ pub fn source_locations_with_reachability(
         .map(|heading| collapse_whitespace(&heading))
         .collect();
     let links = needs_links.then(|| content_links(document));
+    let lists = needs_lists
+        .then(|| portable_text_list_projection(document, true))
+        .flatten();
     let mut result = Vec::new();
     for (gate, evaluated) in preset.gates.iter().zip(&report.gates) {
+        if matches!(gate, ContentGate::ListItemCount { .. }) {
+            if let Some((lists, locations)) = &lists
+                && let Some(indices) =
+                    aexeo_core::markdown_adapter::list_finding_indices(lists, gate, evaluated)
+            {
+                for (finding_index, index) in indices
+                    .into_iter()
+                    .take(evaluated.findings.len())
+                    .enumerate()
+                {
+                    if let Some((block_index, span_index)) = locations[index] {
+                        result.push(EmdashSourceLocation {
+                            gate_id: evaluated.gate_id.clone(),
+                            finding_index,
+                            block_index,
+                            span_index,
+                            utf16_offset: 0,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
         if let ContentGate::LinkDestinations {
             allowed_schemes,
             allow_relative,
@@ -1140,6 +1195,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(malformed.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn list_findings_map_to_first_nonempty_span_of_each_list_start() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[
+            {"listItem":"bullet","level":1,"children":[{"_type":"span","text":""},{"_type":"span","text":"Outer ✨"}]},
+            {"listItem":"bullet","level":2,"children":[{"_type":"span","text":"Nested"}]},
+            {"listItem":"bullet","level":2,"children":[{"_type":"span","text":"Nested 2"}]},
+            {"listItem":"bullet","level":1,"children":[{"_type":"span","text":"Outer 2"}]},
+            {"children":[{"_type":"span","text":"Break"}]},
+            {"listItem":"bullet","level":1,"children":[]},
+            {"listItem":"bullet","level":1,"children":[{"_type":"span","text":"Later"}]}
+        ]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='lists'\n[[gates]]\nid='review'\nkind='list_item_count'\nflagged_counts=[2]\n").unwrap();
+        let report = evaluate_content_with_list_completeness(
+            &document, &preset, None, [true; 4], None, None, true,
+        )
+        .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].findings.len(), 3);
+        let positions = source_locations(&document, &preset, &report);
+        assert_eq!(
+            positions
+                .iter()
+                .map(|position| (
+                    position.finding_index,
+                    position.block_index,
+                    position.span_index,
+                    position.utf16_offset
+                ))
+                .collect::<Vec<_>>(),
+            vec![(0, 0, 1, 0), (1, 1, 0, 0)]
+        );
+        let incomplete = evaluate_content_with_list_completeness(
+            &document, &preset, None, [true; 4], None, None, false,
+        )
+        .unwrap();
+        assert_eq!(incomplete.gates[0].status, GateStatus::NotChecked);
+        assert!(source_locations(&document, &preset, &incomplete).is_empty());
     }
 
     #[test]

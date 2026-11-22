@@ -870,6 +870,8 @@ unrecognized end tag occurs. Ambiguous or unsupported markup remains unmapped.
 
 ### EmDash source mapping coverage
 
+Portable Text list-count findings map to the first nonempty span of the list-opening block; a list starting with an empty block remains unmapped. Locations identify the evaluated snapshot.
+
 Single-item EmDash reports include counts of emitted findings eligible for source
 location, mapped findings, and unmapped findings. Aggregate opt-in telemetry includes
 the same eligible and unmapped counts, without content or identifiers. Both the
