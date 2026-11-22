@@ -284,7 +284,8 @@ an atomic multi-file snapshot. A successful result explicitly reports
 
 With `--telemetry`, the CLI writes one aggregate JSON event to stderr after a
 comparison is attempted: status, elapsed milliseconds, number of required checks,
-and whether collection and external evidence were supplied. It does not emit
+whether collection and external evidence were supplied, and, after a successful
+comparison, aggregate policy-gate and expected-check counts. It does not emit
 check IDs, paths or input content. Argument parsing failures do not emit an event.
 Telemetry is informational and never changes the verdict or grants publication
 authority.

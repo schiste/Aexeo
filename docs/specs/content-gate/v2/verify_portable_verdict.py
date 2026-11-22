@@ -133,10 +133,12 @@ def require_policy_coverage(policy, change, has_collection, verdict):
             check = checks.get(check_id)
             if check is None or check['blocking'] is not blocking:
                 raise VerificationError('resolved policy check is missing or has inconsistent blocking')
+    return len(policy['gates']), expected_count
 
 
 def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
-            required_checks, expected_validator, fresh_exit_code, fresh_timed_out, content_bytes=None):
+            required_checks, expected_validator, fresh_exit_code, fresh_timed_out, content_bytes=None,
+            telemetry_counts=None):
     """Check both outputs against current inputs; never authorize publication."""
     if type(fresh_exit_code) is not int or fresh_exit_code != 0 or fresh_timed_out is not False:
         raise VerificationError('fresh evaluator did not complete successfully')
@@ -190,7 +192,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (evidence is not None):
             raise VerificationError('link evidence does not match the verdict profile')
         validate_verdict(verdict)
-        require_policy_coverage(policy, change, collection is not None, verdict)
+        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict)
         if verdict['validator']['version'] != host_options['engine_version']:
             raise VerificationError('validator version does not match host options')
         if verdict['validator'].get('profile') != policy['name']:
@@ -204,6 +206,8 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         del verdict['evaluated_at']
     if not _typed_equal(*verdicts):
         raise VerificationError('verdicts differ')
+    if telemetry_counts is not None:
+        telemetry_counts.update(policy_gate_count=coverage_counts[0], policy_check_count=coverage_counts[1])
     return {'input_binding': 'match', 'fresh_verdict_match': True,
             'required_check_count': len(required_checks), 'publication_authorized': False}
 
@@ -285,6 +289,7 @@ def main():
     parser.add_argument('--telemetry', action='store_true', help='emit aggregate-only telemetry on stderr')
     args = parser.parse_args()
     started = time.perf_counter() if args.telemetry else 0
+    coverage_telemetry = {} if args.telemetry else None
 
     def telemetry(status):
         if not args.telemetry:
@@ -295,6 +300,7 @@ def main():
                  'collection_supplied': args.collection is not None,
                  'content_files_supplied': args.content_files is not None,
                  'external_evidence_supplied': args.external_evidence is not None}
+        event.update(coverage_telemetry)
         try:
             print(json.dumps(event, separators=(',', ':')), file=sys.stderr)
         except (OSError, ValueError):
@@ -310,7 +316,8 @@ def main():
                          read_stable(args.base), read_stable(args.after), artifacts,
                          args.require_check, (args.validator_name, args.validator_version),
                          args.fresh_exit_code, args.fresh_timed_out == 'true',
-                         read_mapped_content(args.content_files) if args.content_files is not None else None)
+                         read_mapped_content(args.content_files) if args.content_files is not None else None,
+                         coverage_telemetry)
     except (VerificationError, OSError, ValueError, TypeError, KeyError) as error:
         print(json.dumps({'matched': False, 'publication_authorized': False}), file=sys.stdout)
         print(str(error), file=sys.stderr)

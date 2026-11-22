@@ -48,8 +48,12 @@ class PortableCliInterop(unittest.TestCase):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
                        '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
-            matched = subprocess.run(verify, capture_output=True, text=True)
+            matched = subprocess.run(verify + ['--telemetry'], capture_output=True, text=True)
             self.assertEqual(matched.returncode, 0, matched.stderr)
+            event = json.loads(matched.stderr)
+            self.assertEqual((event['policy_gate_count'], event['policy_check_count']), (2, 2))
+            self.assertNotIn('article', matched.stderr)
+            self.assertNotIn(str(root), matched.stderr)
             # Keep the verdict internally consistent while omitting the advisory
             # check in both copies; the independently selected policy is unchanged.
             verdict = previous['verdict']

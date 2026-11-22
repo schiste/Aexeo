@@ -523,6 +523,8 @@ class PortableComparison(unittest.TestCase):
             self.assertEqual(event['event'], 'portable_verdict_comparison')
             self.assertEqual(event['status'], 'matched')
             self.assertEqual(event['required_check_count'], 1)
+            self.assertEqual(event['policy_gate_count'], 1)
+            self.assertEqual(event['policy_check_count'], 1)
             self.assertFalse(event['collection_supplied'])
             self.assertFalse(event['external_evidence_supplied'])
             self.assertGreaterEqual(event['duration_ms'], 0)
@@ -552,6 +554,7 @@ class PortableComparison(unittest.TestCase):
             self.assertFalse(json.loads(measured_failure.stdout)['publication_authorized'])
             event = json.loads(measured_failure.stderr.splitlines()[-1])
             self.assertEqual(event['status'], 'error')
+            self.assertNotIn('policy_check_count', event)
             self.assertNotIn(str(root), measured_failure.stderr)
             self.assertNotIn(self.required[0], measured_failure.stderr)
 
