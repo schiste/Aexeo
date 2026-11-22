@@ -687,6 +687,12 @@ requested, and the graph includes source context and file paths: treat both as
 potentially sensitive. Opt-in telemetry on stderr contains only aggregate
 counts and timings. Without the graph flags, static check behavior is unchanged.
 
+The standalone command streams JSON to stdout, avoiding an additional
+report-sized serialized string. Use `--compact` for the same complete JSON
+data without indentation; the default remains pretty-printed. Both forms retain
+all evidence and may contain sensitive content. Streaming does not reduce the
+in-memory graph itself; an output error can leave partial redirected output.
+
 ## Built static sites
 
 Analyze an existing build directory without running a build or making network
