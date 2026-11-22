@@ -30,6 +30,16 @@ unavailable check may become a pass.
 
 ## Aexeo delivery and limits
 
+- [Aexeo #848](https://github.com/schiste/Aexeo/pull/848) binds a
+  host-provided source inventory to experimental portable candidate verdicts.
+  [Aethyme #1949](https://github.com/schiste/Aethyme/pull/1949) rejects empty
+  policies and unconfigured checks, and [#1957](https://github.com/schiste/Aethyme/pull/1957)
+  adds native support for the evidence profile. Real CLI tests covered matching
+  source evidence and rejection after evidence modification, a rebound empty
+  policy, and an omitted advisory check. These changes are merged but no release
+  containing them is asserted. They do not authenticate sources, establish
+  freshness or completeness, or authorize publication.
+
 - [#810](https://github.com/schiste/Aexeo/pull/810) rejects delete and rename
   candidates in the independent portable comparator while their site impact is
   not independently established. [#813](https://github.com/schiste/Aexeo/pull/813)
