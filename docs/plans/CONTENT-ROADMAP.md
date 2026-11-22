@@ -462,6 +462,12 @@ registry before considering the release delivered.
   observer; results are projected from the historical snapshot, and provider
   errors and incomplete projections remain unchecked. The host is responsible
   for observer authorization, network policy, privacy, and freshness.
+  Incremental item and composed collection checks also accept complete,
+  source-bound observation inventories for each candidate; changed observations
+  force reevaluation even for unchanged content ([PR #797](https://github.com/schiste/Aexeo/pull/797)).
+  The batch CLI exports unverified observation templates for base and candidate
+  inventories, with aggregate telemetry. This does not perform network checks or
+  authenticate their eventual results.
   Content-change hosts can also bind per-entry snapshots and revalidate their
   complete input fingerprint; omitted entries remain unchecked. EmDash observers
   receive route and locale context, and unchecked assessments distinguish a failed

@@ -83,6 +83,7 @@ pub fn build_cli() -> Command {
             Command::new("content-incremental")
                 .about("Experimentally evaluate independent proposals against one reusable content baseline")
                 .arg(Arg::new("input").long("input").required(true).help("Versioned JSON batch file, or - for stdin; may contain private content"))
+                .arg(Arg::new("export-link-observations").long("export-link-observations").action(ArgAction::SetTrue).help("Export complete source-bound link observation templates as JSON; output may contain private URLs"))
                 .arg(Arg::new("content-root").long("content-root").help("Authorize an absolute content root for referenced file states"))
                 .arg(Arg::new("host-content-map").long("host-content-map").action(ArgAction::Append).requires("content-root").help("Map all referenced states for one proposal as INDEX=PATH; may be repeated. URIs are not fetched"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timing and counts to stderr")),

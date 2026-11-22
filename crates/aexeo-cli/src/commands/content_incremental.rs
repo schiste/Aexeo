@@ -216,6 +216,142 @@ impl Totals {
     }
 }
 
+// Extract through the same Markdown and HTML adapters used by incremental
+// evaluation. Unobserved link structures never become empty inventories.
+fn observation_template(
+    items: &[CandidateItem],
+    scope: HtmlContentScope,
+) -> Result<BTreeMap<String, LinkObservationSnapshot>> {
+    use aexeo_core::content_gate::LinkReachabilityObservation;
+    let mut snapshots = BTreeMap::new();
+    for item in items {
+        let destinations = match item.media_type.as_str() {
+            "text/markdown" => {
+                aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
+                    &item.entity_id,
+                    &item.source,
+                )?
+                .destinations
+                .ok_or_else(|| anyhow::anyhow!("link destinations are not completely observed"))?
+            }
+            "text/html" => {
+                aexeo_core::html_content_adapter::html_content_with_scope(
+                    &item.entity_id,
+                    &item.source,
+                    scope,
+                )
+                .map_err(|_| anyhow::anyhow!("HTML link projection is unavailable"))?
+                .destinations
+            }
+            _ => bail!("link observation templates require Markdown or HTML items"),
+        };
+        let observations = vec![LinkReachabilityObservation::NotChecked; destinations.len()];
+        if snapshots
+            .insert(
+                item.entity_id.clone(),
+                LinkObservationSnapshot {
+                    version: 1,
+                    source_sha256: item.sha256.clone(),
+                    destinations,
+                    observations,
+                },
+            )
+            .is_some()
+        {
+            bail!("duplicate item identity in link observation inventory");
+        }
+    }
+    Ok(snapshots)
+}
+
+fn export_observation_templates(
+    batch: &Batch,
+    providers: &mut [Option<HostFiles>],
+    telemetry: bool,
+    started: std::time::Instant,
+) -> Result<i32> {
+    use aexeo_core::{
+        content_candidate::overlay_candidate, content_gate_sources::verify_candidate_file_states,
+    };
+    let scope = match batch.mode {
+        Mode::Adapted => HtmlContentScope::Document,
+        Mode::AdaptedMain => HtmlContentScope::Main,
+        _ => bail!("link observation templates require an adapted mode"),
+    };
+    if !batch.snapshot.complete {
+        bail!("base inventory completeness is not attested");
+    }
+    if batch.base_link_observations.is_some()
+        || batch
+            .proposals
+            .iter()
+            .any(|p| p.link_observations.is_some())
+    {
+        bail!("remove existing link observations before exporting templates");
+    }
+    let base = observation_template(&batch.snapshot.items, scope)?;
+    let mut retained_bytes = serde_json::to_vec(&base)?.len();
+    if retained_bytes as u64 > MAX_BYTES {
+        bail!("link observation templates exceed size limit");
+    }
+    let mut candidates = Vec::with_capacity(batch.proposals.len());
+    for (index, proposal) in batch.proposals.iter().enumerate() {
+        let overlay = overlay_candidate(&batch.snapshot, &proposal.change, &proposal.after)
+            .map_err(|_| anyhow::anyhow!("candidate overlay is unavailable"))?;
+        let referenced = proposal
+            .change
+            .entries
+            .iter()
+            .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
+            .flatten()
+            .any(|state| state.inline.is_none());
+        if referenced {
+            let provider = providers[index]
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("referenced content provider is unavailable"))?;
+            verify_candidate_file_states(
+                &proposal.change,
+                &batch.snapshot,
+                &proposal.after,
+                provider,
+                MAX_CONTENT_INPUT_BYTES,
+                MAX_TOTAL_CONTENT_BYTES,
+            )
+            .map_err(|_| anyhow::anyhow!("referenced candidate content could not be verified"))?;
+        }
+        let row = serde_json::json!({"proposal_index":index, "change_id":proposal.change.change_id,
+            "link_observations":observation_template(&overlay.candidate.items, scope)?});
+        retained_bytes = retained_bytes
+            .checked_add(serde_json::to_vec(&row)?.len())
+            .ok_or_else(|| anyhow::anyhow!("link observation templates exceed size limit"))?;
+        if retained_bytes as u64 > MAX_BYTES {
+            bail!("link observation templates exceed size limit");
+        }
+        candidates.push(row);
+    }
+    let count: usize = base
+        .values()
+        .map(|snapshot| snapshot.destinations.len())
+        .sum();
+    let output = serde_json::to_vec(
+        &serde_json::json!({"schema":"aexeo.content-incremental-link-templates/v1-experimental", "base_link_observations":base, "proposals":candidates}),
+    )?;
+    if output.len() as u64 > MAX_BYTES {
+        bail!("link observation templates exceed size limit");
+    }
+    let mut stdout = io::BufWriter::new(io::stdout().lock());
+    stdout.write_all(&output)?;
+    writeln!(stdout)?;
+    stdout.flush()?;
+    if telemetry {
+        eprintln!(
+            "{}",
+            serde_json::json!({"schema":"aexeo.content-incremental-link-template-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "base_items":batch.snapshot.items.len(), "base_destinations":count, "proposals":batch.proposals.len()})
+        );
+    }
+    Ok(0)
+}
+
 pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     let started = std::time::Instant::now();
     let mut bytes = Vec::new();
@@ -291,6 +427,14 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
             )?;
         }
         providers.push(provider);
+    }
+    if args.get_flag("export-link-observations") {
+        return export_observation_templates(
+            &batch,
+            &mut providers,
+            args.get_flag("telemetry"),
+            started,
+        );
     }
     let referenced_states = batch
         .proposals

@@ -90,6 +90,21 @@ by entity ID. Supply the full candidate map, including unchanged items.
 The optional telemetry reports only whether a base map was supplied and the
 number of proposals with a map, without including destinations or content.
 
+To prepare these inventories without manually extracting link destinations, run
+`aexeo-cli content-incremental --input batch.json --export-link-observations`.
+The JSON output contains `base_link_observations` and an ordered `proposals`
+array with `proposal_index`, `change_id`, and each complete candidate's
+`link_observations`. Copy the corresponding maps into the batch, then have the
+host replace each `not_checked` with its own observation before evaluation.
+The export validates every candidate and any referenced states using the same
+`--content-root` and per-proposal `--host-content-map` options. It rejects
+existing observations, unsupported formats, incomplete inventories and
+unprojectable links without emitting a partial template. Empty destination
+lists are observed empty lists. The templates contain URLs and entity IDs and
+must be treated as potentially private; optional telemetry contains only counts.
+Export performs no network requests and does not establish the authenticity or
+freshness of a later observation.
+
 ## Item metadata projections
 
 `prepare_adapted_with_metadata` accepts the same adapted snapshot plus a map
