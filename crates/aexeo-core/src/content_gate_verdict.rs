@@ -1226,7 +1226,8 @@ fn verify_candidate_policy_coverage_with_evidence(
             let available = sources.and_then(|items| items.get(entity));
             let has = |key: &str| available.is_some_and(|items| items.contains_key(key));
             let missing_evidence = match gate {
-                crate::content_gate::ContentGate::EvidenceAnchors { source, .. }
+                crate::content_gate::ContentGate::EditorialPacing { source, .. }
+                | crate::content_gate::ContentGate::EvidenceAnchors { source, .. }
                 | crate::content_gate::ContentGate::StructuredFact { source, .. } => !has(source),
                 crate::content_gate::ContentGate::EvidenceReview { source, review, .. }
                 | crate::content_gate::ContentGate::EvidenceReviewAge { source, review, .. } => {
@@ -3755,6 +3756,7 @@ mod tests {
     fn candidate_policy_coverage_rejects_claimed_execution_without_host_capabilities() {
         let change = change();
         for kind in [
+            "editorial_pacing",
             "custom",
             "site_group",
             "site_audit",
@@ -3766,6 +3768,9 @@ mod tests {
         ] {
             for blocking in [true, false] {
                 let extra = match kind {
+                    "editorial_pacing" => {
+                        "source='s'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n"
+                    }
                     "custom" => "extension='example'\n",
                     "site_group" => "group='links'\n",
                     "evidence_anchors" => "source='s'\nclaim='abc'\nquote='quote'\n",
@@ -3794,6 +3799,24 @@ mod tests {
                         "{kind} was claimed as checked"
                     );
                 }
+                if kind == "editorial_pacing" {
+                    let sources: ChangeEvidenceInventory = [(
+                        "article".into(),
+                        [("s".into(), r#"{"hook":"abc"}"#.into())].into(),
+                    )]
+                    .into();
+                    assert!(
+                        verify_candidate_policy_coverage_with_evidence(
+                            &verdict,
+                            &change,
+                            &policy,
+                            false,
+                            false,
+                            Some(&sources)
+                        )
+                        .is_ok()
+                    );
+                }
             }
         }
     }
@@ -3810,95 +3833,100 @@ mod tests {
             }
         }
         let change = change();
-        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='q'\nblocking=false\n").unwrap();
-        let base = CandidateSnapshot {
-            scope: "site".into(),
-            site_id: "s".into(),
-            site_base_url: None,
-            base: change.base.clone(),
-            complete: true,
-            items: vec![],
-        };
-        let after = vec![CandidateItem {
-            entity_id: "article".into(),
-            public_path: "/article".into(),
-            media_type: "text/plain".into(),
-            revision: None,
-            sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
-            source: "abc".into(),
-            links: None,
-        }];
-        let decision = OfflineDecisionContext {
-            change: &change,
-            preset: &policy,
-            max_entry_bytes: 1024,
-            max_total_bytes: 1024,
-            plain_text_paragraphs: false,
-            collection: None,
-            evaluator_identity: b"build",
-        };
-        let context = CandidateDecisionContext {
-            decision: &decision,
-            base: &base,
-            after: &after,
-        };
-        let envelope = evaluate_draft_portable_candidate_verdict(
-            &context,
-            &mut NoFiles,
-            "2026-01-01T00:00:00Z",
-            HtmlContentScope::Document,
-        )
-        .unwrap();
-        let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
-            validator_name: "aexeo",
-            validator_version: env!("CARGO_PKG_VERSION"),
-            required_checks: &["gate:7:article:words"],
-            exit_code: 0,
-            timed_out: false,
-        };
-        let verify = |e: &_| {
-            verify_draft_passing_candidate_with_content(
-                e,
+        for gate in [
+            "kind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='q'\n",
+            "kind='editorial_pacing'\nsource='s'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n",
+        ] {
+            let policy = ContentPreset::from_toml(&format!("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='source'\n{gate}blocking=false\n")).unwrap();
+            let base = CandidateSnapshot {
+                scope: "site".into(),
+                site_id: "s".into(),
+                site_base_url: None,
+                base: change.base.clone(),
+                complete: true,
+                items: vec![],
+            };
+            let after = vec![CandidateItem {
+                entity_id: "article".into(),
+                public_path: "/article".into(),
+                media_type: "text/plain".into(),
+                revision: None,
+                sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+                source: "abc".into(),
+                links: None,
+            }];
+            let decision = OfflineDecisionContext {
+                change: &change,
+                preset: &policy,
+                max_entry_bytes: 1024,
+                max_total_bytes: 1024,
+                plain_text_paragraphs: false,
+                collection: None,
+                evaluator_identity: b"build",
+            };
+            let context = CandidateDecisionContext {
+                decision: &decision,
+                base: &base,
+                after: &after,
+            };
+            let envelope = evaluate_draft_portable_candidate_verdict(
                 &context,
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
                 HtmlContentScope::Document,
-                None,
-                &requirements,
-                &mut Bytes,
-                1024,
-                1024,
             )
-        };
-        assert!(
-            verify(&envelope).is_ok(),
-            "honest unavailable advisory should remain allowed"
-        );
-        let check = envelope
-            .verdict
-            .checks
-            .iter()
-            .find(|c| c.id == "gate:7:article:source")
             .unwrap();
-        assert_eq!(check.status, CheckStatus::NotChecked);
-        for status in [CheckStatus::Passed, CheckStatus::Failed] {
-            let mut forged = envelope.clone();
-            let check = forged
+            let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+                validator_name: "aexeo",
+                validator_version: env!("CARGO_PKG_VERSION"),
+                required_checks: &["gate:7:article:words"],
+                exit_code: 0,
+                timed_out: false,
+            };
+            let verify = |e: &_| {
+                verify_draft_passing_candidate_with_content(
+                    e,
+                    &context,
+                    HtmlContentScope::Document,
+                    None,
+                    &requirements,
+                    &mut Bytes,
+                    1024,
+                    1024,
+                )
+            };
+            assert!(
+                verify(&envelope).is_ok(),
+                "honest unavailable advisory should remain allowed"
+            );
+            let check = envelope
                 .verdict
                 .checks
-                .iter_mut()
+                .iter()
                 .find(|c| c.id == "gate:7:article:source")
                 .unwrap();
-            check.status = status;
-            check.reason = None;
-            forged.verdict.summary.not_checked -= 1;
-            if status == CheckStatus::Passed {
-                forged.verdict.summary.passed += 1;
-            } else {
-                forged.verdict.summary.failed += 1;
+            assert_eq!(check.status, CheckStatus::NotChecked);
+            for status in [CheckStatus::Passed, CheckStatus::Failed] {
+                let mut forged = envelope.clone();
+                let check = forged
+                    .verdict
+                    .checks
+                    .iter_mut()
+                    .find(|c| c.id == "gate:7:article:source")
+                    .unwrap();
+                check.status = status;
+                check.reason = None;
+                forged.verdict.summary.not_checked -= 1;
+                if status == CheckStatus::Passed {
+                    forged.verdict.summary.passed += 1;
+                } else {
+                    forged.verdict.summary.failed += 1;
+                }
+                assert!(
+                    verify(&forged).is_err(),
+                    "forged evidence result must be rejected"
+                );
             }
-            assert!(
-                verify(&forged).is_err(),
-                "forged evidence result must be rejected"
-            );
         }
     }
 
