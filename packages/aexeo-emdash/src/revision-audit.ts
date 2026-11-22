@@ -11,6 +11,8 @@ import type { EmdashDocument } from "./types.js";
 import { cmsBodyCoverage } from "./cms-coverage.js";
 
 export interface RevisionAuditRequest { collection: string; id: string; revision: string; field?: string }
+export interface CandidateAuditRequest extends RevisionAuditRequest { field: string; candidate: unknown }
+const MAX_CANDIDATE_BYTES = 1024 * 1024;
 interface Revision { id: string; collection: string; entryId: string; data: Record<string, unknown> }
 type Current = EmdashContentItem & { draftRevisionId?: string | null; liveRevisionId?: string | null };
 type RevisionContext = SandboxCtx & { content: SandboxCtx["content"] & {
@@ -55,8 +57,31 @@ export interface RevisionAuditOptions {
 
 const reportKey = (id: string) => `revision-audit:${id}`;
 
+/** Audit a proposed fragment against a historical revision without writing content. */
+export async function auditCandidate(ctx: RevisionContext, input: CandidateAuditRequest, options: RevisionAuditOptions) {
+  if (typeof input.field !== "string" || input.field.trim().length === 0) return { status: "not_checked", reason: "candidate_field_invalid" } as const;
+  let encoded: Uint8Array<ArrayBuffer>;
+  let value: unknown;
+  try {
+    const serialized = JSON.stringify(input.candidate);
+    if (serialized === undefined) return { status: "not_checked", reason: "candidate_invalid" } as const;
+    encoded = new TextEncoder().encode(serialized);
+    value = JSON.parse(serialized) as unknown;
+  } catch {
+    return { status: "not_checked", reason: "candidate_invalid" } as const;
+  }
+  if (encoded.byteLength > MAX_CANDIDATE_BYTES) return { status: "not_checked", reason: "candidate_too_large" } as const;
+  const hash = await crypto.subtle.digest("SHA-256", encoded);
+  const digest = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return auditRevisionInternal(ctx, input, options, { value, digest });
+}
+
 /** Audit the exact host-provided historical data; never read or write article content. */
 export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRequest, options: RevisionAuditOptions) {
+  return auditRevisionInternal(ctx, input, options);
+}
+
+async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditRequest, options: RevisionAuditOptions, candidate?: { value: unknown; digest: string }) {
   const { collection, id, revision } = input;
   if (!ctx.content.get || !ctx.content.getRevision) return { status: "not_checked", reason: "revision_access_unavailable" } as const;
   let current: Current | null;
@@ -105,7 +130,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   const contentFields = field === undefined ? options.contentFieldsByCollection?.[collection] : [field];
   // A revision stores field data, not the historical SEO panel or rendered HTML.
   const item: EmdashContentItem = { id, type: collection, slug: null, status: "draft", locale: localeAtAudit,
-    data: snapshot.data };
+    data: candidate === undefined ? snapshot.data : { ...snapshot.data, [field!]: candidate.value } };
   const adapted = adaptContentItem(item, { route: `/revision/${encodeURIComponent(id)}`, blockMappings: options.blockMappings,
     ...(contentFields === undefined ? {} : { contentFields }),
     ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }),
@@ -113,7 +138,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   const listStructureAttested = field === undefined
     ? collectionListStructureAttested(options.preset?.revisionListStructureCompleteByCollection, collection)
     : fragmentListStructureAttested(options.preset?.revisionFragmentListStructureCompleteByCollection, collection, field);
-  if (listStructureAttested) adapted.document.list_structure_complete = true;
+  if (listStructureAttested && candidate === undefined) adapted.document.list_structure_complete = true;
   // A runtime provider replaces static evidence in the ordinary evaluator.
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;
@@ -121,7 +146,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     ? await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence, options.onContentEvaluationTelemetry)
     : await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
   let revisionObserverInvoked = false;
-  if (options.revisionLinkObservations && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
+  if (candidate === undefined && options.revisionLinkObservations && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
     const started = options.onLinkProviderTelemetry ? performance.now() : 0;
     let status: LinkProviderTelemetry["status"] = "error";
     let reason: string | undefined;
@@ -161,8 +186,9 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     revision_locale_and_link_observer_invoked: "Explicitly configured revision locale and link providers ran; other runtime providers were not invoked.",
   }[runtimeProviders];
   const localeLimitation = localeProviderInvoked ? "the preset locale is supplied by the host for the requested revision" : "the preset locale is taken from the current record";
-  const limitation = `${providerLimitation} Rendered page metadata and source freshness are not verified; ${localeLimitation}; passing does not establish factual accuracy or currentness and does not authorize publication.`;
+  const limitation = `${candidate === undefined ? "" : "This is an unsaved proposed fragment, not the contents of the base revision; revision-specific link observations and list-structure attestations were not used. "}${providerLimitation} Rendered page metadata and source freshness are not verified; ${localeLimitation}; passing does not establish factual accuracy or currentness and does not authorize publication.`;
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
+    ...(candidate === undefined ? {} : { candidate: { status: "unsaved" as const, field: field!, sha256_json: candidate.digest } }),
     preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation,
     assurance: {
       purpose: "editorial_review" as const,

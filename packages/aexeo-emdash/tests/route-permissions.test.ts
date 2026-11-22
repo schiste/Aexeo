@@ -22,6 +22,7 @@ describe("configured plugin declaration", () => {
       ]),
     );
     expect(permissions).toEqual({
+      "audit-candidate": "plugins:manage",
       "audit-revision": "plugins:manage",
       "get-revision-audit": "plugins:read",
       "set-revision-review": "plugins:manage",

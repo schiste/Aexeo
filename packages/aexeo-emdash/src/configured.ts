@@ -58,10 +58,12 @@ import type { Finding, SiteIntelligenceScore } from "./types.js";
 // installed still get a buildable package).
 import { definePlugin } from "emdash";
 import { z } from "zod";
-import { auditRevision, getRevisionAudit } from "./revision-audit.js";
+import { auditCandidate, auditRevision, getRevisionAudit } from "./revision-audit.js";
 import type { RevisionLinkObservationProvider, RevisionLocaleProvider, RevisionLocaleTelemetry } from "./revision-audit.js";
 export type { RevisionLinkObservationProvider, RevisionLocaleProvider, RevisionLocaleTelemetry } from "./revision-audit.js";
 import { getReviewDisposition, getReviewHistory, setReviewDisposition, type ReviewRequest } from "./review-dispositions.js";
+
+const candidateSchema = z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128), candidate: z.json() });
 
 const reviewKeySchema = z.strictObject({ audit_id: z.uuid(), gate_id: z.string().min(1).max(128), finding_index: z.number().int().min(0) });
 const reviewSchema = reviewKeySchema.extend({ decision: z.enum(["retain_with_explanation", "needs_revision", "not_applicable"]), explanation: z.string().trim().min(1).max(2000) });
@@ -295,6 +297,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
     // that writes stays admin, stated explicitly so the split is visible.
     mcp: { tools: {
       audit_revision: { description: "Evaluate a CMS revision or an explicitly configured fragment using its editorial preset.", route: "audit-revision", input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128).optional() }) },
+      audit_candidate: { description: "Evaluate an unsaved proposed fragment against a CMS revision without modifying content.", route: "audit-candidate", input: candidateSchema },
       get_audit: { description: "Retrieve an editorial audit and check whether its revision is still current.", route: "get-revision-audit", input: z.strictObject({ audit_id: z.uuid() }) },
       set_review: { description: "Record an explained decision for one finding in an exact audit.", route: "set-revision-review", input: reviewSchema },
       get_review_history: { description: "Retrieve advisory review submissions for one finding; history completeness is not guaranteed.", route: "get-revision-review-history", input: reviewKeySchema },
@@ -309,6 +312,17 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
           const startedAt = Date.now();
           const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, projectLinks: projectLinkDestinations, revisionLinkObservations: runtime.revisionLinkObservations, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onLinkProviderTelemetry: runtime.onLinkProviderTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
           try { ctx.log?.info("aexeo.revision_audit", { status: result.status, ...(result.status === "not_checked" ? { reason: result.reason } : { revision_status: result.revision_status }), scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
+          return result;
+        },
+      },
+      "audit-candidate": {
+        permission: "plugins:manage",
+        request: { body: "json" },
+        input: candidateSchema,
+        handler: async (ctx: SandboxCtx & { input: z.infer<typeof candidateSchema> }) => {
+          const startedAt = Date.now();
+          const result = await auditCandidate(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
+          try { ctx.log?.info("aexeo.candidate_audit", { status: result.status, ...(result.status === "not_checked" ? { reason: result.reason } : {}), duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },
       },
