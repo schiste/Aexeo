@@ -1490,7 +1490,7 @@ pub fn evaluate_draft_portable_candidate_evidence_verdict<P: ConfinedContentFile
     let mut observe = |entity: &str, destinations: &[String]| {
         observer
             .as_mut()
-            .expect("link observer is present")
+            .ok_or_else(|| anyhow::anyhow!("link observer is unavailable"))?
             .observe(entity, destinations)
     };
     let link_observer: Option<&mut LinkObserver<'_>> = if links.is_some() {
