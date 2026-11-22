@@ -44,7 +44,7 @@ fn read_draft(path: &str) -> Result<String> {
 /// Reuse the real content CLI, including adapter/source mapping and presets.
 /// The child reads its complete input before emitting JSON. A writer thread keeps
 /// pipe traffic concurrent and stdout is bounded; no arbitrary program is run.
-fn evaluate(candidate: &str, args: &ArgMatches) -> Result<Value> {
+fn evaluate(candidate: &str, args: &ArgMatches) -> Result<(Value, ContentReport)> {
     let mut command = Command::new(std::env::current_exe().context("locating current executable")?);
     command
         .args(["content", "-", "--format", "json", "--preset"])
@@ -111,7 +111,7 @@ fn evaluate(candidate: &str, args: &ArgMatches) -> Result<Value> {
     let report: Value =
         serde_json::from_slice(&data).user_context("content evaluator returned invalid JSON")?;
     let typed: ContentReport =
-        serde_json::from_value(report.clone()).user_context("invalid content report")?;
+        ContentReport::deserialize(&report).user_context("invalid content report")?;
     let expected_exit = if typed
         .gates
         .iter()
@@ -138,7 +138,7 @@ fn evaluate(candidate: &str, args: &ArgMatches) -> Result<Value> {
     {
         user_bail!("content evaluator did not bind the complete candidate");
     }
-    Ok(report)
+    Ok((report, typed))
 }
 
 pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
@@ -176,7 +176,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
         scope,
         |candidate| {
             let evaluation_started = started.map(|_| std::time::Instant::now());
-            let report = evaluate(candidate, args)?;
+            let (report, typed) = evaluate(candidate, args)?;
             if let Some(time) = evaluation_started {
                 evaluation_ms += time.elapsed().as_secs_f64() * 1000.0;
             }
@@ -195,8 +195,6 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                 user_bail!("policy or metadata changed during revision");
             }
             *binding = Some(now);
-            let typed: ContentReport =
-                serde_json::from_value(report.clone()).user_context("invalid content report")?;
             *current_report.borrow_mut() = Some(report);
             Ok(typed)
         },
