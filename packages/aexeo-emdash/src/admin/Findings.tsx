@@ -64,6 +64,11 @@ export function BodyCoverageDetails({ route }: { route: Pick<RouteSummary, "body
   return <>{bodyNotice && <p>{bodyNotice}</p>}{componentsNotice && <p>{componentsNotice}</p>}<p>{cmsMetadataCoverageNotice(route.metadata_coverage)}</p></>;
 }
 
+/** A complete body can still have useful metadata coverage to display. */
+export function showRouteDetails(route: Pick<RouteSummary, "assessment" | "body_coverage" | "metadata_coverage">): boolean {
+  return route.assessment !== undefined || route.body_coverage !== "complete" || route.metadata_coverage !== undefined;
+}
+
 export function Findings(): React.JSX.Element {
   const [state, setState] = useState<FetchState>({
     loading: true,
@@ -222,7 +227,7 @@ export function Findings(): React.JSX.Element {
       )}
 
       <RevisionReviews />
-      {payload.routes.filter((route) => route.assessment !== undefined || route.body_coverage !== "complete").map((route) => (
+      {payload.routes.filter(showRouteDetails).map((route) => (
         <section key={route.route} className="rounded border border-kumo-line p-3 text-sm">
           <strong>{route.route}</strong>
           {route.assessment?.status !== "error" && <BodyCoverageDetails route={route} />}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BodyCoverageDetails, ContentAssessmentDetails, findingRouteCount } from "../src/admin/Findings.js";
+import { BodyCoverageDetails, ContentAssessmentDetails, findingRouteCount, showRouteDetails } from "../src/admin/Findings.js";
 import type { DocumentAssessment } from "../src/plugin.js";
 
 describe("React content assessment", () => {
@@ -26,6 +26,13 @@ describe("React content assessment", () => {
 
 
 describe("component coverage presentation", () => {
+  it("keeps metadata coverage visible when the body is complete and no preset is recorded", () => {
+    const metadata_coverage = { observed_fields: [], supplied_fields: [], unavailable_fields: [], description_source_observed: false, description_value_supplied: false };
+    expect(showRouteDetails({ body_coverage: "complete", metadata_coverage })).toBe(true);
+    expect(showRouteDetails({ body_coverage: "complete" })).toBe(false);
+    expect(showRouteDetails({ body_coverage: "partial" })).toBe(true);
+    expect(JSON.stringify(BodyCoverageDetails({ route: { body_coverage: "complete", metadata_coverage } }))).toContain("source mapping unverified");
+  });
   it("shows observed unmapped types without implying complete coverage", () => {
     const view = JSON.stringify(BodyCoverageDetails({ route: { body_coverage: "unavailable", body_projected_blocks: 2, body_unmapped_components: {
       entries: [{ kind: "block", type: "askYourAi", occurrences: 2 }], truncated: true,
