@@ -990,7 +990,8 @@ fn html_source_map_inner(
     // Numeric reference labels are masked in the DOM projection. Verify a
     // second time before accepting the same-length substitution so recovered
     // or ambiguous HTML cannot acquire guessed coordinates.
-    let reference_mask_matches = output.len() == projected.len()
+    let reference_mask_matches = output != projected
+        && output.len() == projected.len()
         && output.bytes().zip(projected.bytes()).all(|(a, b)| {
             a == b || (b == b' ' && (a.is_ascii_digit() || matches!(a, b'[' | b']' | b',' | b'-')))
         })
@@ -1392,6 +1393,17 @@ mod tests {
                 .unwrap()
                 .contains("2025.  Next")
         );
+    }
+
+    #[test]
+    fn source_map_rejects_forged_numeric_masks_without_a_reference() {
+        let source = "<p>Year 2025. Next.</p>";
+        let adapted = html_content("x", source).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        assert!(html_source_map(source, text).is_some());
+        let forged = text.replacen("2025", "    ", 1);
+        assert_eq!(text.len(), forged.len());
+        assert!(html_source_map(source, &forged).is_none());
     }
 
     #[test]
