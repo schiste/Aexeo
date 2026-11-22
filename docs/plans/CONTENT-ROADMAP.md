@@ -100,6 +100,12 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Reuse one Markdown parse for optional list and link observations alongside
+  content projection in the single-content CLI, change verdicts and adapted
+  incremental evaluation. Unobserved embedded HTML still withholds structural
+  results. The content benchmark includes combined and separate-parse timings;
+  adapter telemetry remains opt-in and aggregate-only.
+
 - [x] Project a numeric Portable Text reference across its complete contiguous
   link label, including formatting span boundaries. Keep mixed prose and numeric
   link labels and ambiguous overlapping links intact; preserve original literal

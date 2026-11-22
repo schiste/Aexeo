@@ -1980,23 +1980,26 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
         let mut literal_projection = None;
         let mut heading_levels = None;
         let mut paragraph_list_items = None;
-        let mut structured_lists = if entry.media_type == "text/markdown"
-            && item_preset
-                .gates
-                .iter()
-                .any(|gate| matches!(gate, crate::content_gate::ContentGate::ListItemCount { .. }))
-        {
-            crate::markdown_adapter::markdown_structured_lists(&text)?
-        } else {
-            None
-        };
+        let wants_lists = item_preset
+            .gates
+            .iter()
+            .any(|gate| matches!(gate, crate::content_gate::ContentGate::ListItemCount { .. }));
+        let mut structured_lists = None;
         let (mut input, context, link_count, destinations, source_map) = match entry
             .media_type
             .as_str()
         {
             "text/markdown" => {
-                let adapted =
-                    markdown_input_with_source_map_and_destinations(&entry.entity_id, &text)?;
+                let adapted = crate::markdown_adapter::markdown_project(
+                    &entry.entity_id,
+                    &text,
+                    crate::markdown_adapter::MarkdownProjectionOptions {
+                        source_map: true,
+                        link_destinations: true,
+                        structured_lists: wants_lists,
+                    },
+                )?;
+                structured_lists = adapted.structured_lists;
                 literal_projection = adapted.source_map.literal_projection().map(str::to_owned);
                 heading_levels = adapted.source_map.heading_levels().map(<[u8]>::to_vec);
                 paragraph_list_items = adapted
@@ -6256,6 +6259,54 @@ mod tests {
                 location,
                 "{media}: {source}"
             );
+        }
+    }
+
+    #[test]
+    fn change_verdict_combines_list_and_link_observations() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='list'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=true\n[[gates]]\nid='link'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=true\n").unwrap();
+        for (source, status) in [
+            (
+                "- [one](http://example.org)\n- two\n- three\n",
+                CheckStatus::Failed,
+            ),
+            ("<div>unobserved</div>", CheckStatus::NotChecked),
+        ] {
+            let mut input = change();
+            input.entries[0].media_type = "text/markdown".into();
+            let state = input.entries[0].after.as_mut().unwrap();
+            state.inline = Some(source.into());
+            state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            let report = evaluate_change(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+            )
+            .unwrap();
+            for id in [":list", ":link"] {
+                assert_eq!(
+                    report
+                        .checks
+                        .iter()
+                        .find(|check| check.id.ends_with(id))
+                        .unwrap()
+                        .status,
+                    status
+                );
+            }
+            if status == CheckStatus::Failed {
+                assert_eq!(report.findings.len(), 2);
+                assert!(report.findings.iter().all(|finding| {
+                    finding
+                        .location
+                        .as_ref()
+                        .is_some_and(|location| location.line == 1)
+                }));
+            }
         }
     }
 

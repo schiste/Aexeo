@@ -217,25 +217,27 @@ fn evaluate_item(
     let mut destinations = None;
     let mut heading_levels = None;
     let mut paragraph_list_items = None;
-    let mut structured_lists = if matches!(mode, ProjectionMode::Adapted(_))
-        && item.media_type == "text/markdown"
-        && preset
-            .gates
-            .iter()
-            .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
-    {
-        crate::markdown_adapter::markdown_structured_lists(&item.source)
-            .map_err(|_| unavailable("Markdown list projection failed"))?
-    } else {
-        None
-    };
+    let wants_lists = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }));
+    let mut structured_lists = None;
     let (mut input, context, link_count) = match (mode, item.media_type.as_str()) {
-        (ProjectionMode::Adapted(_), "text/markdown") if wants_destinations => {
-            let adapted = crate::markdown_adapter::markdown_input_with_source_map_and_destinations(
+        (ProjectionMode::Adapted(_), "text/markdown") => {
+            let adapted = crate::markdown_adapter::markdown_project(
                 &item.entity_id,
                 &item.source,
+                crate::markdown_adapter::MarkdownProjectionOptions {
+                    source_map: classify_prose
+                        || wants_heading_levels
+                        || wants_literal
+                        || wants_destinations,
+                    link_destinations: wants_destinations,
+                    structured_lists: wants_lists,
+                },
             )
             .map_err(|_| unavailable("Markdown projection failed"))?;
+            structured_lists = adapted.structured_lists;
             if wants_literal {
                 literal_projection = adapted.source_map.literal_projection().map(str::to_owned);
             }
@@ -254,36 +256,6 @@ fn evaluate_item(
                 .then_some(adapted.link_count);
             destinations = adapted.destinations;
             (adapted.input, Some(adapted.context), count)
-        }
-        (ProjectionMode::Adapted(_), "text/markdown")
-            if classify_prose || wants_heading_levels || wants_literal =>
-        {
-            let (input, context, count, map) =
-                crate::markdown_adapter::markdown_input_with_source_map(
-                    &item.entity_id,
-                    &item.source,
-                )
-                .map_err(|_| unavailable("Markdown projection failed"))?;
-            if wants_literal {
-                literal_projection = map.literal_projection().map(str::to_owned);
-            }
-            if classify_prose {
-                paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);
-            }
-            if wants_heading_levels {
-                heading_levels = map.heading_levels().map(<[u8]>::to_vec);
-            }
-            let count = map.links_complete().then_some(count);
-            (input, Some(context), count)
-        }
-        (ProjectionMode::Adapted(_), "text/markdown") => {
-            let (input, context, count) =
-                crate::markdown_adapter::markdown_input_with_observed_links(
-                    &item.entity_id,
-                    &item.source,
-                )
-                .map_err(|_| unavailable("Markdown projection failed"))?;
-            (input, Some(context), count)
         }
         (ProjectionMode::Adapted(html_scope), "text/html") => {
             let (adapted, levels, lists, literal_text) =
