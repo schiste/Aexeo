@@ -358,6 +358,25 @@ identity. This comparison is not a complete BCP 47 validator.
   and declared an artifact digest, but this exercise did not independently
   inspect those artifact bytes, resolve all rendered routes, or bind the crawl
   to that artifact. Orphan eligibility and this validation item remain open.
+  A subsequent read-only inspection downloaded that run’s existing candidate
+  artifact. The archive and release-input file match the SHA-256 values in its
+  candidate metadata; the archive hash, candidate ID, source SHA and run ID
+  also match the CMS candidate status. These are matching observations, not
+  independent proof of authenticity, deployed bytes or transactional CMS
+  inventory completeness. A local static graph run against its 1,718 HTML
+  files, using caller-inferred paths under the canonical www origin, mapped all
+  files and observed 160,479 links. Aggregate telemetry reported 100,372
+  conditional links and 6.49 seconds of graph analysis on this machine; the
+  JSON report was about 134 MB. This single run is not a latency guarantee.
+  The report had incomplete crawl and missing inventory, response status and
+  headers, surface identity and snapshot date, among other issues; no orphan
+  conclusion is confirmed. The local build is not a runtime crawl.
+  In this particular build, all eight English glossary category HTML files
+  observed were noindex, lacked canonical and hreflang tags, and contained no
+  HTML meta-refresh redirect or direct location assignment detected by the
+  inspection. This describes the archived HTML only: it neither rules out
+  server redirects nor establishes what a later build serves. The real-site
+  and inventory comparison remain open.
 - [x] Mark links with `hidden` on themselves or an ancestor as conditional
   observations, including redirect credit; expose evidence and aggregate opt-in
   telemetry. HTML alone does not establish CSS or script visibility.
