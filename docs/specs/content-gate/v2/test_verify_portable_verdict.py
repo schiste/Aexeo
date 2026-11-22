@@ -154,7 +154,7 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaisesRegex(VerificationError, 'impact'):
             compare(self.encoded(self.previous), self.encoded(self.fresh),
                     self.encoded(base), self.encoded([]), self.artifacts,
-                    [], self.identity, 0, False)
+                    self.required, self.identity, 0, False)
 
     def test_policy_coverage_rejects_rebound_omitted_gate(self):
         # Both verdicts agree and the binding matches the expanded policy; a
