@@ -913,6 +913,62 @@ fn audit_with_matching_origin_raises_no_origin_issue() {
 }
 
 #[test]
+fn foreign_landmark_names_do_not_distort_link_context_counts() {
+    let input = attested_input(&[
+        (
+            "https://example.org/foreign",
+            "published",
+            "<html lang='en'><svg><main><a href='/target'>one</a></main><nav><a href='/target'>two</a></nav></svg></html>",
+        ),
+        (
+            "https://example.org/article",
+            "published",
+            "<html lang='en'><main><svg><nav><a href='/target'>three</a></nav></svg></main></html>",
+        ),
+        (
+            "https://example.org/target",
+            "published",
+            "<html lang='en'><main>target</main></html>",
+        ),
+    ]);
+    let report = run_report(&input, false);
+    let destination = report["links"]["destinations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["destination"] == "https://example.org/target")
+        .unwrap();
+    assert_eq!(destination["distinct_source_pages"], 2);
+    assert_eq!(destination["source_pages_by_context"]["unknown"], 1);
+    assert_eq!(destination["source_pages_by_context"]["body"], 1);
+    assert!(
+        destination["source_pages_by_context"]
+            .get("navigation")
+            .is_none()
+    );
+    let contexts: Vec<_> = destination["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["context"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        contexts
+            .iter()
+            .filter(|context| **context == "unknown")
+            .count(),
+        2
+    );
+    assert_eq!(
+        contexts
+            .iter()
+            .filter(|context| **context == "body")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn rel_qualified_links_are_distinguished_in_counts() {
     let input = attested_input(&[
         (

@@ -1,6 +1,8 @@
 //! Extract attributable links from rendered HTML without guessing unknown contexts.
 use crate::site::markup::tag_breaks_text;
-use html5ever::{ParseOpts, parse_document, tendril::TendrilSink, tree_builder::TreeBuilderOpts};
+use html5ever::{
+    ParseOpts, ns, parse_document, tendril::TendrilSink, tree_builder::TreeBuilderOpts,
+};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
@@ -295,6 +297,7 @@ pub fn extract_document(
     while let Some((node, mut scope)) = stack.pop() {
         if let NodeData::Element { name, .. } = &node.data {
             let tag = name.local.as_ref();
+            let html_element = name.ns == ns!(html);
             if attribute(&node, "hidden").is_some() {
                 scope.hidden_attribute = true;
             }
@@ -304,8 +307,9 @@ pub fn extract_document(
             {
                 scope.hidden_inline_style = true;
             }
-            if (matches!(tag, "template" | "noscript")
-                || (tag == "dialog" && attribute(&node, "open").is_none()))
+            if html_element
+                && (matches!(tag, "template" | "noscript")
+                    || (tag == "dialog" && attribute(&node, "open").is_none()))
                 && !scope.conditional_markup
             {
                 scope.conditional_markup = true;
@@ -321,7 +325,7 @@ pub fn extract_document(
                 .then(|| attribute(&node, "data-aexeo-link-context"))
                 .flatten();
             let semantic = match tag {
-                _ if scope.conditional_markup => None,
+                _ if !html_element || scope.conditional_markup => None,
                 "article" | "main"
                     if !scope.explicit
                         && !scope.non_body_landmark
@@ -350,7 +354,7 @@ pub fn extract_document(
             if explicit.is_some() {
                 scope.explicit = true;
             }
-            if matches!(tag, "aside" | "header") {
+            if html_element && matches!(tag, "aside" | "header") {
                 scope.non_body_landmark = true;
             }
             if let Some(context) = explicit.as_deref().map(explicit_context).or(semantic) {
@@ -360,7 +364,7 @@ pub fn extract_document(
                     _ => tag.to_string(),
                 });
             }
-            if tag == "p" {
+            if html_element && tag == "p" {
                 scope.paragraph = Some(Rc::from(text_content(&node)));
             }
             let href = if tag == "a" {
@@ -394,7 +398,8 @@ pub fn extract_document(
         let children = children_with_template_contents(&node);
         // Only the first direct summary of a closed details element is shown.
         // An ancestor may already be collapsed, including around this summary.
-        let closed_details = is_element(&node, "details") && attribute(&node, "open").is_none();
+        let closed_details = matches!(&node.data, NodeData::Element { name, .. } if name.ns == ns!(html) && name.local.as_ref() == "details")
+            && attribute(&node, "open").is_none();
         let first_summary = closed_details
             .then(|| {
                 children
@@ -494,6 +499,41 @@ mod tests {
             .into_iter()
             .map(|link| link.route)
             .collect()
+    }
+
+    #[test]
+    fn foreign_landmark_names_do_not_create_html_link_contexts() {
+        use html5ever::ns;
+        for (html, namespace) in [
+            (
+                "<svg><main><a href='/one'>one</a></main><nav><a href='/two'>two</a></nav></svg><main><a href='/three'>three</a></main>",
+                ns!(svg),
+            ),
+            (
+                "<math><main><a href='/one'>one</a></main><nav><a href='/two'>two</a></nav></math><main><a href='/three'>three</a></main>",
+                ns!(mathml),
+            ),
+        ] {
+            let dom = parse_document(RcDom::default(), ParseOpts::default()).one(html);
+            let mut stack = vec![dom.document.clone()];
+            let mut foreign = Vec::new();
+            while let Some(node) = stack.pop() {
+                if let NodeData::Element { name, .. } = &node.data
+                    && name.ns == namespace
+                    && matches!(name.local.as_ref(), "main" | "nav")
+                {
+                    foreign.push(name.local.to_string());
+                }
+                stack.extend(node.children.borrow().iter().cloned());
+            }
+            foreign.sort();
+            assert_eq!(foreign, ["main", "nav"]);
+            let links = extract_links(html, "https://example.org/", "https://example.org", None);
+            assert_eq!(links.len(), 3);
+            assert_eq!(links[0].context, LinkContext::Unknown);
+            assert_eq!(links[1].context, LinkContext::Unknown);
+            assert_eq!(links[2].context, LinkContext::Body);
+        }
     }
 
     #[test]
