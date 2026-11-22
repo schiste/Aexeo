@@ -49,6 +49,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   dist-tags; a version in the manifest or changelog does not establish that it
   was published. Build and test the archive from the release source tree, then
   verify the registry version and artifact integrity after publication.
+  For a monorepo package, pass its directory explicitly to `npm pack` or run
+  from that directory; do not rely on `--prefix` to select the pack target.
+  Inspect the packed file list and test the resulting archive.
 - Before a guarded PR merge, fetch the full live `headRefOid` directly from
   `gh pr view --json headRefOid` and pass that exact value to
   `--match-head-commit`; never reconstruct a full SHA from an abbreviated log.
