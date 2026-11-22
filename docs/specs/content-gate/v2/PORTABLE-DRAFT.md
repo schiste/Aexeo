@@ -257,8 +257,15 @@ prevents a match even when a passing verdict file exists. These are caller
 assertions, not proof of execution.
 The comparator strictly validates Aexeo offline host-option fields and rejects a
 verdict whose declared HTML scope or validator version differs from those options.
-It also compares each validator profile with the resolved policy name; it does
-not validate the full policy or authenticate these labels. It still cannot
+It also compares each validator profile with the resolved policy name. For the
+currently understood Aexeo v1 resolved-policy artifact, it requires a check for
+each configured gate and applicable changed item, or the collection-scoped check
+when a collection is supplied, with the configured blocking flag. Unknown gate
+kinds and policy versions are rejected. This detects omitted checks even if the
+host's explicit required-check list omits them. It does not validate every gate
+parameter, prove the evaluator ran the checks correctly, or authenticate the
+policy or validator labels. The host must still independently select its required
+checks and enforce completeness, freshness and the publication boundary. It still cannot
 establish that the independently supplied options were used by the evaluator.
 The producer's artifact encodings are still Aexeo-specific; the host must
 obtain them independently rather than trust a bundle from the previous result.

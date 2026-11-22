@@ -78,6 +78,63 @@ def validate_host_options(options):
     return options.get('html_scope')
 
 
+
+# This is a versioned understanding of Aexeo's current gate scopes, not a
+# validation of each gate's parameters or proof that its evaluator ran.
+_ITEM_GATE_KINDS = frozenset({
+    'editorial_pacing', 'literal_markdown_links', 'list_item_count', 'word_count',
+    'character_count', 'metadata_length', 'metadata_age', 'paragraph_count',
+    'paragraph_length', 'repeated_paragraph_openings', 'repeated_sentence_openings',
+    'sentence_opening_window', 'sentence_opening_terms', 'repeated_punctuation',
+    'trailing_ing_clause', 'similar_sentence_lengths', 'sentence_length_variance',
+    'prose_sentence_length_variance', 'inline_triple_candidates', 'duplicate_paragraphs',
+    'paragraph_character_length', 'link_count', 'link_destinations', 'link_reachability',
+    'sentence_length', 'sentence_character_length', 'repeated_terms', 'required_terms',
+    'forbidden_terms', 'required_metadata', 'required_headings', 'heading_length',
+    'heading_hierarchy', 'duplicate_headings', 'final_newline', 'evidence_anchors',
+    'structured_fact', 'evidence_review', 'evidence_review_age', 'custom',
+    'site_group', 'site_audit',
+})
+
+
+def require_policy_coverage(policy, change, has_collection, verdict):
+    """Reject a verdict omitting a configured gate instance or its blocking flag."""
+    if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
+            or type(policy['version']) is not int or policy['version'] != 1
+            or not isinstance(policy['gates'], list)):
+        raise VerificationError('unsupported resolved policy shape')
+    text(policy['name'], empty=False)
+    checks = {check['id']: check for check in verdict['checks']}
+    entries = [entry['entity_id'] for entry in change['entries']
+               if entry.get('after') is not None]
+    ids = set()
+    expected_count = 0
+    for gate in policy['gates']:
+        if not isinstance(gate, dict):
+            raise VerificationError('invalid resolved gate')
+        gate_id, kind, blocking = gate.get('id'), gate.get('kind'), gate.get('blocking')
+        text(gate_id, empty=False)
+        if (gate_id in ids or type(blocking) is not bool or not isinstance(kind, str)
+                or kind not in _ITEM_GATE_KINDS | {'unique_collection_metadata'}):
+            raise VerificationError('unsupported resolved gate')
+        ids.add(gate_id)
+        collection_gate = kind == 'unique_collection_metadata' and has_collection
+        expected_count += 1 if collection_gate else len(entries)
+        # Bound work before forming a Cartesian product of untrusted inputs.
+        if expected_count > len(checks):
+            raise VerificationError('resolved policy check is missing')
+    for gate in policy['gates']:
+        gate_id, kind, blocking = gate['id'], gate['kind'], gate['blocking']
+        if kind == 'unique_collection_metadata' and has_collection:
+            expected = [f'collection:0::{gate_id}']
+        else:
+            expected = (f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate_id}' for entity in entries)
+        for check_id in expected:
+            check = checks.get(check_id)
+            if check is None or check['blocking'] is not blocking:
+                raise VerificationError('resolved policy check is missing or has inconsistent blocking')
+
+
 def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
             required_checks, expected_validator, fresh_exit_code, fresh_timed_out, content_bytes=None):
     """Check both outputs against current inputs; never authorize publication."""
@@ -133,6 +190,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (evidence is not None):
             raise VerificationError('link evidence does not match the verdict profile')
         validate_verdict(verdict)
+        require_policy_coverage(policy, change, collection is not None, verdict)
         if verdict['validator']['version'] != host_options['engine_version']:
             raise VerificationError('validator version does not match host options')
         if verdict['validator'].get('profile') != policy['name']:

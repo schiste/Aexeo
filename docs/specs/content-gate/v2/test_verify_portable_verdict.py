@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, validate_link_evidence, validate_schema
+from verify_portable_verdict import compare, require_policy_coverage, validate_link_evidence, validate_schema
 
 
 class PortableComparison(unittest.TestCase):
@@ -102,6 +102,64 @@ class PortableComparison(unittest.TestCase):
                          {(0, 'before'): after, (0, 'after'): before}):
             with self.assertRaises(VerificationError):
                 check(supplied)
+
+    def test_policy_coverage_rejects_rebound_omitted_gate(self):
+        # Both verdicts agree and the binding matches the expanded policy; a
+        # host-supplied list containing only the first check is insufficient.
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'].append(dict(policy['gates'][0], id='omitted'))
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'policy check is missing'):
+            self.check()
+
+    def test_policy_coverage_scopes_and_fails_closed(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        # Rust scopes entity lengths in UTF-8 bytes, not Unicode scalars.
+        change['entries'][0]['entity_id'] = 'été'
+        verdict['checks'][0]['id'] = 'gate:5:été:words'
+        require_policy_coverage(policy, change, False, verdict)
+        verdict['checks'][0]['id'] = 'gate:3:été:words'
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, False, verdict)
+        verdict['checks'][0]['id'] = 'gate:5:été:words'
+        verdict['checks'][0]['blocking'] = False
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, False, verdict)
+        verdict['checks'][0]['blocking'] = True
+        collection_gate = dict(policy['gates'][0], id='unique', kind='unique_collection_metadata')
+        policy['gates'].append(collection_gate)
+        verdict['checks'].append({'id': 'collection:0::unique', 'blocking': True})
+        require_policy_coverage(policy, change, True, verdict)
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, False, verdict)
+        collection_gate['kind'] = 'unknown_future_gate'
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, True, verdict)
+        collection_gate['kind'] = 'unique_collection_metadata'
+        collection_gate['id'] = 'words'
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, True, verdict)
+        policy['gates'].pop()
+        second = copy.deepcopy(change['entries'][0])
+        second['entity_id'] = 'second'
+        change['entries'].append(second)
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, False, verdict)
+        verdict['checks'].append({'id': 'gate:6:second:words', 'blocking': True})
+        require_policy_coverage(policy, change, False, verdict)
+        for invalid in (None, [], {}, True):
+            policy['gates'][0]['kind'] = invalid
+            with self.subTest(kind=invalid), self.assertRaises(VerificationError):
+                require_policy_coverage(policy, change, False, verdict)
 
     def test_fresh_process_must_complete_successfully(self):
         for code, timed_out in ((1, False), (2, False), (None, False), (True, False),
