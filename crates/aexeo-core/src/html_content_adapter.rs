@@ -225,7 +225,7 @@ pub fn html_content_with_literal_projection(
                         if tag == "a"
                             && let Some(href) =
                                 attrs.iter().find(|attr| attr.name.local.as_ref() == "href")
-                            && href.value.starts_with("#reference-")
+                            && crate::content_gate::numeric_reference_destination(&href.value)
                             && let Some(label) = reference_label(&node)
                             && crate::content_gate::numeric_reference_marker(&href.value, &label)
                         {
@@ -1296,6 +1296,36 @@ mod tests {
             crate::text_index::LineIndex::new(source)
                 .position(source, source.find("Next").unwrap())
         );
+    }
+
+    #[test]
+    fn wikipedia_citations_keep_literal_source_and_locations() {
+        let source = "<p>Élan.<sup><a href='#cite_note-example-17'>[17]</a></sup> Next. <a href='/ordinary'>2025</a></p>";
+        let adapted = html_content("x", source).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        assert!(text.contains("Élan.     Next"), "{text}");
+        assert!(text.contains("2025"));
+        assert_eq!(adapted.destinations, ["#cite_note-example-17", "/ordinary"]);
+        let map = html_source_map(source, text).unwrap();
+        let pos = crate::text_index::LineIndex::new(text)
+            .position(text, text.find("Next").unwrap())
+            .unwrap();
+        assert_eq!(
+            map.source_position(source, text, pos.0, pos.1),
+            crate::text_index::LineIndex::new(source)
+                .position(source, source.find("Next").unwrap())
+        );
+        for href in ["#cite_note-", "#cite_note_other", "/ordinary"] {
+            let html = format!("<p>Élan.<a href='{href}'>2025</a> Next.</p>");
+            assert!(
+                html_content("x", &html)
+                    .unwrap()
+                    .input
+                    .text
+                    .unwrap()
+                    .contains("2025")
+            );
+        }
     }
 
     #[test]

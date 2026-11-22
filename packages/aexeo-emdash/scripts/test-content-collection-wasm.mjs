@@ -455,6 +455,16 @@ assert.equal(citedReport.source_locations.length, 31);
 assert.equal(JSON.stringify(citedDocument), originalCitations);
 console.log("WASM sentence analysis preserves reference markers and source locations");
 
+// Wikipedia-style citation targets are handled without changing literal text.
+const wikiCitedDocument = structuredClone(citedDocument);
+wikiCitedDocument.body[0].markDefs[0].href = "#cite_note-example-1";
+const wikiCitedOriginal = JSON.stringify(wikiCitedDocument);
+const wikiCitedReport = await evaluateContent(wikiCitedDocument, "citation-test", { "citation-test": sentencePreset });
+assert.equal(wikiCitedReport.gates[0].measurements.sentence_count, 31);
+assert.equal(wikiCitedReport.source_locations.length, 31);
+assert.equal(JSON.stringify(wikiCitedDocument), wikiCitedOriginal);
+console.log("WASM Wikipedia citations preserve sentence boundaries and source locations");
+
 // A visible URL split across spans must not create artificial sentence breaks.
 const urlDocument = { route: "/url", title: "URL", body: [{ children: [
   { _type: "span", text: "See https://example." },

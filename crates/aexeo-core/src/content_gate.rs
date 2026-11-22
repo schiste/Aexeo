@@ -195,9 +195,18 @@ fn sentence_is_quoted(
             .any(|ch| matches!(ch, '"' | '«' | '»' | '“' | '”' | '‘'))
 }
 
+/// Whether a fragment identifies a supported reference target. This only
+/// recognizes target conventions; it does not establish that the source exists.
+pub fn numeric_reference_destination(href: &str) -> bool {
+    href.starts_with("#reference-")
+        || href
+            .strip_prefix("#cite_note-")
+            .is_some_and(|suffix| !suffix.is_empty())
+}
+
 /// Whether an explicitly linked reference marker can be excluded from prose.
 pub(crate) fn numeric_reference_marker(href: &str, text: &str) -> bool {
-    href.starts_with("#reference-")
+    numeric_reference_destination(href)
         && text.bytes().any(|byte| byte.is_ascii_digit())
         && text
             .bytes()

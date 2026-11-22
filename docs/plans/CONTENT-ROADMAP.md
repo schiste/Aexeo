@@ -100,6 +100,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Recognize numeric markers linked to Wikipedia `#cite_note-…` targets
+  in Markdown, HTML and Portable Text, preserving literal content, destinations
+  and source coordinates. This is an explicit target convention, not source or
+  citation verification; ambiguous labels remain prose.
+
 - [x] Let host JSON adapters supply partial byte-matched prose spans and
   heading offsets. The CLI rejects invalid spans and heading offsets, reports
   only mapped positions, and marks the source as host-supplied; correspondence

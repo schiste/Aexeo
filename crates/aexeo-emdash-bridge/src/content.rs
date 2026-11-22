@@ -96,7 +96,7 @@ fn content_input_with_context(
                         .data
                         .get("href")
                         .and_then(serde_json::Value::as_str)
-                        .is_some_and(|href| href.starts_with("#reference-"))
+                        .is_some_and(aexeo_core::content_gate::numeric_reference_destination)
             })
             .map(|def| def.key.as_str())
             .collect();
@@ -2047,6 +2047,28 @@ field = "slug"
         assert_eq!(locations.len(), 31);
         assert_eq!((locations[1].span_index, locations[1].utf16_offset), (3, 0));
         assert_eq!(document.body[0].children.len(), 69);
+    }
+
+    #[test]
+    fn wikipedia_citations_keep_literal_input_and_portable_text_positions() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{
+                "markDefs":[{"_key":"ref", "_type":"link", "href":"#cite_note-source-17"}],
+                "children":[{"_type":"span", "text":"Élan."}, {"_type":"span", "text":"[17]", "marks":["ref"]}, {"_type":"span", "text":" Next sentence."}]
+            }]
+        })).unwrap();
+        let (input, _, _, literal) = content_input_with_context(&document);
+        assert_eq!(input.text.as_deref(), Some("Élan.     Next sentence."));
+        assert_eq!(literal.as_deref(), Some("Élan.[17] Next sentence."));
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n",
+        )
+        .unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].measurements["sentence_count"], 2);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 1);
+        assert_eq!((locations[0].span_index, locations[0].utf16_offset), (2, 1));
     }
 
     #[test]
