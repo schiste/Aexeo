@@ -294,35 +294,35 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         text,
     ) {
         (Some("markdown"), Some(text)) => {
-            if preset
+            let wants_lists = preset
                 .gates
                 .iter()
-                .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
-            {
-                structured_lists = aexeo_core::markdown_adapter::markdown_structured_lists(&text)?;
-            }
-            let (input, capabilities, links, map) = if args.get_flag("export-link-observations")
+                .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }));
+            let wants_destinations = args.get_flag("export-link-observations")
                 || args.contains_id("link-observations")
                 || preset.gates.iter().any(|gate| {
                     matches!(
                         gate,
                         ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
                     )
-                }) {
-                let adapted =
-                    aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
-                        id, &text,
-                    )?;
-                destinations = adapted.destinations;
-                (
-                    adapted.input,
-                    adapted.context,
-                    adapted.link_count,
-                    adapted.source_map,
-                )
-            } else {
-                aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?
-            };
+                });
+            let adapted = aexeo_core::markdown_adapter::markdown_project(
+                id,
+                &text,
+                aexeo_core::markdown_adapter::MarkdownProjectionOptions {
+                    source_map: true,
+                    link_destinations: wants_destinations,
+                    structured_lists: wants_lists,
+                },
+            )?;
+            structured_lists = adapted.structured_lists;
+            destinations = adapted.destinations;
+            let (input, capabilities, links, map) = (
+                adapted.input,
+                adapted.context,
+                adapted.link_count,
+                adapted.source_map,
+            );
             literal_projection = map.literal_projection().map(str::to_owned);
             heading_levels = map.heading_levels().map(<[u8]>::to_vec);
             paragraph_list_items = map.paragraph_list_items().map(<[bool]>::to_vec);

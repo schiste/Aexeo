@@ -525,16 +525,18 @@ pub fn markdown_structured_lists(source: &str) -> Result<Option<Vec<StructuredLi
         return Ok(None);
     }
     let root = parse_markdown(source)?;
+    Ok(structured_lists_from_root(&root))
+}
+
+fn structured_lists_from_root(root: &Node) -> Option<Vec<StructuredList>> {
     let mut lists = Vec::new();
-    let mut pending = vec![(&root, 0usize)];
+    let mut pending = vec![(root, 0usize)];
     while let Some((node, depth)) = pending.pop() {
         if matches!(node, Node::Html(html) if observed_html_break(&html.value).is_none()) {
-            return Ok(None);
+            return None;
         }
         let child_depth = if let Node::List(list) = node {
-            let Some(position) = list.position.as_ref() else {
-                return Ok(None);
-            };
+            let position = list.position.as_ref()?;
             lists.push(StructuredList {
                 item_count: list
                     .children
@@ -553,7 +555,7 @@ pub fn markdown_structured_lists(source: &str) -> Result<Option<Vec<StructuredLi
             pending.extend(children.iter().rev().map(|child| (child, child_depth)));
         }
     }
-    Ok(Some(lists))
+    Some(lists)
 }
 
 /// Map list findings to the exact observed Markdown list openings.
@@ -650,21 +652,76 @@ pub fn markdown_input_with_source_map_and_destinations(
     id: impl Into<String>,
     source: &str,
 ) -> Result<MarkdownContentWithDestinations> {
+    let projection = markdown_project(
+        id,
+        source,
+        MarkdownProjectionOptions {
+            source_map: true,
+            link_destinations: true,
+            structured_lists: false,
+        },
+    )?;
+    Ok(MarkdownContentWithDestinations {
+        input: projection.input,
+        context: projection.context,
+        link_count: projection.link_count,
+        source_map: projection.source_map,
+        destinations: projection.destinations,
+    })
+}
+
+/// Optional observations produced together with a single Markdown parse.
+#[derive(Default)]
+pub struct MarkdownProjectionOptions {
+    pub source_map: bool,
+    pub link_destinations: bool,
+    pub structured_lists: bool,
+}
+
+/// A combined projection. `None` observations are unavailable or were not requested;
+/// an observed empty list is represented by `Some(Vec::new())`.
+pub struct MarkdownProjection {
+    pub input: ContentInput,
+    pub context: ContentContext,
+    pub link_count: usize,
+    pub source_map: MarkdownSourceMap,
+    pub destinations: Option<Vec<String>>,
+    pub structured_lists: Option<Vec<StructuredList>>,
+}
+
+/// Project the requested independent capabilities from one parsed document.
+/// Destination source positions require `source_map`; callers must still check
+/// `links_complete` before treating the count as a complete observation.
+pub fn markdown_project(
+    id: impl Into<String>,
+    source: &str,
+    options: MarkdownProjectionOptions,
+) -> Result<MarkdownProjection> {
     let root = parse_markdown(source)?;
     let definitions = reference_definitions(&root);
-    let links = link_destinations_from_root(&root, source, &definitions);
-    let (input, context, count, mut map) =
-        extract_markdown_from_root(id, source, true, &root, definitions)?;
+    let lists = (options.structured_lists
+        && source.len() <= crate::content_gate::MAX_CONTENT_INPUT_BYTES)
+        .then(|| structured_lists_from_root(&root))
+        .flatten();
+    let links = options
+        .link_destinations
+        .then(|| link_destinations_from_root(&root, source, &definitions))
+        .flatten();
+    let (input, context, link_count, mut source_map) =
+        extract_markdown_from_root(id, source, options.source_map, &root, definitions)?;
     let destinations = links.map(|links| {
-        map.link_starts = links.iter().map(|link| link.start).collect();
+        if options.source_map {
+            source_map.link_starts = links.iter().map(|link| link.start).collect();
+        }
         links.into_iter().map(|link| link.url).collect()
     });
-    Ok(MarkdownContentWithDestinations {
+    Ok(MarkdownProjection {
         input,
         context,
-        link_count: count,
-        source_map: map,
+        link_count,
+        source_map,
         destinations,
+        structured_lists: lists,
     })
 }
 
@@ -1203,6 +1260,57 @@ mod tests {
             ),
             Some((1, 11))
         );
+    }
+
+    #[test]
+    fn combined_projection_matches_independent_observations() {
+        for source in [
+            "# Heading\n\n- [one](/one)\n- two\n  - nested\n\n[ref][id]\n\n[id]: /target\n",
+            "before <a href='/opaque'>opaque</a> after",
+            "plain prose without a list",
+        ] {
+            let (old_input, _old_context, old_count, old_map) =
+                markdown_input_with_source_map("x", source).unwrap();
+            let old_destinations = markdown_link_destinations(source).unwrap();
+            let projected = markdown_project(
+                "x",
+                source,
+                MarkdownProjectionOptions {
+                    source_map: true,
+                    link_destinations: true,
+                    structured_lists: true,
+                },
+            )
+            .unwrap();
+            assert_eq!(projected.input.text, old_input.text, "{source}");
+            assert_eq!(projected.input.headings, old_input.headings, "{source}");
+            assert_eq!(projected.link_count, old_count, "{source}");
+            assert_eq!(projected.destinations, old_destinations, "{source}");
+            assert_eq!(
+                projected.source_map.links_complete(),
+                old_map.links_complete(),
+                "{source}"
+            );
+            assert_eq!(
+                projected.source_map.heading_levels(),
+                old_map.heading_levels(),
+                "{source}"
+            );
+            assert_eq!(
+                projected.source_map.paragraph_list_items(),
+                old_map.paragraph_list_items(),
+                "{source}"
+            );
+            assert_eq!(
+                projected.structured_lists,
+                markdown_structured_lists(source).unwrap(),
+                "{source}"
+            );
+            let minimal =
+                markdown_project("x", source, MarkdownProjectionOptions::default()).unwrap();
+            assert!(minimal.destinations.is_none());
+            assert!(minimal.structured_lists.is_none());
+        }
     }
 
     #[test]

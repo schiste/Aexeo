@@ -213,3 +213,47 @@ fn shared_list_cases_match_markdown_html_and_wasm() {
         }
     }
 }
+
+#[test]
+fn combined_list_and_destination_checks_keep_locations_and_withhold_opaque_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='combined'\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+    let article = dir.path().join("article.md");
+    for (source, expected) in [
+        ("- [one](http://example.org)\n- two\n- three\n", "failed"),
+        ("<div>unobserved</div>\n", "not_checked"),
+    ] {
+        fs::write(&article, source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--input-format",
+                "markdown",
+                "--preset",
+                "combined",
+                "--preset-source",
+                &format!("combined={}", preset.display()),
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(if expected == "failed" { 1 } else { 2 }),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["gates"][0]["status"], expected);
+        assert_eq!(report["gates"][1]["status"], expected);
+        if expected == "failed" {
+            assert_eq!(report["source_locations"][0]["line"], 1);
+            assert_eq!(report["source_locations"][1]["line"], 1);
+        }
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(source));
+    }
+}
