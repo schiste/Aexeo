@@ -280,6 +280,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For JSON Schema identifier patterns ending in `$`, test a valid identifier
   followed by a newline: common regex engines match before that newline. Enforce
   exact lengths as well as the pattern and test both valid and invalid lengths.
+- When running isolated copies of the content-gate v2 Python tests, preserve
+  the sibling `v1/` schema directory alongside `v2/`: the independent verifier
+  resolves v1 change and verdict schemas relative to its own file. Run a known
+  valid comparison as well as rejection cases so missing schemas cannot masquerade
+  as a successful negative test.
 - For Python JSON Schema format checks, verify each required format checker is
   registered: optional dependencies can otherwise make validation silently skip
   it. Test malformed format values and fail closed when a checker is missing.
