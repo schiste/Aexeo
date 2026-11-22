@@ -304,6 +304,11 @@ registry before considering the release delivered.
 - [x] Measure EmDash projection separately from projection plus evaluation on a
   synthetic 500-block snapshot, with local aggregate p50/p95 and CI budgets.
   These measurements exclude JSON parsing, WASM startup and network latency.
+- [x] Record fresh-process Node module import, first WASM evaluation and total
+  process p50/p95 on a synthetic item. The benchmark runs against the real
+  bundled bridge, checks its output and fails if the bridge is missing. CI
+  records it without a threshold pending representative calibration; Node and
+  OS cache conditions differ from a browser or workerd cold start.
 - [x] Single-parse Markdown link validation and a p50/p95 comparison against the
   two-parse baseline ([PR #47](https://github.com/schiste/Aexeo/pull/47)).
 - [x] Opt-in per-gate timing telemetry for local content and crawls in resolved preset

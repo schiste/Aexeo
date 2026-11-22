@@ -364,3 +364,20 @@ status and duration. This adds an evaluation per mapped field (and another for
 fields with successful link observations) and does not establish factual accuracy, rendered
 page quality or publication readiness. Coverage telemetry contains aggregate
 counts, without field names or content.
+
+### Measuring local WASM startup
+
+In a repository checkout, run `npm ci` and `npm run build` in this package,
+then run `npm run --silent bench:wasm-startup`. For an installed package, run
+`node node_modules/@aeptus/aexeo-emdash/scripts/benchmark-wasm-startup.mjs`
+from the host project. The benchmark starts 20 new Node
+processes and reports aggregate average, p50 and p95 durations for each whole
+process, module import and first synthetic evaluation. Module import and first
+evaluation together include any lazy WASM initialization; the whole-process
+measurement also includes Node startup and process teardown. Each evaluation
+must pass before a sample is accepted. Output contains no content or route.
+
+This is a local Node measurement, not a browser or workerd cold start, and it
+excludes network and host CMS access. Operating-system caches may already be
+warm. CI records the measurement without a startup budget until repeated CI
+runs establish a representative threshold.

@@ -163,6 +163,8 @@ jobs:
         run: npm run build --prefix packages/aexeo-emdash
       - name: Test the plugin against the real WASM
         run: npm run test:wasm --prefix packages/aexeo-emdash
+      - name: Measure fresh-process plugin startup
+        run: node packages/aexeo-emdash/scripts/test-benchmark-wasm-startup.mjs
       - name: Build the worker's WASM
         run: npm run build:wasm --prefix packages/aexeo-crawl-worker
       - name: Test the worker in workerd with the real WASM
