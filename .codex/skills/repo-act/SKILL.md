@@ -131,7 +131,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   EmDash projections where applicable. For token recognition, also test tokens
   beginning immediately after adjacent or duplicate block boundaries and tokens
   split across Portable Text spans; check punctuation and mapped positions in
-  Markdown, HTML and rebuilt WASM where those adapters apply.
+  Markdown, HTML and rebuilt WASM where those adapters apply. For URLs inside
+  prose, test lowercase, uppercase and mixed-case HTTP(S) schemes, malformed
+  or embedded non-URLs, and the next sentence's position; link parsing and
+  sentence segmentation may use different recognizers.
 - For structural adapter classifications, test source blocks that yield no
   projected paragraph (such as an empty list item), not just classifications of
   visible paragraphs. An omitted block can hide a boundary; withhold completeness
