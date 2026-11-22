@@ -92,13 +92,10 @@ pub(crate) fn literal_projection_matches(projected: &str, literal: &str) -> bool
     loop {
         match (masked.next(), original.next()) {
             (None, None) => return true,
-            (Some(a), Some(b)) if a == b => (),
             (Some(a), Some(b))
-                if reference_label_character(b)
-                    && a == if b.len_utf8() == 2 { '\u{00a0}' } else { ' ' } =>
-            {
-                ()
-            }
+                if a == b
+                    || (reference_label_character(b)
+                        && a == if b.len_utf8() == 2 { '\u{00a0}' } else { ' ' }) => {}
             _ => return false,
         }
     }
