@@ -291,8 +291,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `EPERM`; do not interpret that alone as proof of a surviving process. Avoid
   signaling a recycled group ID, and never treat ambiguous cleanup as success.
 - For candidate snapshot tests, rebuild a changed item with its fixture constructor
-  so its source digest matches the new bytes. Verify a negative control fails
-  for the intended gate or invariant rather than invalid fixture metadata.
+  so its source digest matches the new bytes. For each adversarial variant,
+  confirm it is accepted without the target guard and rejected with it; an
+  unrelated validation error can otherwise make a regression test pass. Use a
+  prior build or an isolated in-memory mutation, leaving tracked code unchanged.
 - For candidate verdicts with link evidence, test both production and independent verification with inline, file and URI states. Check that wrong host bytes, independent bytes and candidate content are rejected; support in the producer alone does not establish verifier interoperability.
 - For cross-process interoperability tests, build each executable from the
   exact source revision under test, or verify its build provenance before
