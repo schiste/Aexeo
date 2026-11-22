@@ -1606,7 +1606,7 @@ mod tests {
             evaluated,
             reused,
             ..
-        } = baseline.evaluate_with_evidence(&change, &[next.clone()], None, &candidate)
+        } = baseline.evaluate_with_evidence(&change, std::slice::from_ref(&next), None, &candidate)
         else {
             panic!("expected complete evaluation")
         };
@@ -1628,7 +1628,7 @@ mod tests {
             );
         }
         assert!(matches!(
-            baseline.evaluate_with_evidence(&change, &[next.clone()], None, &base),
+            baseline.evaluate_with_evidence(&change, std::slice::from_ref(&next), None, &base),
             IncrementalEvaluation::Evaluated {
                 evaluated: 1,
                 reused: 1,
@@ -1636,12 +1636,12 @@ mod tests {
             }
         ));
         assert!(matches!(
-            baseline.evaluate(&change, &[next.clone()]),
+            baseline.evaluate(&change, std::slice::from_ref(&next)),
             IncrementalEvaluation::NotChecked { .. }
         ));
         candidate.remove("b");
         assert!(matches!(
-            baseline.evaluate_with_evidence(&change, &[next.clone()], None, &candidate),
+            baseline.evaluate_with_evidence(&change, std::slice::from_ref(&next), None, &candidate),
             IncrementalEvaluation::NotChecked { .. }
         ));
         candidate.insert("b".into(), BTreeMap::new());
