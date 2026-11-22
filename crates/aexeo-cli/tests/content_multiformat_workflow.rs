@@ -495,6 +495,32 @@ fn literal_terms_can_see_reference_labels_without_affecting_rhythm() {
 }
 
 #[test]
+fn arabic_decimal_sentences_keep_source_positions_across_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, "version=1\nname='t'\n[[gates]]\nid='length'\nkind='sentence_character_length'\nmax_chars=5\nblocking=false\n").unwrap();
+    for (format, source) in [
+        ("html", "<p>Value ٣.١٤ units. Next sentence.</p>"),
+        ("markdown", "Value ۳.۱۴ units. Next sentence."),
+    ] {
+        fs::write(&draft, source).unwrap();
+        let (report, _) = evaluate(&draft, &preset, format);
+        assert_eq!(
+            report["gates"][0]["measurements"]["sentence_count"], 2,
+            "{format}"
+        );
+        assert_eq!(
+            report["source_locations"].as_array().unwrap().len(),
+            2,
+            "{format}"
+        );
+        let column = source[..source.find("Next").unwrap()].chars().count() + 1;
+        assert_eq!(report["source_locations"][1]["column"], column, "{format}");
+    }
+}
+
+#[test]
 fn multi_period_abbreviations_work_across_markdown_and_html() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("example");
