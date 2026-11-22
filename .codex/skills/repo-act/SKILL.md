@@ -98,6 +98,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   workspace (currently 2024 here). Invoking `rustfmt` with a different edition
   can change import ordering; check the focused file with the same edition or
   use `cargo fmt` so it reads the manifest.
+  After edits spanning multiple crates, run `cargo fmt --all -- --check`
+  before submission: formatting only one package leaves other changed crates unchecked.
 - Before portable content-gate Python interoperability tests, create a venv in
   the session scratch directory and install `docs/specs/content-gate/v2/requirements-test.txt`.
   Run the tests with that venv's Python: missing schema validators fail closed
