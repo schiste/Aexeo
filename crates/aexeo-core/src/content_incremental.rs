@@ -69,6 +69,9 @@ fn checked_overlay_with_sources<P: crate::content_gate_sources::ConfinedContentF
     Ok(overlay)
 }
 
+/// Host-supplied evidence per entity. Neither authenticity nor freshness is established.
+pub type IncrementalEvidence = BTreeMap<String, BTreeMap<String, String>>;
+
 /// Reports evaluated by this binary from an owned base and owned preset.
 /// Construct once and reuse for multiple proposals against the same base.
 /// The cache is intentionally not serializable and has no mutable accessors.
@@ -77,6 +80,7 @@ pub struct IncrementalBaseline {
     preset: ContentPreset,
     reports: BTreeMap<String, ContentReport>,
     mode: ProjectionMode,
+    evidence: Option<IncrementalEvidence>,
     metadata_dependent: bool,
     base_metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
     link_observations:
@@ -146,10 +150,21 @@ fn is_item_metadata_gate(gate: &ContentGate) -> bool {
     )
 }
 
+fn is_evidence_gate(gate: &ContentGate) -> bool {
+    matches!(
+        gate,
+        ContentGate::EvidenceAnchors { .. }
+            | ContentGate::StructuredFact { .. }
+            | ContentGate::EvidenceReview { .. }
+            | ContentGate::EvidenceReviewAge { .. }
+    )
+}
+
 fn validate_preset(
     preset: &ContentPreset,
     mode: ProjectionMode,
     has_metadata: bool,
+    has_evidence: bool,
 ) -> Result<(), NotChecked> {
     preset
         .validate()
@@ -205,7 +220,8 @@ fn validate_preset(
                     | ContentGate::DuplicateHeadings { .. }
             );
         let metadata_gate = has_metadata && is_item_metadata_gate(gate);
-        !text_gate && !paragraph_gate && !structured_gate && !metadata_gate
+        let evidence_gate = has_evidence && is_evidence_gate(gate);
+        !text_gate && !paragraph_gate && !structured_gate && !metadata_gate && !evidence_gate
     }) {
         return Err(unavailable(
             "preset contains gates outside the supported independent item scope",
@@ -220,6 +236,7 @@ fn evaluate_item(
     mode: ProjectionMode,
     metadata: Option<&BTreeMap<String, String>>,
     link_snapshot: Option<&crate::content_gate_verdict::LinkObservationSnapshot>,
+    evidence: Option<&BTreeMap<String, String>>,
 ) -> Result<ContentReport, NotChecked> {
     let classify_prose = preset
         .gates
@@ -347,6 +364,7 @@ fn evaluate_item(
         }
     };
     input.metadata = metadata.cloned();
+    input.evidence_sources = evidence.cloned();
     if let Some(snapshot) = link_snapshot
         && (snapshot.version != 1
             || snapshot.source_sha256 != item.sha256
@@ -390,7 +408,7 @@ impl IncrementalBaseline {
     /// Evaluate all base entities once. A host's completeness and link
     /// projection claims are prerequisites, not independently proven facts.
     pub fn prepare(snapshot: CandidateSnapshot, preset: ContentPreset) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Plain, None, None)
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Plain, None, None, None)
     }
 
     /// Interpret blank-line-separated plain text as paragraphs using the same
@@ -400,7 +418,14 @@ impl IncrementalBaseline {
         snapshot: CandidateSnapshot,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::ParagraphText, None, None)
+        Self::prepare_with_mode(
+            snapshot,
+            preset,
+            ProjectionMode::ParagraphText,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Project Markdown and static HTML using the shared adapters; plain text
@@ -446,6 +471,7 @@ impl IncrementalBaseline {
             ProjectionMode::Adapted(html_scope),
             None,
             None,
+            None,
         )
     }
 
@@ -461,6 +487,7 @@ impl IncrementalBaseline {
             preset,
             ProjectionMode::Adapted(html_scope),
             Some(metadata),
+            None,
             None,
         )
     }
@@ -480,6 +507,29 @@ impl IncrementalBaseline {
             ProjectionMode::Adapted(html_scope),
             metadata,
             Some(observations),
+            None,
+        )
+    }
+
+    /// Prepare a baseline with a complete per-entity evidence inventory. The host
+    /// must verify provenance, freshness, and revision consistency independently.
+    pub fn prepare_adapted_with_evidence(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
+        observations: Option<
+            BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: IncrementalEvidence,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode(
+            snapshot,
+            preset,
+            ProjectionMode::Adapted(html_scope),
+            metadata,
+            observations,
+            Some(evidence),
         )
     }
 
@@ -491,6 +541,7 @@ impl IncrementalBaseline {
         link_observations: Option<
             BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
         >,
+        evidence: Option<IncrementalEvidence>,
     ) -> Result<Self, NotChecked> {
         let snapshot = ValidatedCandidateSnapshot::new(snapshot).map_err(unavailable)?;
         validate_scope(&snapshot, mode)?;
@@ -525,7 +576,24 @@ impl IncrementalBaseline {
                 "link observation inventory does not match base identities",
             ));
         }
-        validate_preset(&preset, mode, metadata.is_some())?;
+        let needs_evidence = preset.gates.iter().any(is_evidence_gate);
+        if needs_evidence != evidence.is_some() {
+            return Err(unavailable(
+                "evidence inventory must be supplied exactly when evidence gates are selected",
+            ));
+        }
+        if let Some(map) = &evidence
+            && (map.len() != snapshot.items.len()
+                || snapshot
+                    .items
+                    .iter()
+                    .any(|item| !map.contains_key(&item.entity_id)))
+        {
+            return Err(unavailable(
+                "evidence inventory does not match base identities",
+            ));
+        }
+        validate_preset(&preset, mode, metadata.is_some(), evidence.is_some())?;
         let metadata_dependent = preset.gates.iter().any(is_item_metadata_gate);
         let mut reports = BTreeMap::new();
         for item in &snapshot.items {
@@ -543,6 +611,7 @@ impl IncrementalBaseline {
                     link_observations
                         .as_ref()
                         .and_then(|map| map.get(&item.entity_id)),
+                    evidence.as_ref().and_then(|map| map.get(&item.entity_id)),
                 )?,
             );
         }
@@ -551,6 +620,7 @@ impl IncrementalBaseline {
             preset,
             reports,
             mode,
+            evidence,
             metadata_dependent,
             base_metadata: metadata,
             link_observations,
@@ -593,7 +663,7 @@ impl IncrementalBaseline {
                     max_total_bytes,
                 )
             })
-            .and_then(|overlay| self.evaluate_overlay(change, &overlay, None));
+            .and_then(|overlay| self.evaluate_overlay(change, &overlay, None, None));
         match result {
             Ok(result) => result,
             Err(error) => IncrementalEvaluation::NotChecked {
@@ -613,7 +683,7 @@ impl IncrementalBaseline {
         let result = self
             .validate_change_media(change)
             .and_then(|()| checked_overlay(&self.snapshot, change, after))
-            .and_then(|overlay| self.evaluate_overlay(change, &overlay, Some(observations)));
+            .and_then(|overlay| self.evaluate_overlay(change, &overlay, Some(observations), None));
         result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
             reason: error.reason,
         })
@@ -644,7 +714,66 @@ impl IncrementalBaseline {
                     max_total_bytes,
                 )
             })
-            .and_then(|overlay| self.evaluate_overlay(change, &overlay, Some(observations)));
+            .and_then(|overlay| self.evaluate_overlay(change, &overlay, Some(observations), None));
+        result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
+            reason: error.reason,
+        })
+    }
+
+    /// Re-evaluate when an evidence snapshot changes, including for unchanged content.
+    /// The host must supply an inventory for every candidate entity and independently
+    /// establish source authenticity, freshness and revision consistency.
+    pub fn evaluate_with_evidence(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        observations: Option<
+            &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: &IncrementalEvidence,
+    ) -> IncrementalEvaluation {
+        let result = self
+            .validate_change_media(change)
+            .and_then(|()| checked_overlay(&self.snapshot, change, after))
+            .and_then(|overlay| {
+                self.evaluate_overlay(change, &overlay, observations, Some(evidence))
+            });
+        result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
+            reason: error.reason,
+        })
+    }
+
+    /// Evaluate confined referenced changes with the same complete candidate evidence inventory.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_sources_and_evidence<
+        P: crate::content_gate_sources::ConfinedContentFiles,
+    >(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+        observations: Option<
+            &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: &IncrementalEvidence,
+    ) -> IncrementalEvaluation {
+        let result = self
+            .validate_change_media(change)
+            .and_then(|()| {
+                checked_overlay_with_sources(
+                    &self.snapshot,
+                    change,
+                    after,
+                    provider,
+                    max_state_bytes,
+                    max_total_bytes,
+                )
+            })
+            .and_then(|overlay| {
+                self.evaluate_overlay(change, &overlay, observations, Some(evidence))
+            });
         result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
             reason: error.reason,
         })
@@ -657,7 +786,7 @@ impl IncrementalBaseline {
     ) -> Result<IncrementalEvaluation, NotChecked> {
         self.validate_change_media(change)?;
         let overlay = checked_overlay(&self.snapshot, change, after)?;
-        self.evaluate_overlay(change, &overlay, None)
+        self.evaluate_overlay(change, &overlay, None, None)
     }
 
     fn validate_change_media(&self, change: &Change) -> Result<(), NotChecked> {
@@ -680,6 +809,7 @@ impl IncrementalBaseline {
         observations: Option<
             &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
         >,
+        evidence: Option<&IncrementalEvidence>,
     ) -> Result<IncrementalEvaluation, NotChecked> {
         validate_scope(&overlay.candidate, self.mode)?;
         if self.link_observations.is_some() != observations.is_some() {
@@ -697,6 +827,21 @@ impl IncrementalBaseline {
         {
             return Err(unavailable(
                 "link observation inventory does not match candidate identities",
+            ));
+        }
+        if self.evidence.is_some() != evidence.is_some() {
+            return Err(unavailable("candidate evidence inventory is required"));
+        }
+        if let Some(map) = evidence
+            && (map.len() != overlay.candidate.items.len()
+                || overlay
+                    .candidate
+                    .items
+                    .iter()
+                    .any(|item| !map.contains_key(&item.entity_id)))
+        {
+            return Err(unavailable(
+                "evidence inventory does not match candidate identities",
             ));
         }
         // The accepted gates depend only on the item's own projected content.
@@ -730,6 +875,13 @@ impl IncrementalBaseline {
         for item in &overlay.candidate.items {
             let report = if baseline_items.get(item.entity_id.as_str()).copied() == Some(item)
                 && (!self.metadata_dependent || !changed.contains(item.entity_id.as_str()))
+                && match (&self.evidence, evidence) {
+                    (Some(base), Some(candidate)) => {
+                        base.get(&item.entity_id) == candidate.get(&item.entity_id)
+                    }
+                    (None, None) => true,
+                    _ => false,
+                }
                 && match (&self.link_observations, observations) {
                     (Some(base), Some(candidate)) => {
                         let a = &base[&item.entity_id];
@@ -776,6 +928,7 @@ impl IncrementalBaseline {
                     self.mode,
                     fields,
                     observations.and_then(|map| map.get(&item.entity_id)),
+                    evidence.and_then(|map| map.get(&item.entity_id)),
                 )?
             };
             reports.insert(item.entity_id.clone(), report);
@@ -1245,7 +1398,10 @@ impl ComposedBaseline {
             .items
             .validate_change_media(change)
             .and_then(|()| overlay.as_ref().map_err(Clone::clone))
-            .and_then(|overlay| self.items.evaluate_overlay(change, overlay, observations));
+            .and_then(|overlay| {
+                self.items
+                    .evaluate_overlay(change, overlay, observations, None)
+            });
         let collection_result = overlay
             .as_ref()
             .map_err(Clone::clone)
@@ -1421,6 +1577,92 @@ mod tests {
     }
 
     #[test]
+    fn evidence_inventory_controls_incremental_reuse_and_fails_closed() {
+        let (mut snapshot, _, mut change) = fixture();
+        let a = item("a", "claim", None);
+        let b = item("b", "claim", None);
+        snapshot.items = vec![a.clone(), b.clone()];
+        let preset = ContentPreset::from_toml("version=1\nname='evidence'\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='claim'\nquote='quote'\n").unwrap();
+        let sources = BTreeMap::from([("study".into(), "quote".into())]);
+        let base = BTreeMap::from([("a".into(), sources.clone()), ("b".into(), sources.clone())]);
+        let baseline = IncrementalBaseline::prepare_adapted_with_evidence(
+            snapshot.clone(),
+            preset.clone(),
+            crate::html_content_adapter::HtmlContentScope::Document,
+            None,
+            None,
+            base.clone(),
+        )
+        .unwrap();
+        let next = item("a", "claim revised", None);
+        change.entries = vec![entry("a", Operation::Update, Some(&a), Some(&next))];
+        let mut candidate = base.clone();
+        candidate
+            .get_mut("b")
+            .unwrap()
+            .insert("study".into(), "different".into());
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate_with_evidence(&change, &[next.clone()], None, &candidate)
+        else {
+            panic!("expected complete evaluation")
+        };
+        assert_eq!((evaluated, reused), (2, 0));
+        assert_eq!(reports["b"].gates[0].status, GateStatus::Failed);
+        for item in [&next, &b] {
+            let report = evaluate_item(
+                &preset,
+                item,
+                ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+                None,
+                None,
+                candidate.get(&item.entity_id),
+            )
+            .unwrap();
+            assert_eq!(
+                serde_json::to_value(&reports[&item.entity_id]).unwrap(),
+                serde_json::to_value(report).unwrap()
+            );
+        }
+        assert!(matches!(
+            baseline.evaluate_with_evidence(&change, &[next.clone()], None, &base),
+            IncrementalEvaluation::Evaluated {
+                evaluated: 1,
+                reused: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            baseline.evaluate(&change, &[next.clone()]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        candidate.remove("b");
+        assert!(matches!(
+            baseline.evaluate_with_evidence(&change, &[next.clone()], None, &candidate),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        candidate.insert("b".into(), BTreeMap::new());
+        assert!(matches!(
+            baseline.evaluate_with_evidence(&change, &[next], None, &candidate),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        assert!(
+            IncrementalBaseline::prepare_adapted_with_evidence(
+                snapshot,
+                preset,
+                crate::html_content_adapter::HtmlContentScope::Document,
+                None,
+                None,
+                candidate
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn adapted_literal_terms_see_reference_labels() {
         let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['[17]']\n").unwrap();
         for (media, source) in [
@@ -1436,6 +1678,7 @@ mod tests {
                 &preset,
                 &candidate,
                 ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+                None,
                 None,
                 None,
             )
