@@ -13,6 +13,56 @@ ROOT = HERE.parents[3]
 
 
 class PortableCliInterop(unittest.TestCase):
+    def test_real_multi_gate_verdict_rejects_omitted_advisory_check(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-coverage-') as directory:
+            root = Path(directory)
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(fixture['artifacts']['change'], encoding='utf-8')
+            (root / 'preset').write_text(
+                "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"
+                "[[gates]]\nid='characters'\nkind='character_count'\nmin=1\nblocking=false\n",
+                encoding='utf-8')
+            binary = os.environ.get('AEXEO_CLI_BIN')
+            executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+            common = executable + ['content-change', '--preset', 'test', '--preset-source',
+                'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build']
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            exported = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                '--candidate-after', str(root / 'after'), '--draft-portable-verdict']
+            result = subprocess.run(command, cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'previous')), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            previous = json.loads((root / 'previous').read_text(encoding='utf-8'))
+            self.assertEqual(len(previous['verdict']['checks']), 2)
+            (root / 'fresh').write_text(json.dumps(previous), encoding='utf-8')
+            verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+            for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                verify += ['--' + name.replace('_', '-'), str(root / name)]
+            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
+                       '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+            matched = subprocess.run(verify, capture_output=True, text=True)
+            self.assertEqual(matched.returncode, 0, matched.stderr)
+            # Keep the verdict internally consistent while omitting the advisory
+            # check in both copies; the independently selected policy is unchanged.
+            verdict = previous['verdict']
+            verdict['checks'] = [check for check in verdict['checks'] if check['id'] != 'gate:7:article:characters']
+            verdict['summary']['checks'] -= 1
+            verdict['summary']['passed'] -= 1
+            for name in ('previous', 'fresh'):
+                (root / name).write_text(json.dumps(previous), encoding='utf-8')
+            rejected = subprocess.run(verify, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+            self.assertIn('policy check is missing', rejected.stderr)
+            self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+
     def test_file_backed_candidate_with_real_cli_and_independent_runner(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         change = json.loads(fixture['artifacts']['change'])
