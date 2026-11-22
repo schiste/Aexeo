@@ -671,3 +671,77 @@ fn referenced_rename_requires_both_before_and_after_bytes() {
         "not_checked"
     );
 }
+
+#[test]
+fn link_observation_inventories_work_with_items_and_composed_presets() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    let source = "[example](https://example.org)";
+    let digest = "b64cfc245d95ab25d38166f5a37f7263a0495a5588c728f959f3cb596e4a55d8";
+    input["snapshot"]["items"][0]["source"] = json!(source);
+    input["snapshot"]["items"][0]["sha256"] = json!(digest);
+    input["snapshot"]["items"][0]["media_type"] = json!("text/markdown");
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["after"][0]["source"] = json!(source);
+        proposal["after"][0]["sha256"] = json!(digest);
+        proposal["change"]["entries"][0]["after"]["inline"] = json!(source);
+        proposal["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+        proposal["after"][0]["media_type"] = json!("text/markdown");
+        proposal["change"]["entries"][0]["media_type"] = json!("text/markdown");
+    }
+    input["preset"] = json!("links");
+    input["preset_sources"] = json!({"links":"version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n"});
+    let hash = input["snapshot"]["items"][0]["sha256"].clone();
+    let observation = json!({"version":1,"source_sha256":hash,"destinations":["https://example.org"],"observations":["reachable"]});
+    input["base_link_observations"] = json!({"b":observation});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["link_observations"] = json!({"a":observation,"b":observation});
+    }
+    let output = run(&input, &["--telemetry"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        lines(&output)
+            .iter()
+            .all(|row| row["result"]["status"] == "evaluated" && row["result"]["reused"] == 1)
+    );
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["reused"], 2);
+    assert_eq!(telemetry["base_link_observations_supplied"], true);
+    assert_eq!(telemetry["proposals_with_link_observations"], 2);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("example.org"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("abc"));
+    let mut null_inventory = input.clone();
+    null_inventory["base_link_observations"] = Value::Null;
+    assert!(!run(&null_inventory, &[]).status.success());
+    input["proposals"][0]["link_observations"]["b"]["source_sha256"] = json!("wrong");
+    let output = run(&input, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(lines(&output)[0]["result"]["status"], "not_checked");
+    assert_eq!(lines(&output)[1]["result"]["status"], "evaluated");
+    input["proposals"][0]["link_observations"]["b"] = observation.clone();
+    input["preset_sources"]["links"] = json!(
+        "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+    );
+    input["base_metadata"] = json!({"b":{"slug":"b"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["change"]["entries"][0]["metadata"] = json!({"slug":"a"});
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(lines(&output)[0]["result"]["status"], "composed");
+    assert_eq!(lines(&output)[0]["result"]["items"]["status"], "evaluated");
+    assert_eq!(
+        lines(&output)[0]["result"]["collection"]["status"],
+        "report"
+    );
+}

@@ -352,11 +352,11 @@ fn evaluate_item(
             || snapshot.source_sha256 != item.sha256
             || destinations.as_ref() != Some(&snapshot.destinations)
             || snapshot.destinations.len() != snapshot.observations.len())
-        {
-            return Err(unavailable(
-                "link observation snapshot does not match the item",
-            ));
-        }
+    {
+        return Err(unavailable(
+            "link observation snapshot does not match the item",
+        ));
+    }
     let capabilities = ContentEvaluationContext {
         link_reachability: link_snapshot.map(|snapshot| snapshot.observations.as_slice()),
         adapter: context.as_ref(),
@@ -520,11 +520,11 @@ impl IncrementalBaseline {
                     .items
                     .iter()
                     .any(|item| !observations.contains_key(&item.entity_id)))
-            {
-                return Err(unavailable(
-                    "link observation inventory does not match base identities",
-                ));
-            }
+        {
+            return Err(unavailable(
+                "link observation inventory does not match base identities",
+            ));
+        }
         validate_preset(&preset, mode, metadata.is_some())?;
         let metadata_dependent = preset.gates.iter().any(is_item_metadata_gate);
         let mut reports = BTreeMap::new();
@@ -694,11 +694,11 @@ impl IncrementalBaseline {
                     .items
                     .iter()
                     .any(|item| !map.contains_key(&item.entity_id)))
-            {
-                return Err(unavailable(
-                    "link observation inventory does not match candidate identities",
-                ));
-            }
+        {
+            return Err(unavailable(
+                "link observation inventory does not match candidate identities",
+            ));
+        }
         // The accepted gates depend only on the item's own projected content.
         // Changed identities come from the validated change, not link coverage.
         let changed: BTreeSet<&str> = overlay.impact.changed.iter().map(String::as_str).collect();
@@ -1073,6 +1073,29 @@ impl ComposedBaseline {
         preset: ContentPreset,
         html_scope: crate::html_content_adapter::HtmlContentScope,
     ) -> Result<Self, NotChecked> {
+        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, None)
+    }
+
+    /// Prepare both item and collection scopes with source-bound link observations.
+    pub fn prepare_adapted_with_link_observations(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        observations: BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, Some(observations))
+    }
+
+    fn prepare_with_observations(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        observations: Option<
+            BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+    ) -> Result<Self, NotChecked> {
         preset
             .validate()
             .map_err(|_| unavailable("invalid content preset"))?;
@@ -1089,7 +1112,20 @@ impl ComposedBaseline {
                 "mixed preset must contain item and collection gates",
             ));
         }
-        let items = if items.gates.iter().any(is_item_metadata_gate) {
+        let items = if let Some(observations) = observations {
+            let item_metadata = items
+                .gates
+                .iter()
+                .any(is_item_metadata_gate)
+                .then(|| metadata.clone());
+            IncrementalBaseline::prepare_adapted_with_link_observations(
+                snapshot.clone(),
+                items,
+                html_scope,
+                item_metadata,
+                observations,
+            )?
+        } else if items.gates.iter().any(is_item_metadata_gate) {
             IncrementalBaseline::prepare_adapted_with_metadata_and_html_scope(
                 snapshot.clone(),
                 metadata.clone(),
@@ -1121,7 +1157,7 @@ impl ComposedBaseline {
     /// collection cannot be hidden by a successful result in the other scope.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> ComposedEvaluation {
         let overlay = checked_overlay(&self.items.snapshot, change, after);
-        self.evaluate_with_overlay(change, overlay)
+        self.evaluate_with_overlay(change, overlay, None)
     }
 
     /// Evaluate both scopes after verifying all host-supplied referenced states.
@@ -1142,7 +1178,41 @@ impl ComposedBaseline {
             max_state_bytes,
             max_total_bytes,
         );
-        self.evaluate_with_overlay(change, overlay)
+        self.evaluate_with_overlay(change, overlay, None)
+    }
+
+    /// Evaluate both scopes using an explicit complete candidate link inventory.
+    pub fn evaluate_with_link_observations(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+    ) -> ComposedEvaluation {
+        let overlay = checked_overlay(&self.items.snapshot, change, after);
+        self.evaluate_with_overlay(change, overlay, Some(observations))
+    }
+
+    /// Evaluate both scopes after checking referenced content and link inventories.
+    pub fn evaluate_with_sources_and_link_observations<
+        P: crate::content_gate_sources::ConfinedContentFiles,
+    >(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+    ) -> ComposedEvaluation {
+        let overlay = checked_overlay_with_sources(
+            &self.items.snapshot,
+            change,
+            after,
+            provider,
+            max_state_bytes,
+            max_total_bytes,
+        );
+        self.evaluate_with_overlay(change, overlay, Some(observations))
     }
 
     /// Project candidate metadata after verifying all host-supplied referenced states.
@@ -1167,12 +1237,15 @@ impl ComposedBaseline {
         &self,
         change: &Change,
         overlay: Result<CandidateOverlay, NotChecked>,
+        observations: Option<
+            &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
     ) -> ComposedEvaluation {
         let item_result = self
             .items
             .validate_change_media(change)
             .and_then(|()| overlay.as_ref().map_err(Clone::clone))
-            .and_then(|overlay| self.items.evaluate_overlay(change, overlay, None));
+            .and_then(|overlay| self.items.evaluate_overlay(change, overlay, observations));
         let collection_result = overlay
             .as_ref()
             .map_err(Clone::clone)

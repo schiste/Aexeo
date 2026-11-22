@@ -83,8 +83,12 @@ baseline report may be reused. Supplying no candidate inventory never reuses an
 old observation implicitly. Item metadata can be supplied at preparation and
 follows the existing replacement rules. These methods do not fetch URLs or
 establish observation provenance, freshness, or publication authority: the host
-must establish those properties. The existing CLI and composed collection API
-do not yet expose these new methods.
+must establish those properties. The composed API exposes the same methods while reporting item and collection
+scopes independently. The experimental `content-incremental` batch accepts
+`base_link_observations` and, for each proposal, `link_observations` maps keyed
+by entity ID. Supply the full candidate map, including unchanged items.
+The optional telemetry reports only whether a base map was supplied and the
+number of proposals with a map, without including destinations or content.
 
 ## Item metadata projections
 
