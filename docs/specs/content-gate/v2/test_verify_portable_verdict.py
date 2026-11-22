@@ -172,6 +172,35 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaisesRegex(VerificationError, 'policy check is missing'):
             self.check()
 
+    def test_rebound_unsupported_media_cannot_claim_item_coverage(self):
+        change = json.loads(self.artifacts['change'])
+        change['entries'][0]['media_type'] = 'application/json'
+        after = copy.deepcopy(self.fixture['after'])
+        after[0]['media_type'] = 'application/json'
+        self.artifacts['change'] = self.encoded(change)
+        candidate = overlay(self.fixture['base'], change, after)
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        for result in (self.previous, self.fresh):
+            result['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'media'):
+            compare(self.encoded(self.previous), self.encoded(self.fresh),
+                    self.encoded(self.fixture['base']), self.encoded(after),
+                    self.artifacts, self.required, self.identity, 0, False)
+
+    def test_collection_only_policy_does_not_require_item_media(self):
+        change = json.loads(self.artifacts['change'])
+        change['entries'][0]['media_type'] = 'application/json'
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'][0].update(kind='unique_collection_metadata', id='unique')
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'][0]['id'] = 'collection:0::unique'
+        self.assertEqual(require_policy_coverage(policy, change, True, verdict), (1, 1))
+        with self.assertRaisesRegex(VerificationError, 'media'):
+            require_policy_coverage(policy, change, False, verdict)
+
     def test_rebound_empty_policy_is_rejected(self):
         # Both outputs and their binding agree, but Rust cannot evaluate an
         # empty preset. Existing checks must not make the policy valid.
