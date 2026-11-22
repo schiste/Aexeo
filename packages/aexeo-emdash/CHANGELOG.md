@@ -8,6 +8,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5]
 
+- Treat explicitly linked numeric Wikipedia `#cite_note-…` markers as citations during rhythm analysis, while preserving literal text and source positions. This does not verify the reference.
+
 - Report revision read failures without exposing host errors; retain evaluated reports with unknown currentness when a later status read fails. Revision audit telemetry includes the bounded reason or currentness status.
 - Return `revision_data_invalid` without evaluating or storing a report when a historical CMS revision contains non-object data.
 - Support separately configured content-fragment audits during save and refresh, with fragment-scoped link observations where the host provides them. Incomplete projections remain not checked.

@@ -1788,6 +1788,43 @@ mod tests {
     }
 
     #[test]
+    fn wikipedia_citations_preserve_source_positions_and_literal_labels() {
+        let source = "Élan.[[17]](#cite_note-example-17) Next sentence. [2025](/ordinary).";
+        let adapted = markdown_input_with_source_map_and_destinations("x", source).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        assert!(text.contains("Élan.     Next"), "{text}");
+        assert!(text.contains("2025"));
+        assert_eq!(
+            adapted.destinations.as_ref().unwrap(),
+            &["#cite_note-example-17", "/ordinary"]
+        );
+        let pos = crate::text_index::LineIndex::new(text)
+            .position(text, text.find("Next").unwrap())
+            .unwrap();
+        assert_eq!(
+            adapted
+                .source_map
+                .source_position(source, text, pos.0, pos.1),
+            crate::text_index::LineIndex::new(source)
+                .position(source, source.find("Next").unwrap())
+        );
+        for link in [
+            "[2025](#cite_note-)",
+            "[Source 2025](#cite_note-example)",
+            "[2025](#cite_note_other)",
+        ] {
+            assert!(
+                markdown_input("x", link)
+                    .unwrap()
+                    .text
+                    .unwrap()
+                    .contains("2025"),
+                "{link}"
+            );
+        }
+    }
+
+    #[test]
     fn formatted_reference_labels_keep_source_positions_and_ordinary_links() {
         for source in [
             "In 2025.[*1*](#reference-source) Next sentence.",
