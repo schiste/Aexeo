@@ -586,3 +586,63 @@ fn referenced_content_symlink_outside_root_is_not_checked() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(lines(&output)[0]["result"]["status"], "not_checked");
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn referenced_rename_requires_both_before_and_after_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let old = root.join("old.txt");
+    let new = root.join("new.txt");
+    fs::write(&old, "abc").unwrap();
+    fs::write(&new, "abc").unwrap();
+    let map = root.join("map.json");
+    fs::write(
+        &map,
+        serde_json::to_vec(&json!([
+            {"entry":0,"state":"before","path":old},
+            {"entry":0,"state":"after","path":new}
+        ]))
+        .unwrap(),
+    )
+    .unwrap();
+    let source = "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n";
+    let mut b = metadata_batch(source);
+    b["proposals"].as_array_mut().unwrap().truncate(1);
+    let hash = b["snapshot"]["items"][0]["sha256"].clone();
+    let state = json!({"sha256":hash,"inline":"abc"});
+    let new_item = json!({"entity_id":"c","public_path":"/c","media_type":"text/plain","revision":null,"sha256":hash,"source":"abc","links":[]});
+    b["proposals"][0]["change"]["entries"] = json!([{"entity_id":"c","previous_entity_id":"b","operation":"rename","media_type":"text/plain","public_path":"/c","before":state,"after":state,"metadata":{"slug":"renamed"}}]);
+    b["proposals"][0]["after"] = json!([new_item]);
+    let expected = run(&b, &[]);
+    b["proposals"][0]["change"]["content_root"] = json!(root);
+    b["proposals"][0]["change"]["entries"][0]["before"] = json!({"sha256":hash,"file":"old.txt"});
+    b["proposals"][0]["change"]["entries"][0]["after"] =
+        json!({"sha256":hash,"uri":"https://example.org/private"});
+    let map_arg = format!("0={}", map.display());
+    let args = [
+        "--content-root",
+        root.to_str().unwrap(),
+        "--host-content-map",
+        &map_arg,
+    ];
+    let actual = run(&b, &args);
+    assert_eq!(
+        actual.status.code(),
+        expected.status.code(),
+        "{}",
+        String::from_utf8_lossy(&actual.stderr)
+    );
+    assert_eq!(lines(&actual), lines(&expected));
+    fs::write(old, "changed").unwrap();
+    let rejected = run(&b, &args);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(
+        lines(&rejected)[0]["result"]["items"]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&rejected)[0]["result"]["collection"]["status"],
+        "not_checked"
+    );
+}
