@@ -269,6 +269,18 @@ fn shared_editorial_fixture_matches_markdown_and_html_cli_contracts() {
         );
         assert_eq!(report["gates"][5]["measurements"]["skipped_levels"], 1);
         assert_eq!(
+            report["gates"][6]["measurements"]["word_count"],
+            fixture["expected"]["word_count"]
+        );
+        assert_eq!(
+            report["gates"][7]["measurements"]["character_count"],
+            fixture["expected"]["character_count_without_whitespace"]
+        );
+        assert_eq!(
+            report["gates"][8]["measurements"]["character_count"],
+            fixture["expected"]["character_count_with_whitespace"][format]
+        );
+        assert_eq!(
             report["source_mapping"],
             fixture["expected"]["source_mapping"]
         );
@@ -315,6 +327,9 @@ fn shared_editorial_fixture_matches_markdown_and_html_cli_contracts() {
         );
         assert_eq!(empty["gates"][1]["measurements"]["paragraph_count"], 0);
         assert_eq!(empty["gates"][2]["measurements"]["link_count"], 0);
+        assert_eq!(empty["gates"][6]["measurements"]["word_count"], 0);
+        assert_eq!(empty["gates"][7]["measurements"]["character_count"], 0);
+        assert_eq!(empty["gates"][8]["measurements"]["character_count"], 0);
     }
 }
 
