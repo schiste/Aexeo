@@ -293,6 +293,15 @@ fn http_url_end(
     Some(start + candidate.len())
 }
 
+// Only match a configured abbreviation at the beginning of a token. Opening
+// punctuation can attach to the token without changing the abbreviation.
+fn abbreviation_starts_at(text: &str, start: usize, segment_start: usize) -> bool {
+    start == segment_start
+        || text[..start].chars().next_back().is_some_and(|ch| {
+            ch.is_whitespace() || matches!(ch, '(' | '[' | '{' | '«' | '“' | '‘' | '\'' | '"')
+        })
+}
+
 fn for_each_sentence(
     text: &str,
     mut line: usize,
@@ -368,11 +377,7 @@ fn for_each_sentence(
                     };
                     return start >= segment_start
                         && text.get(start..offset) == Some(word)
-                        && (start == segment_start
-                            || text[..start]
-                                .chars()
-                                .next_back()
-                                .is_some_and(char::is_whitespace));
+                        && abbreviation_starts_at(text, start, segment_start);
                 }
                 abbr.match_indices('.').any(|(position, _)| {
                     let Some(start) = offset.checked_sub(position) else {
@@ -383,11 +388,7 @@ fn for_each_sentence(
                     };
                     start >= segment_start
                         && text.get(start..end) == Some(abbr.as_str())
-                        && (start == segment_start
-                            || text[..start]
-                                .chars()
-                                .next_back()
-                                .is_some_and(char::is_whitespace))
+                        && abbreviation_starts_at(text, start, segment_start)
                         && block_ends
                             .get(next_block)
                             .is_none_or(|&boundary| boundary >= end)
@@ -5510,6 +5511,63 @@ mod tests {
             count += usize::from(!sentence.trim().is_empty());
         });
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn configured_abbreviations_after_opening_punctuation_stay_in_sentence() {
+        let abbreviations = vec!["Dr.".to_owned(), "e.g.".to_owned()];
+        for text in [
+            "She said: (Dr. Martin spoke). Next.",
+            "She said: «Dr. Martin spoke». Next.",
+            "She said: “Dr. Martin spoke”. Next.",
+            "She said: \"Dr. Martin spoke\". Next.",
+            "Examples (e.g. this one) help. Next.",
+            "Examples «e.g. this one» help. Next.",
+        ] {
+            let mut sentences = Vec::new();
+            for_each_sentence(text, 1, 1, &[], ".!?", &abbreviations, |s, line, column| {
+                if !s.trim().is_empty() {
+                    sentences.push((s.trim().to_owned(), line, column));
+                }
+            });
+            assert_eq!(sentences.len(), 2, "{text}: {sentences:?}");
+            assert_eq!(sentences[1].0, "Next", "{text}");
+            assert_eq!(
+                sentences[1].2,
+                text.chars().position(|c| c == 'N').unwrap() + 1,
+                "{text}"
+            );
+        }
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=2\nabbreviations=['Dr.']\n",
+        ).unwrap();
+        let report = preset
+            .evaluate(&literal_input("She said: (Dr. Martin spoke). Next."))
+            .unwrap();
+        assert_eq!(report.gates[0].measurements["sentence_count"], 2);
+        assert_eq!(
+            (
+                report.gates[0].findings[0].line,
+                report.gates[0].findings[0].column
+            ),
+            (1, 1)
+        );
+        let mut count = 0;
+        for_each_sentence(
+            "NotDr. Next.",
+            1,
+            1,
+            &[],
+            ".!?",
+            &abbreviations,
+            |s, _, _| {
+                count += usize::from(!s.trim().is_empty());
+            },
+        );
+        assert_eq!(
+            count, 2,
+            "an abbreviation suffix inside a word is not a token"
+        );
     }
 
     #[test]
