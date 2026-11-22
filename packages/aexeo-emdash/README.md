@@ -217,6 +217,30 @@ A failed observation or unavailable projection remains unchecked with a distinct
 content-free reason; provider errors are not exposed. The host owns its network
 policy and request limits.
 
+### Reviewing an unsaved fragment over MCP
+
+Configured plugins also expose `audit_candidate` to authorized, consented MCP
+clients. Supply `collection`, `id`, `revision`, `field`, and a JSON `candidate`
+(string or Portable Text). The field must exist in the base revision and be
+explicitly configured in `fragmentFieldsByCollection`; it uses that field's
+preset. The candidate JSON is limited to 1 MiB after serialization. The host
+should also enforce request-size limits before parsing.
+
+The adapter evaluates a copy of the base revision with only the selected field
+replaced. It does not save, publish, or alter the CMS record. The result and
+`get_audit` identify the candidate as `unsaved`, with `sha256_json` computed
+from the UTF-8 bytes of JavaScript `JSON.stringify(candidate)`; this is a
+fingerprint of the submitted JSON serialization, not a cross-language canonical
+JSON digest. Source paths and locations refer to the candidate field. The
+reported revision status concerns the **base revision**, not the candidate.
+Revision-specific link observations and host attestations of list completeness
+are not reused for the proposed text. Unavailable checks remain `not_checked`.
+Audit reports are persisted and can contain findings or excerpts; protect access
+as for revision audits. A passing result does not establish factual accuracy,
+meaning preservation, currentness or publication authorization. The agent must
+compare the base revision and candidate, retain editorial control, and rerun
+against the saved revision if the content is subsequently saved.
+
 ### Auditing an exact CMS revision over MCP
 
 Configured-mode plugins expose `audit_revision` (`collection`, `id`, `revision`)

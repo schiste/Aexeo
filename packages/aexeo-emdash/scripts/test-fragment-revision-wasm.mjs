@@ -1,5 +1,6 @@
 // Exercise revision fragment selection through the real built content bridge.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createPlugin } from "../dist/configured.js";
 
 const current = { id: "one", type: "posts", locale: "en", draftRevisionId: "rev1", data: { intro: "Current content." } };
@@ -20,7 +21,32 @@ assert.ok(result.report.gates.length > 0);
 assert.ok(result.report.gates.every(gate => gate.status !== "not_checked"));
 assert.equal((await plugin.routes["get-revision-audit"].handler({ ...ctx, input: { audit_id: result.audit_id } })).revision_status, "draft");
 assert.equal((await plugin.routes["audit-revision"].handler({ ...ctx, input: { ...input, field: "content" } })).reason, "fragment_preset_not_configured");
-console.log("WASM revision fragment audit test passed");
+const proposal = await plugin.routes["audit-candidate"].handler({ ...ctx, input: { ...input, candidate: "A revised introduction." } });
+assert.equal(proposal.status, "evaluated");
+assert.equal(proposal.candidate.status, "unsaved");
+assert.equal(proposal.candidate.sha256_json, createHash("sha256").update(JSON.stringify("A revised introduction.")).digest("hex"));
+assert.equal(proposal.scope, "fragment");
+assert.ok(proposal.report.gates.length > 0);
+assert.equal(proposal.assurance.publication_authorization, "not_granted");
+assert.equal(revision.data.intro, "A useful short introduction.");
+const savedProposal = await plugin.routes["get-revision-audit"].handler({ ...ctx, input: { audit_id: proposal.audit_id } });
+assert.deepEqual(savedProposal.candidate, proposal.candidate);
+const fragmentPolicy = `version=1
+name="candidate-words"
+[[gates]]
+id="words"
+kind="word_count"
+min=3
+blocking=true
+`;
+const checkingPlugin = createPlugin({ revisionAudits: true, contentPreset: { name: "article", sources: { "candidate-words": fragmentPolicy }, fragmentFieldsByCollection: { posts: { intro: "candidate-words" } } } });
+const shortCandidate = await checkingPlugin.routes["audit-candidate"].handler({ ...ctx, input: { ...input, candidate: "Too short" } });
+const longCandidate = await checkingPlugin.routes["audit-candidate"].handler({ ...ctx, input: { ...input, candidate: "Long enough now" } });
+assert.equal(shortCandidate.report.gates[0].status, "failed");
+assert.equal(longCandidate.report.gates[0].status, "passed");
+assert.notEqual(shortCandidate.candidate.sha256_json, longCandidate.candidate.sha256_json);
+assert.equal(revision.data.intro, "A useful short introduction.");
+console.log("WASM revision and candidate fragment audit test passed");
 
 // Exercise the opt-in historical observer through the real plugin and WASM.
 // The ordinary current-content observer must never be used for an old revision.

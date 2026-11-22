@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { auditRevision, getRevisionAudit } from "../src/revision-audit.js";
+import { auditCandidate, auditRevision, getRevisionAudit } from "../src/revision-audit.js";
 vi.mock("../src/wasm-init.js", () => ({}));
 import { createPlugin } from "../src/configured.js";
 
@@ -33,6 +33,37 @@ describe("revision audits", () => {
     await auditRevision(ctx as never, fragment, { preset: { ...base, revisionFragmentListStructureCompleteByCollection: { posts: ["body"] } }, evaluate });
     expect(evaluate.mock.calls[4]?.[0].list_structure_complete).toBeUndefined();
     expect(revision.data.content[0]?.children[0]?.text).toBe("Historical sentence.");
+  });
+
+  it("audits an unsaved fragment against its base without trusting revision-only observations", async () => {
+    const { ctx, revision } = host();
+    const candidate = [{ _type: "block", children: [{ _type: "span", text: "Proposed sentence." }] }];
+    const evaluate = vi.fn(async (document: any) => {
+      expect(JSON.stringify(document.body)).toContain("Proposed sentence.");
+      expect(document.list_structure_complete).not.toBe(true);
+      return { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    });
+    const observer = vi.fn();
+    const result = await auditCandidate(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate }, {
+      preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } }, revisionFragmentListStructureCompleteByCollection: { posts: ["content"] } },
+      evaluate, revisionLinkObservations: observer,
+    });
+    expect(result.status).toBe("evaluated");
+    if (result.status !== "evaluated") throw new Error("candidate unavailable");
+    expect(result.candidate).toMatchObject({ status: "unsaved", field: "content", sha256_json: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(result.limitation).toContain("unsaved proposed fragment");
+    expect(observer).not.toHaveBeenCalled();
+    expect(revision.data.content[0]?.children[0]?.text).toBe("Historical sentence.");
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ candidate: result.candidate });
+  });
+
+  it("rejects oversized or unconfigured candidate fields without evaluating", async () => {
+    const { ctx } = host();
+    const evaluate = vi.fn(async () => report);
+    const options = { preset: { name: "article" }, evaluate };
+    expect(await auditCandidate(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: "x".repeat(1024 * 1024) }, options)).toMatchObject({ status: "not_checked", reason: "candidate_too_large" });
+    expect(await auditCandidate(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: "edit" }, options)).toMatchObject({ status: "not_checked", reason: "fragment_preset_not_configured" });
+    expect(evaluate).not.toHaveBeenCalled();
   });
 
   it("observes links only for the exact requested revision and binds results to its projection", async () => {
@@ -436,6 +467,10 @@ describe("revision audits", () => {
     expect(plugin.capabilities).toContain("content:revisions:read");
     expect((createPlugin({}) as { capabilities: string[] }).capabilities).not.toContain("content:revisions:read");
     expect(plugin.mcp?.tools.audit_revision?.route).toBe("audit-revision");
+    expect(plugin.mcp?.tools.audit_candidate?.route).toBe("audit-candidate");
+    expect(plugin.routes["audit-candidate"]?.permission).toBe("plugins:manage");
+    expect(plugin.mcp?.tools.audit_candidate?.input.safeParse({ collection: "posts", id: "one", revision: "rev1", field: "intro", candidate: "proposed" }).success).toBe(true);
+    expect(plugin.mcp?.tools.audit_candidate?.input.safeParse({ collection: "posts", id: "one", revision: "rev1", field: "intro" }).success).toBe(false);
     expect(plugin.mcp?.tools.get_audit?.route).toBe("get-revision-audit");
     expect(plugin.routes["audit-revision"]?.permission).toBe("plugins:manage");
     expect(plugin.routes["audit-revision"]?.request?.body).toBe("json");
