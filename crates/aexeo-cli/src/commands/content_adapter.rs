@@ -46,13 +46,15 @@ struct List {
     depth: usize,
 }
 
-/// Source bytes and byte-identical host-declared prose spans. Their correspondence
-/// to the actual host content remains the host's responsibility.
+/// Source bytes and byte-identical host-declared prose and heading locations.
+/// Their correspondence to the actual host content remains the host's responsibility.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct HostSourceMap {
     source_text: String,
     spans: Vec<HostSourceSpan>,
+    #[serde(default)]
+    heading_offsets: Option<Vec<Option<usize>>>,
 }
 
 #[derive(Deserialize)]
@@ -64,7 +66,7 @@ struct HostSourceSpan {
 }
 
 impl HostSourceMap {
-    fn validate(&self, projected: &str) -> Result<()> {
+    fn validate(&self, projected: &str, headings: Option<&[String]>) -> Result<()> {
         ensure!(
             self.spans.len() <= MAX_OBSERVATIONS,
             "source map observation limit exceeded"
@@ -91,7 +93,73 @@ impl HostSourceMap {
             previous_end = span.projected_end;
             previous_source_end = source_end;
         }
+        if let Some(offsets) = &self.heading_offsets {
+            let headings =
+                headings.ok_or_else(|| anyhow::anyhow!("heading offsets require headings"))?;
+            ensure!(
+                offsets.len() == headings.len(),
+                "heading offsets must match headings"
+            );
+            let mut previous_end = 0;
+            for (offset, heading) in offsets.iter().zip(headings) {
+                if let Some(start) = offset {
+                    let end = start
+                        .checked_add(heading.len())
+                        .ok_or_else(|| anyhow::anyhow!("invalid heading source range"))?;
+                    ensure!(
+                        !heading.is_empty()
+                            && *start >= previous_end
+                            && self.source_text.get(*start..end) == Some(heading.as_str()),
+                        "heading source bytes must match ordered nonoverlapping headings"
+                    );
+                    previous_end = end;
+                }
+            }
+        }
         Ok(())
+    }
+
+    pub(super) fn heading_positions(
+        &self,
+        source_index: &LineIndex,
+        headings: Option<&[String]>,
+        levels: Option<&[u8]>,
+        gate: &aexeo_core::content_gate::ContentGate,
+        result: &aexeo_core::content_gate::ContentGateResult,
+    ) -> Option<Vec<Option<(usize, usize)>>> {
+        use aexeo_core::content_gate::{
+            ContentGate, heading_finding_indices, heading_hierarchy_indices,
+        };
+        let offsets = self.heading_offsets.as_deref()?;
+        let headings = headings?;
+        let indices: Vec<usize> = if let ContentGate::HeadingHierarchy { initial_level, .. } = gate
+        {
+            heading_hierarchy_indices(levels?, *initial_level).collect()
+        } else {
+            heading_finding_indices(gate, headings)?
+        };
+        if offsets.len() != headings.len() || indices.len() != result.total_findings() {
+            return None;
+        }
+        Some(
+            indices
+                .into_iter()
+                .take(result.findings.len())
+                .map(|index| {
+                    source_index.position(&self.source_text, offsets.get(index).copied().flatten()?)
+                })
+                .collect(),
+        )
+    }
+
+    pub(super) fn has_heading_offsets(&self) -> bool {
+        self.heading_offsets.is_some()
+    }
+
+    pub(super) fn heading_offset_count(&self) -> usize {
+        self.heading_offsets.as_ref().map_or(0, |offsets| {
+            offsets.iter().filter(|offset| offset.is_some()).count()
+        })
     }
 
     pub(super) fn gate_positions(
@@ -198,7 +266,7 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
     );
     let text = projection.text.as_deref().unwrap_or("");
     if let Some(map) = &projection.source_map {
-        map.validate(text)?;
+        map.validate(text, projection.headings.as_deref())?;
     }
     if let Some(ends) = &projection.block_ends {
         ensure!(
