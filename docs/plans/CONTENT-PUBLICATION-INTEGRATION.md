@@ -136,7 +136,11 @@ Aethyme also has an experimental v2 path: [#1870](https://github.com/schiste/Aet
 compares independently supplied inputs offline; [#1871](https://github.com/schiste/Aethyme/pull/1871)
 supervises fresh evaluation and before/after snapshots; [#1908](https://github.com/schiste/Aethyme/pull/1908)
 compares host-supplied link evidence; and [#1939](https://github.com/schiste/Aethyme/pull/1939)
-checks resolved-policy coverage. These commands are separate from the v1 broker
+checks resolved-policy coverage. On 2026-11-22, all nine offline CLI
+interoperability tests passed with Aexeo commit `d50546f6` and Aethyme 0.8.155
+(build `3bdff6a5`), including rejection of an omitted advisory policy check.
+The tests used locally supplied inputs and do not establish a deployed host.
+These commands are separate from the v1 broker
 gate, remain experimental, and do not authorize publication. They do not establish
 input authenticity, inventory completeness, source freshness or an atomic
 publication boundary. The host must independently provide those guarantees.
