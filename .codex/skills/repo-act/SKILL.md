@@ -291,6 +291,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For CLI revalidation failures, assert the specific error exit and diagnostic,
   and that any previous output remains unchanged. A nonzero exit alone can be
   an ordinary failed editorial gate rather than a rejected revalidation.
+- For piped child processes, close the writer's owned stdin after sending input
+  so a child reading to EOF can proceed; drain output concurrently. Bound test
+  waits and terminate the test child on timeout so a pipe regression cannot
+  stall the suite indefinitely.
 - For process-group cleanup, test both a normal child exit and a timeout with
   a live descendant, plus unsupported or denied inspection. On macOS,
   signaling a group whose only member is an exited, unreaped leader can return
