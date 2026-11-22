@@ -215,12 +215,12 @@ pub fn numeric_reference_destination(href: &str) -> bool {
             .is_some_and(|suffix| !suffix.is_empty())
 }
 
-fn reference_digit(ch: char) -> bool {
+fn supported_decimal_digit(ch: char) -> bool {
     ch.is_ascii_digit() || matches!(ch, '\u{0660}'..='\u{0669}' | '\u{06f0}'..='\u{06f9}')
 }
 
 fn reference_label_character(ch: char) -> bool {
-    reference_digit(ch) || matches!(ch, '[' | ']' | ',' | '،' | '-' | ' ')
+    supported_decimal_digit(ch) || matches!(ch, '[' | ']' | ',' | '،' | '-' | ' ')
 }
 
 /// Validate one contiguous fragment of a reference label. `Some` indicates
@@ -232,7 +232,7 @@ pub fn numeric_reference_label_fragment(text: &str) -> Option<bool> {
         if !reference_label_character(ch) {
             return None;
         }
-        has_digit |= reference_digit(ch);
+        has_digit |= supported_decimal_digit(ch);
     }
     Some(has_digit)
 }
@@ -347,11 +347,11 @@ fn for_each_sentence(
             && text[..offset]
                 .chars()
                 .next_back()
-                .is_some_and(|c| c.is_ascii_digit())
+                .is_some_and(supported_decimal_digit)
             && text[offset + 1..]
                 .chars()
                 .next()
-                .is_some_and(|c| c.is_ascii_digit());
+                .is_some_and(supported_decimal_digit);
         let abbreviation = !block_end
             && ch == Some('.')
             && !abbreviations.is_empty()
@@ -5427,6 +5427,43 @@ mod tests {
         ] {
             let report = preset.evaluate(&literal_input(text)).unwrap();
             assert_eq!(report.gates[0].measurements["sentence_count"], 2, "{text}");
+        }
+    }
+
+    #[test]
+    fn sentence_segmentation_preserves_supported_decimal_digits_and_positions() {
+        for number in ["3.14", "٣.١٤", "۳.۱۴", "3.١۴"] {
+            let text = format!("Value {number} units. Next sentence.");
+            let mut sentences = Vec::new();
+            for_each_sentence(&text, 1, 1, &[], ".!?", &[], |segment, line, column| {
+                if !segment.trim().is_empty() {
+                    sentences.push((segment.trim().to_owned(), line, column));
+                }
+            });
+            assert_eq!(
+                sentences,
+                vec![
+                    (format!("Value {number} units"), 1, 1),
+                    ("Next sentence".into(), 1, 19)
+                ],
+                "{number}"
+            );
+            let preset = ContentPreset::from_toml(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_character_length'\nmax_chars=5\n",
+            ).unwrap();
+            let report = preset.evaluate(&literal_input(&text)).unwrap();
+            assert_eq!(
+                report.gates[0].measurements["sentence_count"], 2,
+                "{number}"
+            );
+            assert_eq!(report.gates[0].findings.len(), 2, "{number}");
+            assert_eq!(
+                (
+                    report.gates[0].findings[1].line,
+                    report.gates[0].findings[1].column
+                ),
+                (1, 19)
+            );
         }
     }
 

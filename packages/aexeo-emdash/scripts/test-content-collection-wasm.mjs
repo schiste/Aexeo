@@ -510,6 +510,24 @@ assert.equal(multilingualReport.source_locations[0].utf16_offset, 1);
 assert.equal(JSON.stringify(multilingualCitation), multilingualOriginal);
 console.log("WASM multilingual citations preserve literal text and UTF-16 locations");
 
+// Decimals using Arabic-Indic or Persian digits remain inside their sentence,
+// even when Portable Text divides the number across spans.
+for (const [first, second] of [["٣.", "١٤"], ["۳.", "۱۴"]]) {
+  const decimal = { route: "/decimal", title: "Decimal", body: [{ children: [
+    { _type: "span", text: `Value ${first}` },
+    { _type: "span", text: `${second} units. ` },
+    { _type: "span", text: "Next sentence." },
+  ] }] };
+  const original = JSON.stringify(decimal);
+  const report = await evaluateContent(decimal, "citation-test", { "citation-test": sentencePreset });
+  assert.equal(report.gates[0].measurements.sentence_count, 2);
+  assert.equal(report.source_locations.length, 2);
+  assert.equal(report.source_locations[1].span_index, 2);
+  assert.equal(report.source_locations[1].utf16_offset, 0);
+  assert.equal(JSON.stringify(decimal), original);
+}
+console.log("WASM preserves multilingual decimals and Portable Text locations");
+
 // A visible URL split across spans must not create artificial sentence breaks.
 const urlDocument = { route: "/url", title: "URL", body: [{ children: [
   { _type: "span", text: "See https://example." },

@@ -71,6 +71,12 @@ the literal label and source coordinates while excluding it from sentence
 measurements. This targeted support does not establish general Arabic language
 coverage, source validity, or translation quality.
 
+Sentence segmentation also recognizes a period between ASCII, Arabic-Indic or
+Persian digits as part of a decimal, including across Portable Text spans.
+CLI, bridge and WASM regressions check sentence counts and following source
+locations. This targeted punctuation rule does not establish general Arabic
+segmentation, interpretation or translation quality.
+
 ### Preview rendered-page spot check, 2026-11-19
 
 Read-only comparison of the current CMS record for the evidence-room article
