@@ -33,7 +33,8 @@ pub struct LinkEvidence {
     pub context: LinkContext,
     pub component: Option<String>,
     pub paragraph: Option<String>,
-    /// Whether the link appeared inside template, noscript, or a closed dialog.
+    /// Whether the link appeared inside template, noscript, a closed dialog,
+    /// or an HTML element with an `inert` attribute on itself or an ancestor.
     /// Absent in older reports, where its status cannot be established.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_markup: Option<bool>,
@@ -91,6 +92,7 @@ struct Scope {
     non_body_landmark: bool,
     /// Markup that may not be displayed in the evaluated page.
     conditional_markup: bool,
+    inert_attribute: bool,
     hidden_attribute: bool,
     hidden_inline_style: bool,
     collapsed_details: bool,
@@ -284,6 +286,7 @@ pub fn extract_document(
         explicit: false,
         non_body_landmark: false,
         conditional_markup: false,
+        inert_attribute: false,
         hidden_attribute: false,
         hidden_inline_style: false,
         collapsed_details: false,
@@ -296,6 +299,9 @@ pub fn extract_document(
         if let NodeData::Element { name, .. } = &node.data {
             let tag = name.local.as_ref();
             let html_element = name.ns == ns!(html);
+            if html_element && attribute(&node, "inert").is_some() {
+                scope.inert_attribute = true;
+            }
             if attribute(&node, "hidden").is_some() {
                 scope.hidden_attribute = true;
             }
@@ -382,7 +388,7 @@ pub fn extract_document(
                     context: scope.context,
                     component: scope.component.clone(),
                     paragraph: scope.paragraph.as_deref().map(str::to_owned),
-                    conditional_markup: Some(scope.conditional_markup),
+                    conditional_markup: Some(scope.conditional_markup || scope.inert_attribute),
                     hidden_attribute: Some(scope.hidden_attribute),
                     hidden_inline_style: Some(scope.hidden_inline_style),
                     collapsed_details: Some(scope.collapsed_details),
@@ -698,6 +704,22 @@ mod tests {
         let old: LinkEvidence = serde_json::from_value(old).unwrap();
         assert_eq!(old.collapsed_details, None);
         assert!(!old.is_nonconditional());
+    }
+
+    #[test]
+    fn inert_html_ancestors_are_conditional_but_retain_context() {
+        let html = "<main><div inert><p><a href='/a'>inert body</a></p><dialog open><a href='/b'>dialog</a></dialog></div><a inert='false' href='/c'>own</a><a href='/d'>normal</a><svg inert><a href='/e'>foreign</a></svg></main>";
+        let links = extract_links(html, "https://example.org/", "https://example.org", None);
+        assert_eq!(
+            links
+                .iter()
+                .map(LinkEvidence::is_nonconditional)
+                .collect::<Vec<_>>(),
+            vec![false, false, false, true, true]
+        );
+        assert_eq!(links[0].context, LinkContext::Body);
+        assert_eq!(links[0].paragraph.as_deref(), Some("inert body"));
+        assert_eq!(links[0].conditional_markup, Some(true));
     }
 
     #[test]
