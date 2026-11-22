@@ -1044,6 +1044,24 @@ impl Projection {
                     self.literal_projection.push_masked(&mut self.text, label);
                 }
             }
+            // Removing a reference between adjacent word characters must not
+            // merge those words. Do not insert a token before punctuation.
+            Node::FootnoteReference(item) => {
+                if self
+                    .text
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_alphanumeric)
+                    && item
+                        .position
+                        .as_ref()
+                        .and_then(|position| source.get(position.end.offset..))
+                        .and_then(|remaining| remaining.chars().next())
+                        .is_some_and(char::is_alphanumeric)
+                {
+                    self.text.push(' ');
+                }
+            }
             Node::Break(_) => self.text.push('\n'),
             Node::Html(html) => match observed_html_break(&html.value) {
                 Some(HtmlBreak::Line) => self.text.push('\n'),
@@ -1180,6 +1198,27 @@ fn extract_markdown_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn footnote_reference_preserves_word_boundary() {
+        let source = "Alpha[^note]beta.\n\n[^note]: Source.\n";
+        let (input, _, _, map) = markdown_input_with_source_map("x", source).unwrap();
+        let text = input.text.unwrap();
+        assert!(text.starts_with("Alpha beta."), "{text:?}");
+        assert_eq!(map.source_position(source, &text, 1, 7), Some((1, 13)));
+        assert_eq!(input.source_text.as_deref(), Some(source));
+        let punctuation = "First[^n]. Next.\n\n[^n]: Note.";
+        let (input, _, _, _) = markdown_input_with_source_map("x", punctuation).unwrap();
+        assert!(input.text.unwrap().starts_with("First. Next."));
+        for source in [
+            "One[^1]two[^2]three.\n\n[^1]: A.\n[^2]: B.",
+            "One[^é]two.\n\n[^é]: Note.",
+        ] {
+            let (input, _, _, _) = markdown_input_with_source_map("x", source).unwrap();
+            let text = input.text.unwrap();
+            assert!(!text.contains("Onetwo"), "{text:?}");
+        }
+    }
+
     #[test]
     fn projected_paragraphs_classify_nested_list_items_without_guessing_html() {
         assert_eq!(MarkdownSourceMap::default().paragraph_list_items(), None);
