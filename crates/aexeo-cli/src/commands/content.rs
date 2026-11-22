@@ -465,9 +465,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         return Ok(EXIT_SUCCESS);
     }
     if args.get_flag("export-link-observations") {
-        let source = input
-            .source_text
+        // Host projections must bind the entire supplied adapter document, not
+        // just its projected prose: structure and source mappings can change
+        // independently while the text and ordered destinations stay the same.
+        let source = adapter_source
             .as_deref()
+            .or(input.source_text.as_deref())
             .user_context("link observation source is unavailable")?;
         let extracted = destinations
             .as_deref()
@@ -502,9 +505,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         let snapshot: LinkObservationSnapshot =
             aexeo_contracts::content_gate_change_validation::parse_lossless_json(data.as_bytes())
                 .user_context("invalid link observation snapshot")?;
-        let source = input
-            .source_text
+        // Host projections must bind the entire supplied adapter document, not
+        // just its projected prose: structure and source mappings can change
+        // independently while the text and ordered destinations stay the same.
+        let source = adapter_source
             .as_deref()
+            .or(input.source_text.as_deref())
             .user_context("link observation source is unavailable")?;
         let extracted = destinations
             .as_deref()
