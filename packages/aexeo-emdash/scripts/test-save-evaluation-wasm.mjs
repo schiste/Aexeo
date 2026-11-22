@@ -175,6 +175,28 @@ ignore_whitespace=true
   console.log("WASM character count handles observed and incomplete content");
 }
 
+// A plain CMS field retains its original whitespace through the configured
+// adapter and WASM character-count gate.
+{
+  const preset = `version=1
+name="plain-characters"
+[[gates]]
+id="characters"
+kind="character_count"
+min=13
+max=13
+ignore_whitespace=false
+`;
+  const configured = createPlugin({ contentPreset: { name: "plain-characters", sources: { "plain-characters": preset } } });
+  const page = item("plain-characters", { data: { body: "  Start\nEnd  " } });
+  const host = fakeHost([page]);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const gate = host.store.get("findings:/plain-characters").assessment.gates.find((entry) => entry.gate_id === "characters");
+  assert.equal(gate.status, "passed");
+  assert.equal(gate.measurements.character_count, 13);
+  assert.deepEqual(host.logged, []);
+}
+
 // Metadata bounds run through configured saves and the real WASM bridge.
 {
   const preset = `version=1

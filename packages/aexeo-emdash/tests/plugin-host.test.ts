@@ -159,6 +159,16 @@ describe("EmDash content adaptation", () => {
     expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
   });
 
+  it("preserves whitespace in observed plain-text fields", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { body: "  Start\nEnd  " } };
+    const direct = contentItemToEmdashDocument(item);
+    expect(direct.body?.[0]?.children[0]?.text).toBe("  Start\nEnd  ");
+    expect(direct.body_capabilities).toEqual(["text"]);
+    const selected = adaptContentItem({ ...item, data: { intro: "  Start\nEnd  " } }, { contentFields: ["intro"] }).document;
+    expect(selected.body?.[0]?.children[0]?.text).toBe("  Start\nEnd  ");
+    expect(selected.body_capabilities).toEqual(["text"]);
+  });
+
   it("withholds automatic coverage when another conventional body field is unrecognized", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
     for (const field of ["body", "content", "blocks"]) {

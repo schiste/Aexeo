@@ -535,7 +535,7 @@ function extractFirstPortableText(
     if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings, coverage);
     if (isEmdashBlocksArray(value, slug)) return mapMixedPortableText(value, mappings, coverage);
     if (typeof value === "string" && value.trim().length > 0) {
-      return { blocks: [portableTextBlock(value.trim(), `${slug}-text`)], capabilities: ["text"] };
+      return { blocks: [portableTextBlock(value, `${slug}-text`)], capabilities: ["text"] };
     }
   }
 
