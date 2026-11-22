@@ -297,11 +297,19 @@ impl CompositionProfile {
         if !self.assess(input)?.is_empty() {
             bail!("composition does not satisfy the profile");
         }
-        self.assemble_snapshot(input)
+        self.assemble_assessed(input)
     }
 
     /// Reconstruct a well-formed snapshot even when advisory bounds fail.
     pub fn assemble_snapshot(&self, input: &Value) -> Result<String> {
+        self.assess_and_assemble_snapshot(input)
+            .map(|(_, text)| text)
+    }
+
+    pub(crate) fn assess_and_assemble_snapshot(
+        &self,
+        input: &Value,
+    ) -> Result<(Vec<CompositionIssue>, String)> {
         let issues = self.assess(input)?;
         if issues
             .iter()
@@ -309,6 +317,12 @@ impl CompositionProfile {
         {
             bail!("composition has invalid structure");
         }
+        let text = self.assemble_assessed(input)?;
+        Ok((issues, text))
+    }
+
+    // Both callers have already assessed the same immutable input.
+    fn assemble_assessed(&self, input: &Value) -> Result<String> {
         let object = input
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("composition must be a JSON object"))?;
@@ -318,13 +332,12 @@ impl CompositionProfile {
                 .get(&field.name)
                 .ok_or_else(|| anyhow::anyhow!("composition field is missing"))?;
             if let Some(text) = value.as_str() {
-                parts.push(text.to_owned());
+                parts.push(text);
             } else if let Some(array) = value.as_array() {
                 for item in array {
                     parts.push(
                         item.as_str()
-                            .ok_or_else(|| anyhow::anyhow!("composition item is not a string"))?
-                            .to_owned(),
+                            .ok_or_else(|| anyhow::anyhow!("composition item is not a string"))?,
                     );
                 }
             }
@@ -417,6 +430,13 @@ mod tests {
         let stale = preset.evaluate(&input).unwrap();
         assert_eq!(stale.gates[0].status, GateStatus::NotChecked);
         assert!(stale.gates[0].findings.is_empty());
+        input.evidence_sources = Some(BTreeMap::from([(
+            "composition".into(),
+            r#"{"hook":"four","examples":[false]}"#.into(),
+        )]));
+        let invalid = preset.evaluate(&input).unwrap();
+        assert_eq!(invalid.gates[0].status, GateStatus::NotChecked);
+        assert!(invalid.gates[0].findings.is_empty());
         input.evidence_sources = None;
         assert_eq!(
             preset.evaluate(&input).unwrap().gates[0].status,
@@ -434,6 +454,13 @@ mod tests {
         let input = json!({"items": vec![""; 1000]});
         assert!(profile.assess(&input).is_ok());
         assert!(profile.assemble(&input).is_err());
+        assert!(profile.assemble_snapshot(&input).is_err());
+        let boundary = json!({"items": ["a".repeat(MAX_TEXT_BYTES - 1024), ""]});
+        assert_eq!(profile.assemble(&boundary).unwrap().len(), MAX_TEXT_BYTES);
+        assert_eq!(
+            profile.assemble_snapshot(&boundary).unwrap().len(),
+            MAX_TEXT_BYTES
+        );
     }
 
     #[test]

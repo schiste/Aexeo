@@ -2609,11 +2609,10 @@ impl ContentPreset {
                             {
                                 profile.separator.clone_from(separator);
                             }
-                            match parsed.ok().and_then(|value| {
-                                let issues = profile.assess(&value).ok()?;
-                                let text = profile.assemble_snapshot(&value).ok()?;
-                                Some((issues, text))
-                            }) {
+                            match parsed
+                                .ok()
+                                .and_then(|value| profile.assess_and_assemble_snapshot(&value).ok())
+                            {
                                 Some((issues, text)) if text == *document => {
                                     measurements.insert("issue_count".into(), issues.len());
                                     for issue in issues {
