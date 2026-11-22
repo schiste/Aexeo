@@ -1,0 +1,55 @@
+{
+  "preset": "version=1\nname='workflow'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\nblocking=false\n",
+  "cases": [
+    {
+      "name": "uppercase",
+      "markdown": "See HTTPS://example.test/a.b. Next.",
+      "html": "<p>See HTTPS://example.test/a.b. Next.</p>",
+      "document": {
+        "route": "/urls",
+        "title": "URLs",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "See HTTPS://example."
+              },
+              {
+                "_type": "span",
+                "text": "test/a.b. Next."
+              }
+            ]
+          }
+        ]
+      },
+      "expected_sentences": 2,
+      "expected_findings": 1
+    },
+    {
+      "name": "mixed-case",
+      "markdown": "Read hTtPs://example.test/a.b?x=1. Done.",
+      "html": "<p>Read hTtPs://example.test/a.b?x=1. Done.</p>",
+      "document": {
+        "route": "/urls",
+        "title": "URLs",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Read hTtPs://example."
+              },
+              {
+                "_type": "span",
+                "text": "test/a.b?x=1. Done."
+              }
+            ]
+          }
+        ]
+      },
+      "expected_sentences": 2,
+      "expected_findings": 1
+    }
+  ]
+}

@@ -390,6 +390,39 @@ fn unicode_openings_match_across_markdown_and_html() {
 }
 
 #[test]
+fn url_sentence_boundaries_match_shared_cross_adapter_cases() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/cross-adapter-urls.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, fixture["preset"].as_str().unwrap()).unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        for format in ["html", "markdown"] {
+            let source = case[format].as_str().unwrap();
+            fs::write(&draft, source).unwrap();
+            let (report, telemetry) = evaluate(&draft, &preset, format);
+            assert_eq!(
+                report["gates"][0]["measurements"]["sentence_count"], case["expected_sentences"],
+                "{format}: {}",
+                case["name"]
+            );
+            assert_eq!(
+                report["gates"][0]["findings"].as_array().unwrap().len(),
+                case["expected_findings"].as_u64().unwrap() as usize,
+                "{format}: {}",
+                case["name"]
+            );
+            assert_eq!(
+                telemetry["source_mapping"]["mapped"],
+                case["expected_findings"]
+            );
+            assert!(!telemetry.to_string().contains("example.test"));
+        }
+    }
+}
+
+#[test]
 fn numeric_citations_do_not_merge_sentences_across_markdown_and_html() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/cross-adapter-citations.json")).unwrap();
