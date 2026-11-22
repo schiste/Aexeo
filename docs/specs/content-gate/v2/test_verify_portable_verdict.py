@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, require_policy_coverage, validate_link_evidence, validate_schema
+from verify_portable_verdict import compare, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses
 
 
 class PortableComparison(unittest.TestCase):
@@ -298,6 +298,60 @@ class PortableComparison(unittest.TestCase):
         for status in ('passed', 'failed', 'not_checked'):
             verdict['checks'][0]['status'] = status
             require_policy_coverage(policy, change, False, verdict, True)
+
+    def test_link_status_must_match_explicit_observations(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'][0]['kind'] = 'link_reachability'
+        verdict = copy.deepcopy(self.previous['verdict'])
+        snapshot = {'entries': {'article': {'observations': ['reachable']}}}
+        for observation, status, valid in (
+                ('not_checked', 'passed', False), ('not_checked', 'failed', False),
+                ('not_checked', 'not_checked', True), ('not_found', 'passed', False),
+                ('not_found', 'failed', True), ('reachable', 'passed', True)):
+            snapshot['entries']['article']['observations'][0] = observation
+            verdict['checks'][0]['status'] = status
+            with self.subTest(observation=observation, status=status):
+                if valid:
+                    verify_link_observation_statuses(snapshot, policy, verdict)
+                else:
+                    with self.assertRaisesRegex(VerificationError, 'contradicts'):
+                        verify_link_observation_statuses(snapshot, policy, verdict)
+
+    def test_matching_forged_verdict_cannot_hide_partial_link_observations(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'].append({'id': 'links', 'kind': 'link_reachability',
+                                'severity': 'warning', 'blocking': False})
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        entry = change['entries'][0]
+        snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {
+            entry['entity_id']: {'version': 1, 'source_sha256': entry['after']['sha256'],
+                'destinations': ['https://example.test'], 'observations': ['not_checked']}}}
+        self.artifacts['external_evidence'] = self.encoded(snapshot)
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        for envelope in (self.previous, self.fresh):
+            envelope['binding_sha256'] = binding(inputs)
+            extensions = envelope['verdict']['extensions']
+            extensions.pop('aexeo.offline-input-binding.v1', None)
+            extensions['aexeo.observed-link-binding.v1'] = {
+                'inputs_sha256': 'a' * 64, 'observations_sha256': 'b' * 64}
+            envelope['verdict']['checks'].append({'id': 'gate:7:article:links',
+                'status': 'not_checked', 'blocking': False, 'reason': 'observation unavailable'})
+            envelope['verdict']['summary']['checks'] += 1
+            envelope['verdict']['summary']['not_checked'] += 1
+        self.assertFalse(self.check()['publication_authorized'])
+        for envelope in (self.previous, self.fresh):
+            check = envelope['verdict']['checks'][-1]
+            check['status'] = 'passed'
+            check.pop('reason')
+            envelope['verdict']['summary']['not_checked'] -= 1
+            envelope['verdict']['summary']['passed'] += 1
+        with self.assertRaisesRegex(VerificationError, 'contradicts'):
+            self.check()
 
     def test_rebound_verdict_cannot_claim_missing_evidence_was_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])

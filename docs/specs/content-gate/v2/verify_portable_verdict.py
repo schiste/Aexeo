@@ -210,6 +210,8 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
             raise VerificationError('link evidence does not match the verdict profile')
         validate_verdict(verdict)
         coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, evidence is not None)
+        if evidence is not None:
+            verify_link_observation_statuses(parse(evidence), policy, verdict)
         if verdict['validator']['version'] != host_options['engine_version']:
             raise VerificationError('validator version does not match host options')
         if verdict['validator'].get('profile') != policy['name']:
@@ -227,6 +229,22 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         telemetry_counts.update(policy_gate_count=coverage_counts[0], policy_check_count=coverage_counts[1])
     return {'input_binding': 'match', 'fresh_verdict_match': True,
             'required_check_count': len(required_checks), 'publication_authorized': False}
+
+
+def verify_link_observation_statuses(snapshot, policy, verdict):
+    """Reject completed checks that contradict explicitly partial observations."""
+    checks = {check['id']: check for check in verdict['checks']}
+    for entity, item in snapshot['entries'].items():
+        incomplete = 'not_checked' in item['observations']
+        not_found = 'not_found' in item['observations']
+        for gate in policy['gates']:
+            if gate['kind'] != 'link_reachability':
+                continue
+            check = checks.get(f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}')
+            if check is None:
+                raise VerificationError('link reachability check is missing')
+            if (incomplete and check['status'] != 'not_checked') or (not_found and check['status'] == 'passed'):
+                raise VerificationError('link reachability status contradicts its observations')
 
 
 def validate_link_evidence(snapshot, change):

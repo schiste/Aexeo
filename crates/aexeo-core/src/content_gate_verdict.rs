@@ -175,6 +175,44 @@ fn verify_candidate_link_destinations(
     Ok(())
 }
 
+// A matching digest cannot turn explicitly partial observations into a
+// completed check. This is a consistency check, not proof of fresh execution.
+fn verify_link_observation_statuses(
+    snapshots: &ChangeLinkSnapshots,
+    preset: &ContentPreset,
+    verdict: &Verdict,
+) -> Result<()> {
+    use crate::content_gate::{ContentGate, LinkReachabilityObservation};
+    let checks: std::collections::BTreeMap<_, _> = verdict
+        .checks
+        .iter()
+        .map(|check| (check.id.as_str(), check))
+        .collect();
+    for (entity, snapshot) in &snapshots.entries {
+        let incomplete = snapshot
+            .observations
+            .contains(&LinkReachabilityObservation::NotChecked);
+        let not_found = snapshot
+            .observations
+            .contains(&LinkReachabilityObservation::NotFound);
+        for gate in &preset.gates {
+            if !matches!(gate, ContentGate::LinkReachability { .. }) {
+                continue;
+            }
+            let id = scoped_id("gate", entity, gate.id());
+            let check = checks
+                .get(id.as_str())
+                .ok_or_else(|| anyhow::anyhow!("link reachability check is missing"))?;
+            if (incomplete && check.status != CheckStatus::NotChecked)
+                || (not_found && check.status == CheckStatus::Passed)
+            {
+                bail!("link reachability status contradicts its observations");
+            }
+        }
+    }
+    Ok(())
+}
+
 impl ChangeLinkSnapshotObserver<'_> {
     /// Return observations only when extracted destinations match exactly.
     pub fn observe(
@@ -1269,6 +1307,7 @@ pub fn verify_draft_passing_candidate_with_content<
             scope,
             Some(context.after),
         )?;
+        verify_link_observation_statuses(&snapshots, context.decision.preset, &envelope.verdict)?;
     }
     Ok(())
 }
@@ -3093,6 +3132,42 @@ mod tests {
             verify(&envelope).is_err(),
             "omitted advisory gate was accepted"
         );
+    }
+
+    #[test]
+    fn candidate_link_status_must_match_explicit_observations() {
+        use crate::content_gate::LinkReachabilityObservation::{NotChecked, NotFound, Reachable};
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='link_reachability'\nblocking=false\n").unwrap();
+        let mut verdict = evaluate(&change(), 1).unwrap();
+        let mut snapshots = ChangeLinkSnapshots {
+            version: 1,
+            change_id: "x".into(),
+            entries: [(
+                "article".into(),
+                LinkObservationSnapshot {
+                    version: 1,
+                    source_sha256: String::new(),
+                    destinations: vec!["https://example.test".into()],
+                    observations: vec![Reachable],
+                },
+            )]
+            .into(),
+        };
+        for (observation, status, valid) in [
+            (NotChecked, CheckStatus::Passed, false),
+            (NotChecked, CheckStatus::Failed, false),
+            (NotChecked, CheckStatus::NotChecked, true),
+            (NotFound, CheckStatus::Passed, false),
+            (NotFound, CheckStatus::Failed, true),
+            (Reachable, CheckStatus::Passed, true),
+        ] {
+            snapshots.entries.get_mut("article").unwrap().observations[0] = observation;
+            verdict.checks[0].status = status;
+            assert_eq!(
+                verify_link_observation_statuses(&snapshots, &policy, &verdict).is_ok(),
+                valid
+            );
+        }
     }
 
     #[test]
@@ -6188,6 +6263,80 @@ mod tests {
                 1024
             )
             .is_ok()
+        );
+        // A matching binding does not justify turning partial advisory link
+        // observations into a completed check.
+        let advisory_policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\nblocking=true\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=false\n",
+        ).unwrap();
+        let advisory_decision = OfflineDecisionContext {
+            change: &change,
+            preset: &advisory_policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build-id",
+        };
+        let advisory_candidate = CandidateDecisionContext {
+            decision: &advisory_decision,
+            base: &base,
+            after: &after,
+        };
+        let mut partial = snapshots.clone();
+        partial.entries.get_mut("article").unwrap().observations[0] = Observation::NotChecked;
+        let partial_context = CandidateLinkDecisionContext {
+            candidate: &advisory_candidate,
+            snapshots: &partial,
+        };
+        let mut honest = evaluate_draft_portable_candidate_link_verdict(
+            &partial_context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            scope,
+        )
+        .unwrap();
+        let partial_evidence = LinkSnapshotDecisionContext {
+            offline: &advisory_decision,
+            snapshots: &partial,
+        }
+        .artifacts_with_html_scope(scope)
+        .unwrap()
+        .external_evidence;
+        let advisory_requirements =
+            aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+                validator_name: "aexeo",
+                validator_version: env!("CARGO_PKG_VERSION"),
+                required_checks: &["gate:7:article:words"],
+                exit_code: 0,
+                timed_out: false,
+            };
+        let verify_partial = |verdict: &_| {
+            verify_draft_passing_candidate_with_content(
+                verdict,
+                &advisory_candidate,
+                scope,
+                Some(&partial_evidence),
+                &advisory_requirements,
+                &mut IndependentBytes(source.as_bytes().to_vec()),
+                1024,
+                1024,
+            )
+        };
+        assert!(verify_partial(&honest).is_ok());
+        let link_check = honest
+            .verdict
+            .checks
+            .iter_mut()
+            .find(|c| c.id == "gate:7:article:links")
+            .unwrap();
+        link_check.status = CheckStatus::Passed;
+        link_check.reason = None;
+        honest.verdict.summary.not_checked -= 1;
+        honest.verdict.summary.passed += 1;
+        assert!(
+            verify_partial(&honest).is_err(),
+            "partial observations were accepted as a completed check"
         );
         // Referenced candidate states must support the same link evidence as
         // inline states, after independently checking the host-provided bytes.
