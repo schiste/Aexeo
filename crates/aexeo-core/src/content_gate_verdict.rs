@@ -1155,16 +1155,20 @@ fn verify_candidate_policy_coverage(
                 .ok_or_else(|| {
                     anyhow::anyhow!("resolved policy check is missing or has inconsistent blocking")
                 })?;
-            // The portable candidate evaluator supplies neither a site nor custom
-            // extensions, even when it receives collection or link observations.
+            // This candidate evaluator supplies neither a site, custom extensions,
+            // nor per-item evidence sources. Link observations are a distinct input.
             if matches!(
                 gate,
                 crate::content_gate::ContentGate::Custom { .. }
                     | crate::content_gate::ContentGate::SiteGroup { .. }
                     | crate::content_gate::ContentGate::SiteAudit { .. }
+                    | crate::content_gate::ContentGate::EvidenceAnchors { .. }
+                    | crate::content_gate::ContentGate::StructuredFact { .. }
+                    | crate::content_gate::ContentGate::EvidenceReview { .. }
+                    | crate::content_gate::ContentGate::EvidenceReviewAge { .. }
             ) && check.status != CheckStatus::NotChecked
             {
-                bail!("candidate evaluator cannot execute site or custom gates");
+                bail!("candidate evaluator cannot execute site, custom or evidence gates");
             }
             Ok(())
         };
@@ -3084,11 +3088,25 @@ mod tests {
     #[test]
     fn candidate_policy_coverage_rejects_claimed_execution_without_host_capabilities() {
         let change = change();
-        for kind in ["custom", "site_group", "site_audit"] {
+        for kind in [
+            "custom",
+            "site_group",
+            "site_audit",
+            "evidence_anchors",
+            "structured_fact",
+            "evidence_review",
+            "evidence_review_age",
+        ] {
             for blocking in [true, false] {
                 let extra = match kind {
                     "custom" => "extension='example'\n",
                     "site_group" => "group='links'\n",
+                    "evidence_anchors" => "source='s'\nclaim='abc'\nquote='quote'\n",
+                    "structured_fact" => "source='s'\nclaim='abc'\npointer='/n'\nexpected=1\n",
+                    "evidence_review" => "source='s'\nreview='r'\nclaim='abc'\n",
+                    "evidence_review_age" => {
+                        "source='s'\nreview='r'\nclaim='abc'\nas_of='2026-01-01'\nmax_days=30\n"
+                    }
                     _ => "",
                 };
                 let policy = ContentPreset::from_toml(&format!(
@@ -3109,6 +3127,110 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn candidate_verifier_rejects_forged_advisory_evidence_result() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate_sources::{ContentPhase, IndependentContent};
+        struct Bytes;
+        impl IndependentContent for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, _: ContentPhase) -> io::Result<Self::Reader> {
+                Ok(Cursor::new(b"abc".to_vec()))
+            }
+        }
+        let change = change();
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='q'\nblocking=false\n").unwrap();
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: change.base.clone(),
+            complete: true,
+            items: vec![],
+        };
+        let after = vec![CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        }];
+        let decision = OfflineDecisionContext {
+            change: &change,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let context = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let envelope = evaluate_draft_portable_candidate_verdict(
+            &context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+            validator_name: "aexeo",
+            validator_version: env!("CARGO_PKG_VERSION"),
+            required_checks: &["gate:7:article:words"],
+            exit_code: 0,
+            timed_out: false,
+        };
+        let verify = |e: &_| {
+            verify_draft_passing_candidate_with_content(
+                e,
+                &context,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Bytes,
+                1024,
+                1024,
+            )
+        };
+        assert!(
+            verify(&envelope).is_ok(),
+            "honest unavailable advisory should remain allowed"
+        );
+        let check = envelope
+            .verdict
+            .checks
+            .iter()
+            .find(|c| c.id == "gate:7:article:source")
+            .unwrap();
+        assert_eq!(check.status, CheckStatus::NotChecked);
+        for status in [CheckStatus::Passed, CheckStatus::Failed] {
+            let mut forged = envelope.clone();
+            let check = forged
+                .verdict
+                .checks
+                .iter_mut()
+                .find(|c| c.id == "gate:7:article:source")
+                .unwrap();
+            check.status = status;
+            check.reason = None;
+            forged.verdict.summary.not_checked -= 1;
+            if status == CheckStatus::Passed {
+                forged.verdict.summary.passed += 1;
+            } else {
+                forged.verdict.summary.failed += 1;
+            }
+            assert!(
+                verify(&forged).is_err(),
+                "forged evidence result must be rejected"
+            );
         }
     }
 

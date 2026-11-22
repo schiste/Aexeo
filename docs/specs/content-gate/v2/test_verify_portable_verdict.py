@@ -276,7 +276,8 @@ class PortableComparison(unittest.TestCase):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])
         verdict = copy.deepcopy(self.previous['verdict'])
-        for kind in ('custom', 'site_group', 'site_audit'):
+        for kind in ('custom', 'site_group', 'site_audit', 'evidence_anchors',
+                     'structured_fact', 'evidence_review', 'evidence_review_age'):
             policy['gates'][0]['kind'] = kind
             for blocking in (True, False):
                 policy['gates'][0]['blocking'] = blocking
@@ -288,6 +289,34 @@ class PortableComparison(unittest.TestCase):
                     with self.subTest(kind=kind, status=status, blocking=blocking):
                         with self.assertRaises(VerificationError):
                             require_policy_coverage(policy, change, False, verdict)
+
+    def test_rebound_verdict_cannot_claim_missing_evidence_was_checked(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'].append({'id': 'source', 'kind': 'evidence_anchors',
+                                'source': 's', 'claim': 'abc', 'quote': 'q',
+                                'severity': 'warning', 'blocking': False})
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        for envelope in (self.previous, self.fresh):
+            envelope['binding_sha256'] = binding(inputs)
+            envelope['verdict']['checks'].append({'id': 'gate:7:article:source',
+                'status': 'not_checked', 'blocking': False, 'reason': 'evidence unavailable'})
+            envelope['verdict']['summary']['checks'] += 1
+            envelope['verdict']['summary']['not_checked'] += 1
+        self.assertFalse(self.check()['publication_authorized'])
+        for envelope in (self.previous, self.fresh):
+            check = envelope['verdict']['checks'][-1]
+            check['status'] = 'passed'
+            check.pop('reason')
+            envelope['verdict']['summary']['not_checked'] -= 1
+            envelope['verdict']['summary']['passed'] += 1
+        with self.assertRaisesRegex(VerificationError, 'cannot execute'):
+            self.check()
 
     def test_fresh_process_must_complete_successfully(self):
         for code, timed_out in ((1, False), (2, False), (None, False), (True, False),
