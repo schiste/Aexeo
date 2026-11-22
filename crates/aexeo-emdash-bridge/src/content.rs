@@ -86,7 +86,7 @@ fn content_input_with_context(
             .map(|def| def.key.as_str())
             .collect();
         // A numeric link to a reference is an annotation, not prose. Mask it
-        // with ASCII spaces so all source byte and UTF-16 offsets remain stable.
+        // with whitespace of the same UTF-8 and UTF-16 width to retain offsets.
         let citation_keys: std::collections::BTreeSet<_> = block
             .mark_defs
             .iter()
@@ -136,10 +136,10 @@ fn content_input_with_context(
                     break;
                 }
                 numeric &= reference_key(span, &link_keys, &citation_keys) == Some(key.as_str());
-                has_digit |= span.text.bytes().any(|byte| byte.is_ascii_digit());
-                numeric &= span.text.bytes().all(|byte| {
-                    byte.is_ascii_digit() || matches!(byte, b'[' | b']' | b',' | b'-' | b' ')
-                });
+                match aexeo_core::content_gate::numeric_reference_label_fragment(&span.text) {
+                    Some(digit) => has_digit |= digit,
+                    None => numeric = false,
+                }
                 end += 1;
             }
             for child in &block.children[index..end] {
@@ -2074,6 +2074,31 @@ field = "slug"
         let locations = source_locations(&document, &preset, &report);
         assert_eq!(locations.len(), 1);
         assert_eq!((locations[0].span_index, locations[0].utf16_offset), (2, 1));
+    }
+
+    #[test]
+    fn arabic_reference_digits_keep_portable_text_positions_and_literal_text() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{
+                "markDefs":[{"_key":"ref", "_type":"link", "href":"#reference-proof"}],
+                "children":[
+                    {"_type":"span", "text":"First."},
+                    {"_type":"span", "text":"[١", "marks":["ref"]},
+                    {"_type":"span", "text":"۲، ٣]", "marks":["ref", "strong"]},
+                    {"_type":"span", "text":" Next sentence."}
+                ]
+            }]
+        }))
+        .unwrap();
+        let (input, _, _, literal) = content_input_with_context(&document);
+        assert!(!input.text.as_deref().unwrap().contains("١"));
+        assert_eq!(literal.as_deref(), Some("First.[١۲، ٣] Next sentence."));
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[١۲، ٣]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].measurements["sentence_count"], 2);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!((locations[0].span_index, locations[0].utf16_offset), (3, 1));
     }
 
     #[test]

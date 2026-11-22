@@ -489,6 +489,27 @@ assert.equal(wikiCitedReport.source_locations.length, 31);
 assert.equal(JSON.stringify(wikiCitedDocument), wikiCitedOriginal);
 console.log("WASM Wikipedia citations preserve sentence boundaries and source locations");
 
+// Arabic-Indic and Persian digits in marked references retain literal content
+// and Portable Text UTF-16 coordinates while sentence gates ignore the marker.
+const multilingualCitation = { route: "/multilingual-citations", title: "References", body: [{
+  markDefs: [{ _key: "ref", _type: "link", href: "#reference-source" }],
+  children: [
+    { _type: "span", text: "First." },
+    { _type: "span", text: "[١", marks: ["ref"] },
+    { _type: "span", text: "۲، ٣]", marks: ["ref", "strong"] },
+    { _type: "span", text: " Next sentence." },
+  ],
+}] };
+const multilingualOriginal = JSON.stringify(multilingualCitation);
+const multilingualPreset = "version=1\nname='multilingual'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[١۲، ٣]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n";
+const multilingualReport = await evaluateContent(multilingualCitation, "multilingual", { multilingual: multilingualPreset });
+assert.equal(multilingualReport.gates[0].status, "passed");
+assert.equal(multilingualReport.gates[1].measurements.sentence_count, 2);
+assert.equal(multilingualReport.source_locations[0].span_index, 3);
+assert.equal(multilingualReport.source_locations[0].utf16_offset, 1);
+assert.equal(JSON.stringify(multilingualCitation), multilingualOriginal);
+console.log("WASM multilingual citations preserve literal text and UTF-16 locations");
+
 // A visible URL split across spans must not create artificial sentence breaks.
 const urlDocument = { route: "/url", title: "URL", body: [{ children: [
   { _type: "span", text: "See https://example." },
