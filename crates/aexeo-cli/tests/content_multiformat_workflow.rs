@@ -393,6 +393,24 @@ fn numeric_citations_do_not_merge_sentences_across_markdown_and_html() {
 }
 
 #[test]
+fn markdown_footnote_markers_keep_separate_words_for_editorial_checks() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example.md");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, "version=1\nname='t'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\nblocking=false\n").unwrap();
+    fs::write(&draft, "Alpha[^note]beta. Next sentence.\n\n[^note]: A.").unwrap();
+    let (report, _) = evaluate(&draft, &preset, "markdown");
+    assert_eq!(report["gates"][0]["measurements"]["sentence_count"], 3);
+    assert_eq!(
+        report["gates"][0]["findings"].as_array().unwrap().len(),
+        2,
+        "{report}"
+    );
+    assert_eq!(report["source_locations"][0]["column"], 1);
+    assert_eq!(report["source_locations"][1]["column"], 19);
+}
+
+#[test]
 fn literal_terms_can_see_reference_labels_without_affecting_rhythm() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("example");
