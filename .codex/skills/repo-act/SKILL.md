@@ -31,6 +31,13 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   denied, check the active filesystem sandbox and retry the authorized action
   with access to that state. Do not switch to a private coordination directory
   merely to bypass the restriction: it cannot see the host’s other sessions.
+- For macOS `listener_unverifiable:listener_listing_empty`, inspect the exact
+  TCP-specific `netstat -an -p tcp` listing and exit status in the failing
+  execution context; a nonempty generic `netstat -an` can contain only non-TCP
+  entries. Compare against an independent listener observation without logging
+  addresses, and distinguish restricted visibility from a transient startup.
+  An empty or incomplete listing is not proof of port ownership; keep the
+  ownership check fail closed.
 - If broker status reports schema version 0, check read-only whether its SQLite
   database is locked and whether an Aethyme cleanup process is still live. A
   transient lock can accompany that error; wait and retry before assuming a
