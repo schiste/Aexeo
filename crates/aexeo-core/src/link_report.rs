@@ -1579,10 +1579,13 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                         continue;
                     }
                     if link.is_nonconditional() {
+                        // A nonconditional incoming link makes the final
+                        // conditional-only result false, regardless of later
+                        // observations. All evidence remains in the report.
                         nonconditional = true;
-                    } else {
-                        conditional = true;
+                        break;
                     }
+                    conditional = true;
                 }
             }
             if let Some(credit) = &via_redirect {
@@ -2685,6 +2688,51 @@ mod tests {
                 .iter()
                 .any(|issue| RELEASE_ISSUES.contains(&issue.as_str()))
         );
+    }
+
+    #[test]
+    fn conditional_only_inbound_uses_all_relevant_evidence() {
+        let page = |url: &str, html: &str| RenderedPage {
+            url: url.into(),
+            html: html.into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: None,
+            redirect_chain: Vec::new(),
+            redirected_arrivals: Vec::new(),
+        };
+        let report = build_link_report(&LinkReportInput {
+            version: 1,
+            identity: Some(SurfaceIdentity {
+                origin: "https://example.org".into(),
+                release: "r1".into(),
+                surface: "public".into(),
+                snapshot: "s1".into(),
+            }),
+            snapshot_date: None,
+            crawl_complete: false,
+            pages: vec![
+                page("https://example.org/source", "<main><template><a href='/conditional'>one</a><a href='/mixed'>first</a></template><a href='/mixed'>second</a><a href='/ordinary'>third</a><template><a href='/mixed'>last</a></template></main>"),
+                page("https://EXAMPLE.org:443/conditional", ""),
+                page("https://example.org/mixed", ""),
+                page("https://example.org/ordinary", ""),
+                page("https://example.org/unlinked", ""),
+            ],
+            inventory: None,
+        }).unwrap();
+        assert_eq!(report.pages[1].conditional_only_inbound, Some(true));
+        assert_eq!(report.pages[2].conditional_only_inbound, Some(false));
+        assert_eq!(report.pages[3].conditional_only_inbound, Some(false));
+        assert_eq!(report.pages[4].conditional_only_inbound, Some(false));
+        let mixed = report
+            .links
+            .destinations
+            .iter()
+            .find(|destination| destination.destination == "https://example.org/mixed")
+            .unwrap();
+        assert_eq!(mixed.evidence.len(), 3);
+        assert_eq!(mixed.conditional_source_pages, Some(1));
+        assert_eq!(mixed.nonconditional_source_pages, Some(1));
     }
 
     #[test]
