@@ -1064,11 +1064,9 @@ impl Projection {
             // Delay the separator until the next projected text is known;
             // formatting nodes may intervene between a note and the next word.
             Node::FootnoteReference(_) => {
-                self.pending_footnote_boundary = self
-                    .text
-                    .chars()
-                    .next_back()
-                    .is_some_and(char::is_alphanumeric);
+                self.pending_footnote_boundary = self.text.chars().next_back().is_some_and(|ch| {
+                    ch.is_alphanumeric() || unicode_normalization::char::is_combining_mark(ch)
+                });
             }
             Node::Break(_) => {
                 self.pending_footnote_boundary = false;
@@ -1261,6 +1259,9 @@ mod tests {
             let (input, _, _, _) = markdown_input_with_source_map("x", &source).unwrap();
             assert!(input.text.unwrap().starts_with(expected), "{markup}");
         }
+        let source = "Cafe\u{301}[^n]**beta**.\n\n[^n]: Note.";
+        let (input, _, _, _) = markdown_input_with_source_map("x", source).unwrap();
+        assert!(input.text.unwrap().starts_with("Cafe\u{301} beta."));
         let source = "Alpha[^n]\n\nBeta.\n\n[^n]: Note.";
         let (input, _, _, _) = markdown_input_with_source_map("x", source).unwrap();
         assert!(input.text.unwrap().starts_with("Alpha\nBeta."));
