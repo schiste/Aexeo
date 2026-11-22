@@ -502,6 +502,17 @@ assert.equal(urlReport.source_locations.length, 2);
 assert.equal(urlReport.source_locations[1].span_index, 2);
 assert.equal(urlReport.source_locations[1].utf16_offset, 0);
 assert.equal(JSON.stringify(urlDocument), originalUrlDocument);
+for (const scheme of ["HTTP", "HtTpS"]) {
+  const mixedUrl = structuredClone(urlDocument);
+  mixedUrl.body[0].children[0].text = `See ${scheme}://example.`;
+  const original = JSON.stringify(mixedUrl);
+  const report = await evaluateContent(mixedUrl, "citation-test", { "citation-test": sentencePreset });
+  assert.equal(report.gates[0].measurements.sentence_count, 2, scheme);
+  assert.equal(report.source_locations.length, 2);
+  assert.equal(report.source_locations[1].span_index, 2);
+  assert.equal(report.source_locations[1].utf16_offset, 0);
+  assert.equal(JSON.stringify(mixedUrl), original);
+}
 console.log("WASM preserves URL punctuation and Portable Text source locations");
 
 // Segment boundaries and formatting must not change citation projection or erase
