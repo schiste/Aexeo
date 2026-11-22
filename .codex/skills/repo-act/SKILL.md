@@ -259,6 +259,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `EPERM`; do not interpret that alone as proof of a surviving process. Avoid
   signaling a recycled group ID, and never treat ambiguous cleanup as success.
 - For candidate verdicts with link evidence, test both production and independent verification with inline, file and URI states. Check that wrong host bytes, independent bytes and candidate content are rejected; support in the producer alone does not establish verifier interoperability.
+- For optional native comparator interoperability tests, confirm the selected Aethyme executable actually supports the experimental command with a valid positive case. If it does not, report native coverage as unavailable separately from the Python comparator results; do not infer a protocol failure or claim native coverage.
 - For receipt or manifest comparisons, test a supplied artifact changing
   between verification passes, and ensure different input snapshots are rejected.
   A matching digest does not establish provenance or protect later publication.
