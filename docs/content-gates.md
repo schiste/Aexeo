@@ -495,14 +495,17 @@ Optional fields are `headings` (strings), `heading_levels` (1–6, one per headi
 `paragraphs` (ordered nonoverlapping UTF-8 byte ranges `{start,end,list_item?}`
 in the projected text), `block_ends` (increasing UTF-8 byte offsets), `lists`
 (`{item_count,depth}` for each observed list), and `link_destinations` (strings
-in occurrence order). Paragraph `end` is exclusive. Preserve separation between projected blocks in
-`text`, or provide `block_ends` at their boundaries so words are not joined. Example:
+in occurrence order). Paragraph `end` is exclusive. Preserve separation between
+projected blocks in `text`, or provide `block_ends` at their boundaries so words
+are not joined. Example, including an optional source map:
 
 ```json
 {"schema":"aexeo.content-adapter/v1","text":"Hello world.",
  "headings":["Introduction"],"heading_levels":[1],
  "paragraphs":[{"start":0,"end":12,"list_item":false}],
- "block_ends":[12],"lists":[],"link_destinations":[]}
+ "block_ends":[12],"lists":[],"link_destinations":[],
+ "source_map":{"source_text":"Title\nHello world.",
+               "spans":[{"projected_start":0,"projected_end":12,"source_start":6}]}}
 ```
 
 Each supplied array is the host's assertion that this observation is complete;
@@ -513,10 +516,18 @@ JSON keys and unknown fields are rejected. The input is bounded by the CLI's
 content byte limit and observation counts are bounded. Metadata can be supplied
 separately with `--metadata` as for other formats. The host is responsible for
 faithful extraction, completeness and snapshot provenance; Aexeo cannot infer
-them from JSON. List finding positions remain placeholders and all finding
-coordinates refer to projected text, not the JSON source. `--fix` and
-`--export-adapter-input` are unavailable for this format. Reports bind the
-original JSON bytes, including its observations, in their input fingerprint.
+them from JSON. Optionally, `source_map` contains `source_text` and `spans` of
+`{projected_start, projected_end, source_start}`. Offsets are UTF-8 bytes;
+projected ends are exclusive. Both projected and source ranges must be ordered,
+non-overlapping and byte-identical; invalid ranges reject the input. The map may
+cover only part of the projected text. Prose findings in these spans can receive
+separate positions in the supplied `source_text`; other findings remain unmapped.
+The report labels these positions `host_supplied_spans`: matching bytes cannot
+prove that the host selected the correct occurrence, actual source or snapshot.
+The host must establish that correspondence and provenance. List finding
+positions remain placeholders; finding coordinates always refer to projected
+text, not the JSON file. `--fix` and `--export-adapter-input` are unavailable
+for this format. Reports bind the original JSON bytes, including its observations, in their input fingerprint.
 Feedback capture, corpus export and replay accept this format with the exact JSON
 as the example text. Corpus examples must contain a string `text` projection;
 exact and normalized cross-split checks compare that projected text, even if
