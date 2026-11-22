@@ -170,7 +170,8 @@ is still required to inspect those pages. No CMS content was changed.
   certain unfinished HTTP(S), root-relative, dot-relative and fragment links
   ([#630](https://github.com/schiste/Aexeo/pull/630),
   [#632](https://github.com/schiste/Aexeo/pull/632)). Findings remain advisory;
-  the scanner can miss malformed links and does not validate targets or rendering.
+  HTTP(S) scheme matching is case-insensitive. The scanner can miss malformed
+  links and does not validate targets or rendering.
 - [x] Exercise skipped heading levels with the same synthetic fixture across
   Markdown, static HTML and EmDash/WASM, including source positions, empty or
   unavailable inputs and aggregate mapping telemetry
