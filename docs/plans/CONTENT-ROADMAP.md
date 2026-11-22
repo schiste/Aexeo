@@ -741,6 +741,10 @@ editorial validation remain open.
 
 ## Priorities and acceptance criteria
 
+- Link destination checks reject malformed percent escapes and backslashes, with
+  actionable diagnostics and mapped Markdown and EmDash findings. Encoded percent
+  signs and non-ASCII links remain supported; this check does not prove reachability.
+
 Editorial findings from the shared content engine include advisory suggestions
 for common length, repetition, heading, link and metadata checks. Suggestions
 prompt review or policy adjustment; they do not assert that an automatic rewrite

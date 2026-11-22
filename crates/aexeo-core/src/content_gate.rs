@@ -1294,11 +1294,36 @@ pub fn heading_finding_indices(gate: &ContentGate, headings: &[String]) -> Optio
     }
 }
 
+// URL parsers may repair backslashes or preserve malformed percent escapes.
+// Flag these explicitly rather than silently accepting a different destination.
+fn link_encoding_problem(destination: &str) -> Option<&'static str> {
+    let bytes = destination.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => return Some("contains a backslash"),
+            b'%' => {
+                if index + 2 >= bytes.len()
+                    || !bytes[index + 1].is_ascii_hexdigit()
+                    || !bytes[index + 2].is_ascii_hexdigit()
+                {
+                    return Some("contains an invalid percent escape");
+                }
+                index += 2;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
 /// Check a destination against a configured offline scheme policy.
 pub fn valid_link_destination(destination: &str, schemes: &[String], allow_relative: bool) -> bool {
     if destination.is_empty()
         || destination.chars().any(char::is_whitespace)
         || destination.chars().any(char::is_control)
+        || link_encoding_problem(destination).is_some()
     {
         return false;
     }
@@ -1323,6 +1348,9 @@ fn link_destination_problem(destination: &str, schemes: &[String], allow_relativ
         || destination.chars().any(char::is_control)
     {
         return format!("{preview:?} is empty or contains whitespace or control characters");
+    }
+    if let Some(problem) = link_encoding_problem(destination) {
+        return format!("{preview:?} {problem}");
     }
     match url::Url::parse(destination) {
         Ok(parsed) => format!(
@@ -6440,6 +6468,37 @@ field = "slug"
             folded.evaluate(&input).unwrap().gates[0].status,
             GateStatus::Passed
         );
+    }
+
+    #[test]
+    fn destination_gate_rejects_backslashes_and_invalid_percent_escapes() {
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+        let input = ContentInput::default();
+        let destinations: Vec<String> = [
+            r"/\evil.example/path",
+            r"https://example.org\path",
+            "/partial%2",
+            "/bad%zz",
+            "/?discount=100%",
+            "/good%20path",
+            "https://example.org/%C3%A9",
+            "/été",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let result = preset
+            .evaluate_with_destinations(
+                &input,
+                &ContentEvaluationContext::default(),
+                Some(&destinations),
+            )
+            .unwrap();
+        assert_eq!(result.gates[0].status, GateStatus::Failed);
+        assert_eq!(result.gates[0].measurements["checked_destinations"], 8);
+        assert_eq!(result.gates[0].measurements["invalid_destinations"], 5);
+        assert!(result.gates[0].findings[0].message.contains("backslash"));
+        assert!(result.gates[0].findings[2].message.contains("percent"));
     }
 
     #[test]

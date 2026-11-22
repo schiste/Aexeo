@@ -1787,6 +1787,19 @@ mod tests {
     }
 
     #[test]
+    fn malformed_percent_link_is_reported_and_mapped_in_emdash() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"bad","_type":"link","href":"/bad%zz"},{"_key":"good","_type":"link","href":"/good%20path"}],"children":[{"_type":"span","text":"bad","marks":["bad"]},{"_type":"span","text":" good","marks":["good"]}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["invalid_destinations"], 1);
+        assert!(report.gates[0].findings[0].message.contains("percent"));
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 1);
+        assert_eq!((locations[0].block_index, locations[0].span_index), (0, 0));
+    }
+
+    #[test]
     fn invalid_link_locations_follow_occurrences_and_gate_policy() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"bad","_type":"link","href":"javascript:bad"},{"_key":"good","_type":"link","href":"https://example.org"}],"children":[{"_type":"span","text":"😀 ","marks":["good"]},{"_type":"span","text":"one","marks":["bad"]},{"_type":"span","text":" link","marks":["bad","strong"]},{"_type":"span","text":" and "},{"_type":"span","text":"again","marks":["bad"]}]},{"markDefs":[{"_key":"bad","_type":"link","href":"javascript:bad"}],"children":[{"_type":"span","text":"another","marks":["bad"]}]}]}"#).unwrap();
         let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='https'\nkind='link_destinations'\nallowed_schemes=['https']\n[[gates]]\nid='javascript'\nkind='link_destinations'\nallowed_schemes=['javascript']\n").unwrap();

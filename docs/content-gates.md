@@ -1192,8 +1192,9 @@ blocking = false
 
 The default for `allow_relative` is true; schemes must be unique lowercase URI
 schemes. Empty, whitespace-containing, malformed and disallowed destinations
-produce findings that quote the destination, up to 200 characters, and its scheme.
-Scheme-relative URLs beginning with `//` are rejected because
+produce findings that quote up to 200 characters and explain the issue. The
+check rejects backslashes and invalid percent escapes (such as `%zz` or a trailing
+`%`); encode literal percent signs as `%25`. Scheme-relative URLs beginning with `//` are rejected because
 their effective scheme depends on the page context. A pass does not establish reachability, safety, source support,
 or content accuracy. Markdown direct and ASCII reference links, GFM literal URLs,
 and used EmDash link marks provide destinations. A literal email address in
