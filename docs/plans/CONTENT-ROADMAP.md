@@ -545,7 +545,11 @@ registry before considering the release delivered.
   flag. Matching bindings and a narrow host-required check list cannot hide an
   omitted advisory or blocking gate. This does not validate all gate parameters,
   authenticate the evaluator, establish freshness or authorize publication;
-  the Aethyme native comparator has not yet adopted the check.
+  the Aethyme native comparator has not yet adopted the check. A native
+  implementation is under review in [Aethyme PR #1939](https://github.com/schiste/Aethyme/pull/1939),
+  on top of its unmerged parent; the real cross-process regression in
+  [Aexeo PR #778](https://github.com/schiste/Aexeo/pull/778) is opt-in and
+  detects the omission against the prior comparator. It is not publication authorization.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject
@@ -815,6 +819,11 @@ is safe or that a heuristic establishes quality. Unavailable inputs remain
    content and aggregate telemetry; unavailable EmDash content is separately
    checked. Static HTML projection does not establish browser-rendered visibility.
    Expand parity coverage to more gates, formats and real host projections.
+   The shared fixture also checks word counts and character counts through all
+   three adapters ([PR #780](https://github.com/schiste/Aexeo/pull/780)),
+   including empty and unavailable input. Counts with whitespace differ because
+   projections insert different separators; whitespace-free counts match for
+   this fixture. This does not establish general parity or rendered visibility.
    An opt-in heading hierarchy gate checks complete level sequences in Markdown,
    static HTML and EmDash. A configured initial level handles fragments under
    a template heading; unobserved or incomplete levels stay `not_checked`.
