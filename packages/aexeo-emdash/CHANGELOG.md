@@ -6,11 +6,16 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.5]
+
 - Report revision read failures without exposing host errors; retain evaluated reports with unknown currentness when a later status read fails. Revision audit telemetry includes the bounded reason or currentness status.
-
 - Return `revision_data_invalid` without evaluating or storing a report when a historical CMS revision contains non-object data.
-
-## [0.9.5] - 2026-11-19
+- Support separately configured content-fragment audits during save and refresh, with fragment-scoped link observations where the host provides them. Incomplete projections remain not checked.
+- Allow a host to supply a historical revision locale rather than relying solely on the current record. An unavailable locale is reported as such.
+- Add advisory localized transition-review presets and Arabic rhythm profiles. These heuristics prompt editorial review; they do not establish authorship or factual accuracy.
+- Exclude observed list paragraphs from prose-only variance checks when structure is complete, with scoped list-completeness attestations and aggregate telemetry.
+- Report list-review coverage and matching counts, preserve Portable Text list-opening locations when available, and emit optional aggregate list-review telemetry without document content or identifiers.
+- Preserve reference-label text and citation-aware sentence boundaries, and flag malformed link destination encoding. External gate inputs remain bound to the exact citation text.
 
 - Treat unmapped CMS metadata as unobserved in content gates, while preserving explicit absent fields and legacy direct inputs. The sandbox plugin requires a worker that advertises this coverage support.
 - Add an opt-in advisory metadata review-age gate with an explicit reference date; this schedules review and does not verify facts or source freshness.
@@ -29,7 +34,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 - Allow editors to inspect review history in the revision review interface, and discard stale responses when the selected finding changes.
 - Expose structured revision-audit limits, including that publication is not authorized, rendered pages and source freshness were not checked, and locale comes from the current record.
 
-## [0.9.4] - 2026-11-18
+## [0.9.4]
 
 - Preserve sentence boundaries around recognized numeric Portable Text reference markers in the analysis projection, without changing source citations.
 - Show whether editorial presets are configured or excluded and state that style checks do not establish factual accuracy or currency.
