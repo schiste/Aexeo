@@ -98,6 +98,45 @@ fn graph_report_exposes_evidence_and_private_opt_in_telemetry() {
 }
 
 #[test]
+fn compact_graph_output_preserves_every_field_and_reduces_bytes() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.json");
+    let input = serde_json::json!({
+        "version": 1,
+        "identity": {"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"},
+        "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":false,
+        "pages":[
+            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<main><p>Text <a href='/b'>link</a></p></main>"},
+            {"url":"https://example.org/b", "status_code":200, "response_headers":{}, "html":"<main>Target</main>"}
+        ]
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let run = |compact: bool| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"));
+        cmd.arg("link-graph").arg(&path);
+        if compact {
+            cmd.arg("--compact");
+        }
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        assert_eq!(output.stdout.last(), Some(&b'\n'));
+        output.stdout
+    };
+    let pretty = run(false);
+    let compact = run(true);
+    assert!(compact.len() < pretty.len());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&pretty).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(&compact).unwrap()
+    );
+}
+
+#[test]
 fn conditional_markup_is_not_reported_as_body_or_navigation() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("input.json");
