@@ -130,6 +130,9 @@ impl HostSourceMap {
         use aexeo_core::content_gate::{
             ContentGate, heading_finding_indices, heading_hierarchy_indices,
         };
+        if result.findings.is_empty() {
+            return None;
+        }
         let offsets = self.heading_offsets.as_deref()?;
         let headings = headings?;
         let indices: Vec<usize> = if let ContentGate::HeadingHierarchy { initial_level, .. } = gate
