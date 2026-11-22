@@ -277,6 +277,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   signaling a group whose only member is an exited, unreaped leader can return
   `EPERM`; do not interpret that alone as proof of a surviving process. Avoid
   signaling a recycled group ID, and never treat ambiguous cleanup as success.
+- For candidate snapshot tests, rebuild a changed item with its fixture constructor
+  so its source digest matches the new bytes. Verify a negative control fails
+  for the intended gate or invariant rather than invalid fixture metadata.
 - For candidate verdicts with link evidence, test both production and independent verification with inline, file and URI states. Check that wrong host bytes, independent bytes and candidate content are rejected; support in the producer alone does not establish verifier interoperability.
 - For cross-process interoperability tests, build each executable from the
   exact source revision under test, or verify its build provenance before
