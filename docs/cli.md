@@ -471,10 +471,10 @@ Options:
           [possible values: http, playwright]
 
       --input-format <input-format>
-          Interpret content as raw text, blank-line-separated paragraphs, Markdown, or static HTML
+          Interpret content as raw text, paragraphs, Markdown, static HTML, or a host adapter JSON projection
 
           [default: text]
-          [possible values: text, paragraph-text, markdown, html]
+          [possible values: text, paragraph-text, markdown, html, adapter-json]
 
       --html-scope <html-scope>
           Project the whole static HTML document or its unique main element

@@ -485,6 +485,43 @@ that a web response is still current. The projection and supplied batch contain
 full content and URLs: keep them private, and provide them only to a host you trust.
 Opt-in telemetry contains aggregate checked, not-found and unchecked counts.
 
+## Host adapter JSON
+
+A host with a different content format can supply a versioned projection to the
+single-content CLI: `aexeo-cli content projection.json --input-format adapter-json
+--preset article --format json`. The JSON object uses `schema` equal to
+`aexeo.content-adapter/v1` and `text` containing projected plain text or null.
+Optional fields are `headings` (strings), `heading_levels` (1–6, one per heading),
+`paragraphs` (ordered nonoverlapping UTF-8 byte ranges `{start,end,list_item?}`
+in the projected text), `block_ends` (increasing UTF-8 byte offsets), `lists`
+(`{item_count,depth}` for each observed list), and `link_destinations` (strings
+in occurrence order). Paragraph `end` is exclusive. Preserve separation between projected blocks in
+`text`, or provide `block_ends` at their boundaries so words are not joined. Example:
+
+```json
+{"schema":"aexeo.content-adapter/v1","text":"Hello world.",
+ "headings":["Introduction"],"heading_levels":[1],
+ "paragraphs":[{"start":0,"end":12,"list_item":false}],
+ "block_ends":[12],"lists":[],"link_destinations":[]}
+```
+
+Each supplied array is the host's assertion that this observation is complete;
+an empty array is observed empty, while an omitted or null array is unavailable.
+Paragraph-list classification is unavailable unless every paragraph has an
+explicit `list_item`. Invalid byte ranges, boundaries, heading levels, duplicate
+JSON keys and unknown fields are rejected. The input is bounded by the CLI's
+content byte limit and observation counts are bounded. Metadata can be supplied
+separately with `--metadata` as for other formats. The host is responsible for
+faithful extraction, completeness and snapshot provenance; Aexeo cannot infer
+them from JSON. List finding positions remain placeholders and all finding
+coordinates refer to projected text, not the JSON source. `--fix` and
+`--export-adapter-input` are unavailable for this format. Reports bind the
+original JSON bytes, including its observations, in their input fingerprint.
+`feedback-capture` accepts that exact JSON input, but feedback corpus export and
+replay do not yet support this format.
+Opt-in telemetry records aggregate observation counts and adapter duration, not
+text, identifiers or destinations. This is not a publication authorization.
+
 ## Optional external link observations
 
 `aexeo-cli link-reachability article.md` explicitly contacts absolute HTTP(S)
@@ -1525,7 +1562,7 @@ flagged_counts = [3]
 blocking = false
 ```
 
-The Markdown CLI and content-change evaluator supply observations when the list structure is fully visible. The single-content CLI also observes supported static HTML lists in the selected document or main scope; it checks the source structure against the parsed HTML projection and reports `not_checked` when it cannot establish complete list structure. Embedded HTML in Markdown, plain text, unsupported adapters and incomplete snapshots remain `not_checked`; an observed document without lists passes. Markdown and supported HTML CLI source locations, and Markdown content-change finding locations, identify the original list openings. Static HTML does not establish browser-rendered visibility or page completeness. Hosts may supply complete observations through the additive `evaluate_with_structured_lists` API. For Rust EmDash hosts, `evaluate_content_with_list_completeness` accepts an explicit `list_structure_complete` assertion; set it only when all list blocks, including custom components, are represented in order. Existing CMS calls make no such assertion and therefore report this gate as `not_checked`. Observations are advisory. The projected finding coordinates still use a placeholder; inspect the separate CLI source locations or change-verdict locations for precise list openings.
+The Markdown CLI and content-change evaluator supply observations when the list structure is fully visible. The single-content CLI also observes supported static HTML lists in the selected document or main scope; it checks the source structure against the parsed HTML projection and reports `not_checked` when it cannot establish complete list structure. Embedded HTML in Markdown, plain text, unsupported adapters and incomplete snapshots remain `not_checked`; a host adapter JSON can supply explicit complete list observations; an observed document without lists passes. Markdown and supported HTML CLI source locations, and Markdown content-change finding locations, identify the original list openings. Static HTML does not establish browser-rendered visibility or page completeness. Hosts may supply complete observations through the additive `evaluate_with_structured_lists` API. For Rust EmDash hosts, `evaluate_content_with_list_completeness` accepts an explicit `list_structure_complete` assertion; set it only when all list blocks, including custom components, are represented in order. Existing CMS calls make no such assertion and therefore report this gate as `not_checked`. Observations are advisory. The projected finding coordinates still use a placeholder; inspect the separate CLI source locations or change-verdict locations for precise list openings.
 
 To opt in through the configured EmDash plugin, set `contentPreset.listStructureCompleteByCollection = ["blog_posts"]` only after verifying that the host projects every list block in those collections in order, including any custom components. A missing body or incomplete existing body capabilities still reports `not_checked`. This assertion defaults to off. Direct WASM hosts can set `list_structure_complete: true` on the document under the same condition.
 ### Repeated transition openings

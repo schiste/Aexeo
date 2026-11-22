@@ -2,6 +2,7 @@ pub mod common;
 pub mod composition;
 pub mod config;
 pub mod content;
+mod content_adapter;
 pub mod content_change;
 pub mod content_impact;
 pub mod content_incremental;
