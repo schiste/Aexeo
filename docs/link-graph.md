@@ -74,7 +74,10 @@ The report lists every observed page, including pages with zero observed links,
 and counts distinct source URLs separately for each context. It preserves
 individual link evidence, and separates same-document jumps, external URLs,
 unsupported schemes and indeterminate references. The same source may count
-in several contexts. URL aliases are not inferred. No orphan conclusion is
+in several contexts. HTML landmarks determine implicit body and navigation
+contexts only in the HTML namespace: similarly named SVG or MathML elements do
+not create those contexts. Links inside foreign content retain an enclosing HTML
+context when one exists; otherwise their context is unknown. URL aliases are not inferred. No orphan conclusion is
 produced from this input, even with a matching inventory; only a report built
 from an audit qualifies that audit's orphan findings (see
 [Legacy inbound-link findings](#legacy-inbound-link-findings)).

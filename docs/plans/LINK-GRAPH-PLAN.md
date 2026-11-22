@@ -32,6 +32,12 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- Restrict implicit landmark, paragraph and conditional-element semantics to
+  the HTML namespace. SVG or MathML elements with matching names no longer invent
+  body or navigation context; links retain an enclosing HTML context when present.
+  Unit tests assert the parser's namespace, and a CLI graph test verifies distinct
+  source and context counts. This does not establish browser visibility.
+
 - Compare supported locale variants, extensions and private-use subtags instead
   of ignoring them during orphan qualification. Different or unsupported suffixes
   are unverified; malformed suffixes cannot establish a script or region
