@@ -137,6 +137,43 @@ The [built-in TOML files](../crates/aexeo-core/presets) are embedded in native a
 
 Use `--explain` to print the resolved preset as TOML, or add `--format json` for JSON.
 
+## Agent-driven CLI revision loop
+
+`aexeo-cli content-revise --input draft.md --preset news-style-en` starts a
+local JSON Lines session. It evaluates the initial UTF-8 file using the existing
+`content` command and sends a `proposal_requested` event containing its report
+on stdout when a selected gate fails. The caller can write a single JSON line
+`{"action":"submit","candidate":"the full revised draft"}` to stdin, or
+`{"action":"decline"}` to stop. Each submitted candidate is evaluated before
+another proposal can be requested. EOF also declines. The session ends with a
+`complete` event containing the stop reason, report, counts and SHA-256 of the
+last evaluated candidate. The agent must retain that candidate itself. The
+initial file is never changed; applying a revision remains a separate explicit
+action. Reports and proposals can contain private content.
+
+The default is Markdown, all configured gates and three proposals. Set
+`--input-format` to `text`, `paragraph-text`, `markdown` or `html`, use
+`--html-scope main` for a scoped HTML review, and use the same repeatable
+`--preset-source NAME=PATH` and `--metadata PATH` inputs as `content`.
+`--scope blocking` selects only blocking gates; advisory findings remain in
+the report. `--max-revisions` accepts 0–32. Selected unavailable gates stop
+as `incomplete`; a repeated draft stops as `cycle`. Exit 0 means selected checks
+passed, 1 means another stop with a selected failure, and 2 means unavailable or
+invalid input. Inspect the event and individual checks, not the exit code alone.
+
+Every evaluation invokes the installed CLI as a child process. It compares the
+child's exit with its gate report, binds the report to the candidate bytes and
+checks that the resolved policy and metadata fingerprints do not change between
+evaluations. This detects these changes, not a malicious evaluator or future
+publication races. Auxiliary sources, external services, collection/site
+contexts and CMS projections are not supported by this session; gates needing
+them remain unavailable. A proposal may be at most 16 MiB; the JSON line and
+child report also have byte limits. The caller must manage idle timeouts and
+model costs. `--telemetry` emits aggregate counts and durations to stderr; total
+time includes waiting for the agent and evaluation time includes child startup.
+No claim is made about semantic preservation, factual accuracy or publication
+readiness.
+
 ## Bounded host-driven revision loop
 
 Rust hosts can use `aexeo_core::content_revision_loop::revise` to coordinate
@@ -164,8 +201,8 @@ but a report does not bind the complete policy parameters or authenticate the
 callbacks. The host must verify those inputs independently. A cycle check
 compares candidate bytes, not semantic equivalence. Evaluation and patch quality,
 factual correctness, authorship, reviewer identity and publication safety
-remain outside this API. The standalone CLI, EmDash plugin and agent skill do not
-yet invoke it; integration requires an explicitly configured host.
+remain outside this API. The EmDash plugin does not yet invoke it; CMS integration requires an
+explicitly configured host.
 
 ## Editorial starter profiles
 

@@ -7,6 +7,19 @@ pub fn build_cli() -> Command {
         .version(env!("CARGO_PKG_VERSION"))
         .about("SEO and GEO linting for static websites")
         .subcommand(
+            Command::new("content-revise")
+                .about("Run a bounded agent-driven content review over a JSON Lines stream")
+                .arg(Arg::new("input").long("input").required(true).help("Initial UTF-8 draft file; it is never modified"))
+                .arg(Arg::new("preset").long("preset").required(true).help("Resolved content preset name"))
+                .arg(Arg::new("preset-source").long("preset-source").action(ArgAction::Append).help("Custom preset source as NAME=PATH; repeat for parents"))
+                .arg(Arg::new("input-format").long("input-format").default_value("markdown").value_parser(["text", "paragraph-text", "markdown", "html"]))
+                .arg(Arg::new("html-scope").long("html-scope").value_parser(["document", "main"]).help("HTML scope; requires HTML input"))
+                .arg(Arg::new("metadata").long("metadata").help("JSON object of metadata string values"))
+                .arg(Arg::new("max-revisions").long("max-revisions").default_value("3").value_parser(value_parser!(u32).range(0..=32)))
+                .arg(Arg::new("scope").long("scope").default_value("all").value_parser(["all", "blocking"]))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate counts to stderr")),
+        )
+        .subcommand(
             Command::new("editorial-patch")
                 .about("Propose, review, or explicitly apply source-bound editorial edits")
                 .arg(Arg::new("operation").required(true).value_parser(["propose", "review", "apply", "suggest-transitions"]))
