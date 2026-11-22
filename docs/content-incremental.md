@@ -101,8 +101,9 @@ The export validates every candidate and any referenced states using the same
 existing observations, unsupported formats, incomplete inventories and
 unprojectable links without emitting a partial template. Empty destination
 lists are observed empty lists. The templates contain URLs and entity IDs and
-must be treated as potentially private; optional telemetry contains only counts.
-Export performs no network requests and does not establish the authenticity or
+must be treated as potentially private; optional telemetry contains only counts,
+including newly projected and reused unchanged items. Unchanged items are
+projected once per batch and reused across proposals. Export performs no network requests and does not establish the authenticity or
 freshness of a later observation.
 
 ## Item metadata projections

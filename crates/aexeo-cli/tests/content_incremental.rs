@@ -828,6 +828,9 @@ fn exported_link_templates_round_trip_and_fail_closed() {
         templates["proposals"][0]["link_observations"]["a"]["observations"],
         json!(["not_checked"])
     );
+    let telemetry: Value = serde_json::from_slice(&export.stderr).unwrap();
+    assert_eq!(telemetry["projected_items"], 2);
+    assert_eq!(telemetry["reused_items"], 2);
     assert!(!String::from_utf8_lossy(&export.stderr).contains("example.org"));
     input["base_link_observations"] = templates["base_link_observations"].take();
     for (i, proposal) in input["proposals"]

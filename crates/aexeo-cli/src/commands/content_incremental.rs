@@ -294,6 +294,14 @@ fn export_observation_templates(
     if retained_bytes as u64 > MAX_BYTES {
         bail!("link observation templates exceed size limit");
     }
+    let base_items: BTreeMap<_, _> = batch
+        .snapshot
+        .items
+        .iter()
+        .map(|item| (item.entity_id.as_str(), item))
+        .collect();
+    let mut projected = 0usize;
+    let mut reused = 0usize;
     let mut candidates = Vec::with_capacity(batch.proposals.len());
     for (index, proposal) in batch.proposals.iter().enumerate() {
         let overlay = overlay_candidate(&batch.snapshot, &proposal.change, &proposal.after)
@@ -319,8 +327,27 @@ fn export_observation_templates(
             )
             .map_err(|_| anyhow::anyhow!("referenced candidate content could not be verified"))?;
         }
+        let mut observations = BTreeMap::new();
+        for item in &overlay.candidate.items {
+            let snapshot = if base_items.get(item.entity_id.as_str()).copied() == Some(item) {
+                reused += 1;
+                base.get(&item.entity_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("base link observation template is unavailable")
+                    })?
+                    .clone()
+            } else {
+                projected += 1;
+                observation_template(std::slice::from_ref(item), scope)?
+                    .remove(&item.entity_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("candidate link observation template is unavailable")
+                    })?
+            };
+            observations.insert(item.entity_id.clone(), snapshot);
+        }
         let row = serde_json::json!({"proposal_index":index, "change_id":proposal.change.change_id,
-            "link_observations":observation_template(&overlay.candidate.items, scope)?});
+            "link_observations":observations});
         retained_bytes = retained_bytes
             .checked_add(serde_json::to_vec(&row)?.len())
             .ok_or_else(|| anyhow::anyhow!("link observation templates exceed size limit"))?;
@@ -346,7 +373,7 @@ fn export_observation_templates(
     if telemetry {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-link-template-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "base_items":batch.snapshot.items.len(), "base_destinations":count, "proposals":batch.proposals.len()})
+            serde_json::json!({"schema":"aexeo.content-incremental-link-template-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "base_items":batch.snapshot.items.len(), "base_destinations":count, "proposals":batch.proposals.len(), "projected_items":projected, "reused_items":reused})
         );
     }
     Ok(0)
