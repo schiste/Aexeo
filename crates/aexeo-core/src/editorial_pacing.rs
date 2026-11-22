@@ -302,6 +302,14 @@ impl CompositionProfile {
 
     /// Reconstruct a well-formed snapshot even when advisory bounds fail.
     pub fn assemble_snapshot(&self, input: &Value) -> Result<String> {
+        self.assess_and_assemble_snapshot(input)
+            .map(|(_, text)| text)
+    }
+
+    pub(crate) fn assess_and_assemble_snapshot(
+        &self,
+        input: &Value,
+    ) -> Result<(Vec<CompositionIssue>, String)> {
         let issues = self.assess(input)?;
         if issues
             .iter()
@@ -309,7 +317,8 @@ impl CompositionProfile {
         {
             bail!("composition has invalid structure");
         }
-        self.assemble_assessed(input)
+        let text = self.assemble_assessed(input)?;
+        Ok((issues, text))
     }
 
     // Both callers have already assessed the same immutable input.
@@ -421,6 +430,13 @@ mod tests {
         let stale = preset.evaluate(&input).unwrap();
         assert_eq!(stale.gates[0].status, GateStatus::NotChecked);
         assert!(stale.gates[0].findings.is_empty());
+        input.evidence_sources = Some(BTreeMap::from([(
+            "composition".into(),
+            r#"{"hook":"four","examples":[false]}"#.into(),
+        )]));
+        let invalid = preset.evaluate(&input).unwrap();
+        assert_eq!(invalid.gates[0].status, GateStatus::NotChecked);
+        assert!(invalid.gates[0].findings.is_empty());
         input.evidence_sources = None;
         assert_eq!(
             preset.evaluate(&input).unwrap().gates[0].status,
