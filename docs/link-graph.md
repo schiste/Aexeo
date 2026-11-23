@@ -692,7 +692,7 @@ path validation and file permissions behavior are unchanged.
 The stored audit now contains the parsed site's HTML when graph output is
 requested, and the graph includes source context and file paths: treat both as
 potentially sensitive. Opt-in telemetry on stderr contains aggregate counts,
-timings and the selected output format, without paths or content. Without the graph flags, static check behavior is unchanged.
+timings and the selected output format, without paths or content. Without the graph flags, text and Markdown reports label inbound-link findings as having unverified coverage; the findings and machine-readable audit data are unchanged. A finding absent from an available graph is also not verifiable.
 
 The standalone command streams JSON to stdout, avoiding an additional
 report-sized serialized string. Use `--compact` for the same complete JSON

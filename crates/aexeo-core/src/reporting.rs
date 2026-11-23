@@ -202,10 +202,7 @@ fn priority_lines(
         } else {
             issue.message.clone()
         };
-        if let Some(note) = links
-            .zip(issue.link_graph)
-            .and_then(|(notes, counts)| notes.describe(&issue.rule_id, counts))
-        {
+        if let Some(note) = link_qualification(&issue.rule_id, links, issue.link_graph) {
             message.push_str(&format!(" ({note})"));
         }
         let reach = if issue.pages == 1 {
@@ -742,31 +739,45 @@ pub fn render_text_artifact(
     render_text_artifact_with_links(artifact, success_message, audit_path, None)
 }
 
+fn link_qualification(
+    rule_id: &str,
+    links: Option<&LinkFindingNotes>,
+    counts: Option<LinkFindingCounts>,
+) -> Option<String> {
+    if !matches!(rule_id, "LNK002" | "LNK004") {
+        return None;
+    }
+    Some(match links {
+        None => "coverage not verified: no link graph report".to_string(),
+        Some(notes) => counts
+            .and_then(|counts| notes.describe(rule_id, counts))
+            .unwrap_or_else(|| "coverage not verified: finding not qualified".to_string()),
+    })
+}
+
 /// The qualification of a cluster's `LNK002`/`LNK004` findings, as ` (...)`,
-/// or nothing.
+/// or nothing for unrelated rules.
 fn link_note(
     links: Option<&LinkFindingNotes>,
     findings: &[Finding],
     cluster: &FindingCluster,
 ) -> String {
-    let Some(notes) = links else {
-        return String::new();
-    };
-    let counts = notes.count(
-        findings
-            .iter()
-            .filter(|finding| {
-                finding.rule_id == cluster.rule_id && finding.message == cluster.message
-            })
-            .map(|finding| (finding.rule_id.as_str(), finding.path.as_str())),
-    );
-    notes
-        .describe(&cluster.rule_id, counts)
+    let counts = links.map(|notes| {
+        notes.count(
+            findings
+                .iter()
+                .filter(|finding| {
+                    finding.rule_id == cluster.rule_id && finding.message == cluster.message
+                })
+                .map(|finding| (finding.rule_id.as_str(), finding.path.as_str())),
+        )
+    });
+    link_qualification(&cluster.rule_id, links, counts)
         .map_or_else(String::new, |note| format!(" ({note})"))
 }
 
 /// [`render_text_artifact`], with the qualification of a run's link report
-/// when `links` is given. Without `links`, identical.
+/// when `links` is given; otherwise inbound-link coverage is explicitly unknown.
 pub fn render_text_artifact_with_links(
     artifact: &AuditArtifact,
     success_message: &str,
@@ -889,7 +900,7 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
 }
 
 /// [`render_markdown_artifact`], with the qualification of a run's link report
-/// when `links` is given. Without `links`, identical.
+/// when `links` is given; otherwise inbound-link coverage is explicitly unknown.
 pub fn render_markdown_artifact_with_links(
     artifact: &AuditArtifact,
     audit_path: Option<&Path>,

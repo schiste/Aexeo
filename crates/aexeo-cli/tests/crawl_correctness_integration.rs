@@ -2561,7 +2561,12 @@ fn the_text_report_qualifies_orphan_findings_only_with_a_link_report() {
     assert!(String::from_utf8_lossy(&unbound.stderr).contains("qualifications were not applied"));
 
     let plain = seeded_text_crawl(&site, temp.path(), &inventory, &[]);
-    assert!(plain.contains(&format!("{finding}\n")), "{plain}");
+    assert!(
+        plain.contains(&format!(
+            "{finding} (coverage not verified: no link graph report)\n"
+        )),
+        "{plain}"
+    );
     assert!(
         !plain.contains("Link graph") && !plain.contains("confirmed"),
         "{plain}"
