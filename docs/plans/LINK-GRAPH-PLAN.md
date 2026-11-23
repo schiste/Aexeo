@@ -299,6 +299,11 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 ## Remaining integration and validation
 
+Text and Markdown graph summaries count inbound findings present in the rendered
+audit, including findings absent from the graph as not verifiable. The number
+suppressed as disproven remains a graph observation; filtering an audit does not
+change the graph or establish additional coverage.
+
 Legacy `LNK002`, `LNK003` and `LNK004` are editorial heuristics rather than
 hard technical failures: inbound observations depend on coverage, and link
 wording and counts require judgment. Their rule IDs, finding severities and
