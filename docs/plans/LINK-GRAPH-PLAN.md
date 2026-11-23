@@ -406,6 +406,23 @@ identity. This comparison is not a complete BCP 47 validator.
   response status, headers, snapshot date and surface identity; it cannot confirm
   any orphan. The candidate also includes a selected draft, and this local
   analysis does not attest deployment or actual routes.
+  A later read-only check on 2026-11-23 examined the five `SEO004` findings
+  in Preview [run 45190352207, attempt 2](https://github.com/Aeptus/website-and-content/actions/runs/45190352207).
+  Requests to `aeptus-preview.pages.dev/glossary/category/` for
+  `accounts-access`, `data-backups`, `governance-risk`, `security-basics` and
+  `threats-attacks` each returned HTTP 200 and the build revision header
+  `78dfe7f34159e0f610acb212142f2497ee06b9c6`, matching that run. Each observed
+  HTML contained `robots=noindex`, no canonical link and no meta refresh under
+  a simple textual inspection. Thus these five findings reflect missing tags
+  in the observed Preview response, not a verified redirect. Whether canonical
+  tags should be required on deliberately noindex pages is a host policy choice;
+  this observation alone does not justify suppressing the rule globally. The
+  same audit also reported `EDT001` for an unmatched `/pricing` brief; a HEAD
+  request to the Preview `/pricing` route returned HTTP 404 with that same
+  build revision header. This does not establish whether the brief is still
+  intended to apply. The origin of the other warnings was not checked.
+  Matching a build header does not prove matching CMS snapshot bytes, route
+  inventory completeness, or the behavior of another deployment or future run.
 - [x] Mark links with `hidden` on themselves or an ancestor as conditional
   observations, including redirect credit; expose evidence and aggregate opt-in
   telemetry. HTML alone does not establish CSS or script visibility.
