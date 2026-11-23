@@ -24,7 +24,10 @@ const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Proposal {
-    Submit { candidate: String },
+    Submit {
+        candidate: String,
+        link_observations: Option<String>,
+    },
     Decline {},
 }
 
@@ -44,7 +47,11 @@ fn read_draft(path: &str) -> Result<String> {
 /// Reuse the real content CLI, including adapter/source mapping and presets.
 /// The child reads its complete input before emitting JSON. A writer thread keeps
 /// pipe traffic concurrent and stdout is bounded; no arbitrary program is run.
-fn evaluate(candidate: &str, args: &ArgMatches) -> Result<(Value, ContentReport)> {
+fn evaluate(
+    candidate: &str,
+    args: &ArgMatches,
+    link_observations: Option<&str>,
+) -> Result<(Value, ContentReport)> {
     let mut command = Command::new(std::env::current_exe().context("locating current executable")?);
     command
         .args(["content", "-", "--format", "json", "--preset"])
@@ -67,6 +74,9 @@ fn evaluate(candidate: &str, args: &ArgMatches) -> Result<(Value, ContentReport)
     }
     if let Some(metadata) = args.get_one::<String>("metadata") {
         command.arg("--metadata").arg(metadata);
+    }
+    if let Some(path) = link_observations {
+        command.arg("--link-observations").arg(path);
     }
     let mut child = command
         .stdin(Stdio::piped())
@@ -164,11 +174,13 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
         .user_context("missing revision budget")?;
     let binding = RefCell::new(None::<(Value, Value, Value)>);
     let current_report = RefCell::new(None::<Value>);
+    let observations = RefCell::new(args.get_one::<String>("link-observations").cloned());
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let mut proposal_number = 0usize;
+    let mut proposals_with_observations = 0usize;
     let mut evaluation_ms = 0.0;
     let outcome = content_revision_loop::revise(
         &initial,
@@ -176,7 +188,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
         scope,
         |candidate| {
             let evaluation_started = started.map(|_| std::time::Instant::now());
-            let (report, typed) = evaluate(candidate, args)?;
+            let (report, typed) = evaluate(candidate, args, observations.borrow().as_deref())?;
             if let Some(time) = evaluation_started {
                 evaluation_ms += time.elapsed().as_secs_f64() * 1000.0;
             }
@@ -224,7 +236,14 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
             let proposal: Proposal =
                 serde_json::from_slice(&data).user_context("invalid revision proposal")?;
             Ok(match proposal {
-                Proposal::Submit { candidate } => Some(candidate),
+                Proposal::Submit {
+                    candidate,
+                    link_observations,
+                } => {
+                    proposals_with_observations += usize::from(link_observations.is_some());
+                    *observations.borrow_mut() = link_observations;
+                    Some(candidate)
+                }
                 Proposal::Decline {} => None,
             })
         },
@@ -245,7 +264,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
+            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
         );
     }
     Ok(match outcome.stop {
