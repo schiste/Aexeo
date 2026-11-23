@@ -369,3 +369,39 @@ fn adapter_revisions_recompute_native_paths_for_each_exact_candidate() {
     );
     assert_eq!(session.finish(), 0);
 }
+
+#[test]
+fn adapter_revision_loop_recomputes_native_structural_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("projection.json");
+    let policy = dir.path().join("policy.toml");
+    fs::write(&policy, "version=1\nname='test'\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\nblocking=true\n").unwrap();
+    let candidate = |heading: &str, block: usize| {
+        json!({"schema":"aexeo.content-adapter/v1", "text":"Body", "headings":[heading],
+            "native_source_map":{"spans":[], "heading_paths":[["data","content",block,"children",0,"text"]]}}).to_string()
+    };
+    fs::write(&draft, candidate("Long", 0)).unwrap();
+    let source = format!("test={}", policy.display());
+    let mut session = start(draft.to_str().unwrap(), &source, "adapter-json", &[]);
+    let request = session.read();
+    assert_eq!(
+        request["report"]["native_source_locations"][0]["path"][2],
+        0
+    );
+    session.send(json!({"action":"submit", "candidate":candidate("Still long", 3)}));
+    let request = session.read();
+    assert_eq!(request["event"], "proposal_requested");
+    assert_eq!(
+        request["report"]["native_source_locations"][0]["path"][2],
+        3
+    );
+    let final_candidate = candidate("OK", 3);
+    session.send(json!({"action":"submit", "candidate":final_candidate}));
+    let result = session.read();
+    assert_eq!(result["stop"], "satisfied");
+    assert_eq!(
+        result["candidate_sha256"],
+        result["report"]["input_fingerprint"]["text_sha256"]
+    );
+    assert_eq!(session.finish(), 0);
+}
