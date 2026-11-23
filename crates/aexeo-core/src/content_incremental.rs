@@ -1126,7 +1126,14 @@ impl CollectionBaseline {
         change: &Change,
         overlay: &CandidateOverlay,
     ) -> Result<ProjectedCandidateCollection, NotChecked> {
-        let mut metadata = self.metadata.clone();
+        // Borrow the owned baseline and change projections until the final
+        // collection is assembled; cloning the entire baseline here would
+        // copy every metadata value twice for each candidate.
+        let mut metadata: BTreeMap<&str, Option<&BTreeMap<String, String>>> = self
+            .metadata
+            .iter()
+            .map(|(id, fields)| (id.as_str(), fields.as_ref()))
+            .collect();
         for entry in &change.entries {
             let old_id = match entry.operation {
                 aexeo_contracts::content_gate_protocol::Operation::Create => continue,
@@ -1145,7 +1152,7 @@ impl CollectionBaseline {
                 entry.operation,
                 aexeo_contracts::content_gate_protocol::Operation::Delete
             ) {
-                metadata.insert(entry.entity_id.clone(), entry.metadata.clone());
+                metadata.insert(entry.entity_id.as_str(), entry.metadata.as_ref());
             }
         }
         let collection: Vec<ContentInput> = overlay
@@ -1154,14 +1161,18 @@ impl CollectionBaseline {
             .iter()
             .map(|item| ContentInput {
                 id: item.entity_id.clone(),
-                metadata: metadata.get(&item.entity_id).cloned().flatten(),
+                metadata: metadata
+                    .get(item.entity_id.as_str())
+                    .copied()
+                    .flatten()
+                    .cloned(),
                 ..Default::default()
             })
             .collect();
         if metadata.len() != collection.len()
             || collection
                 .iter()
-                .any(|item| !metadata.contains_key(&item.id))
+                .any(|item| !metadata.contains_key(item.id.as_str()))
         {
             return Err(unavailable("candidate metadata inventory mismatch"));
         }
