@@ -1055,7 +1055,7 @@ missing fields retain observed prose but make body capabilities unavailable.
 
 ### CMS metadata coverage in local content reviews
 
-- [ ] Merge [#887](https://github.com/schiste/Aexeo/pull/887), carrying
+- [x] Merged [#887](https://github.com/schiste/Aexeo/pull/887), carrying
   explicitly observed CMS metadata through EmDash adapter projections, CLI
   gates and the bounded revision loop. The proposal preserves unknown versus
   observed absence, withholds extensions that cannot receive the new coverage,
