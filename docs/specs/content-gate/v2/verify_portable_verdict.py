@@ -142,6 +142,8 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
             check = checks.get(check_id)
             if check is None or check['blocking'] is not blocking:
                 raise VerificationError('resolved policy check is missing or has inconsistent blocking')
+            if kind == 'unique_collection_metadata' and not has_collection and check.get('status') != 'not_checked':
+                raise VerificationError('candidate evaluator cannot execute collection gate without a collection')
             if kind in {'custom', 'site_group', 'site_audit'} and check.get('status') != 'not_checked':
                 raise VerificationError('candidate evaluator cannot execute site or custom gates')
             if (kind == 'literal_markdown_links' and item_media.get(entity) != 'text/html'
