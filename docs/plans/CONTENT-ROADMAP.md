@@ -375,6 +375,16 @@ registry before considering the release delivered.
   them per finding. `python3 scripts/benchmark-content-report.py target/release/aexeo-cli`
   measures a synthetic 30,000-finding end-to-end report and emits local aggregate
   samples; it is an opt-in diagnostic, not a CI budget or a typical workload.
+- [x] Index gate IDs during preset composition while preserving override order,
+  disables, reintroduction and winning origins. Run
+  `python3 scripts/benchmark-preset-composition.py <release-aexeo-cli>` for a
+  synthetic inherited preset; it verifies order, overrides, origins and output
+  stability and emits local aggregate timings. Separate release builds on one
+  Mac resolving 6,000 synthetic gates (4,500 retained) produced identical JSON:
+  five alternating runs had medians of 261.1 ms before and 28.4 ms after with
+  origin explanations; ranges were 251.2–347.6 ms and 26.8–446.9 ms. For a
+  built-in small profile, 20 runs had medians of 7.9 ms and 8.1 ms. These are
+  local process measurements, not typical workloads or production guarantees.
 - [x] Performance budget validation requires every configured benchmark exactly
   once and rejects missing, invalid or non-finite measurements; independent
   content and EmDash example targets have distinct binary names.
