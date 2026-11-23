@@ -417,8 +417,10 @@ identity. This comparison is not a complete BCP 47 validator.
   in the observed Preview response, not a verified redirect. Whether canonical
   tags should be required on deliberately noindex pages is a host policy choice;
   this observation alone does not justify suppressing the rule globally. The
-  same audit also reported `EDT001` for an unmatched `/pricing` brief. Its
-  actual applicability and the origin of other warnings were not checked.
+  same audit also reported `EDT001` for an unmatched `/pricing` brief; a HEAD
+  request to the Preview `/pricing` route returned HTTP 404 with that same
+  build revision header. This does not establish whether the brief is still
+  intended to apply. The origin of the other warnings was not checked.
   Matching a build header does not prove matching CMS snapshot bytes, route
   inventory completeness, or the behavior of another deployment or future run.
 - [x] Mark links with `hidden` on themselves or an ancestor as conditional
