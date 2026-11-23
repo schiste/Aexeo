@@ -209,7 +209,7 @@ fn main() -> anyhow::Result<()> {
     projection_samples.sort_unstable();
     println!(
         "{}",
-        serde_json::json!({"name":"collection_projection/500_items_10_updates", "items":500,"updates":10,"metadata_fields_per_item":9,"metadata_value_bytes":256,"iterations":iterations,"projection_p50_ms":percentile(&projection_samples,50),"projection_p95_ms":percentile(&projection_samples,95),"result_sha256":checksum})
+        serde_json::json!({"name":"collection_projection/500_items_10_updates", "items":500,"updates":10,"metadata_fields_per_item":9,"custom_metadata_value_bytes":256,"iterations":iterations,"projection_p50_ms":percentile(&projection_samples,50),"projection_p95_ms":percentile(&projection_samples,95),"result_sha256":checksum})
     );
     Ok(())
 }
