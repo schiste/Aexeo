@@ -271,3 +271,17 @@ The baseline is process-local and can be reused for independent candidate
 reports; the host supplies all candidate pages and context for each call. It
 neither authenticates these inputs nor proves that they are current or complete.
 It does not update audit-bound legacy findings or authorize publication.
+
+Agents can use the same in-process baseline for several independent candidates:
+
+```sh
+aexeo-cli link-graph-incremental --base base-link-input.json candidate-a.json candidate-b.json
+```
+
+Each input uses the existing versioned `link-graph` JSON format. The command
+writes one compact JSON line per successful candidate with its full report and
+aggregate work counters. It compares every candidate to the same base, not to
+the preceding candidate. Inputs are limited to 128 MiB each and duplicate JSON
+keys are rejected. If a later input fails, earlier output lines may already
+have been written; consumers must check the exit status before treating the
+batch as complete. No crawl, publication or source freshness check is performed.

@@ -19,7 +19,7 @@ use crate::commands::{
         command_snippet,
     },
     intelligence::command_intelligence,
-    link_graph::command_link_graph,
+    link_graph::{command_link_graph, command_link_graph_incremental},
     link_reachability::command_link_reachability,
     listings::{command_adapters, command_plugin_check, command_rules},
     runtime::{
@@ -49,6 +49,7 @@ pub fn invocation(matches: &clap::ArgMatches) -> (String, String) {
 pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
         Some(("link-graph", submatches)) => command_link_graph(submatches),
+        Some(("link-graph-incremental", submatches)) => command_link_graph_incremental(submatches),
         Some(("link-reachability", submatches)) => command_link_reachability(submatches),
         Some(("editorial-patch", submatches)) => command_editorial_patch(submatches),
         Some(("composition", submatches)) => command_composition(submatches),
