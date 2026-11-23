@@ -114,6 +114,17 @@ links and does not validate URLs.
 Compose it with another preset using `extends`, and enable it only where the
 host renders Portable Text as rich text rather than interpreting Markdown.
 
+The same gate can review explicitly selected static HTML in `content` and
+`content-change`. It inspects projected prose outside HTML links, code,
+preformatted text and image alternative text; static parsing cannot establish
+actual browser visibility or rendering. Source positions and a complete review
+are supplied only for the conservative, validated HTML source-mapping subset;
+ambiguous, hidden or unsupported structures remain `not_checked`. Inline markup
+may divide a candidate across nodes. The review uses the same advisory Markdown
+heuristics and does not prove a link is broken. For the single-content CLI,
+opt-in telemetry adds only aggregate review availability and candidate count to
+`html_projection` when this gate is configured.
+
 Numeric reference labels linked to `#reference-…` are masked in sentence-rhythm
 projections to avoid merging sentences. Literal required, forbidden and repeated
 term checks in the content CLI, change verdict, incremental evaluation and EmDash

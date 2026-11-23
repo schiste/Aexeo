@@ -605,3 +605,62 @@ fn prose_variance_withholds_main_scope_nested_in_list() {
             .is_empty()
     );
 }
+
+#[test]
+fn html_literal_markdown_review_maps_findings_and_withholds_ambiguous_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\n",
+    )
+    .unwrap();
+    let run = |source| {
+        fs::write(&input, source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                input.to_str().unwrap(),
+                "--input-format",
+                "html",
+                "--preset",
+                "custom",
+                "--preset-source",
+                &format!("custom={}", preset.display()),
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap();
+        let event = String::from_utf8(output.stderr).unwrap();
+        assert!(!event.contains("example"));
+        let event = event
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|event| event["event"] == "content_evaluation")
+            .unwrap();
+        (
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+            event,
+        )
+    };
+    let (report, telemetry) = run("<p>See [example](/x).</p><p><code>[sample](/x)</code></p>");
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(report["gates"][0]["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([{ "gate_id":"literal", "finding_index":0, "line":1, "column":8 }])
+    );
+    assert_eq!(
+        telemetry["html_projection"]["literal_markdown_review"],
+        serde_json::json!({"status":"complete", "candidates":1})
+    );
+    let (ambiguous, telemetry) = run("<p><b>[example](/x)</p></b>");
+    assert_eq!(
+        telemetry["html_projection"]["literal_markdown_review"],
+        serde_json::json!({"status":"unavailable"})
+    );
+    assert_eq!(ambiguous["gates"][0]["status"], "not_checked");
+}

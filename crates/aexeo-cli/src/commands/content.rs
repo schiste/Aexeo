@@ -348,9 +348,16 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 aexeo_core::html_content_adapter::HtmlContentScope::Document
             };
-            match aexeo_core::html_content_adapter::html_content_with_literal_projection(
-                &id, &text, scope,
-            ) {
+            let project = if preset
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::LiteralMarkdownLinks { .. }))
+            {
+                aexeo_core::html_content_adapter::html_content_with_literal_markdown_projection
+            } else {
+                aexeo_core::html_content_adapter::html_content_with_literal_projection
+            };
+            match project(&id, &text, scope) {
                 Ok((adapted, levels, list_items, literal_text)) => {
                     literal_projection = literal_text;
                     if preset
@@ -367,12 +374,28 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     heading_levels = Some(levels);
                     paragraph_list_items = list_items;
                     if html_projection.is_some() {
-                        html_projection = Some(serde_json::json!({
+                        let mut projection = serde_json::json!({
                             "status": "complete",
                             "headings": adapted.input.headings.as_ref().map_or(0, Vec::len),
                             "paragraphs": adapted.context.paragraphs.as_ref().map_or(0, Vec::len),
                             "links": adapted.destinations.len(),
-                        }));
+                        });
+                        if preset
+                            .gates
+                            .iter()
+                            .any(|gate| matches!(gate, ContentGate::LiteralMarkdownLinks { .. }))
+                        {
+                            projection["literal_markdown_review"] = match &adapted
+                                .context
+                                .literal_markdown_links
+                            {
+                                Some(positions) => {
+                                    serde_json::json!({"status": "complete", "candidates": positions.len()})
+                                }
+                                None => serde_json::json!({"status": "unavailable"}),
+                            };
+                        }
+                        html_projection = Some(projection);
                     }
                     link_count = Some(adapted.destinations.len());
                     destinations = Some(adapted.destinations);
