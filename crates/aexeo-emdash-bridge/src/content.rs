@@ -209,6 +209,9 @@ fn content_input_with_context(
     )
 }
 
+// Must match the adapter-json reader's per-observation limit.
+const MAX_ADAPTER_OBSERVATIONS: usize = 100_000;
+
 fn bounded_adapter_projection(value: serde_json::Value) -> Result<serde_json::Value> {
     anyhow::ensure!(
         serde_json::to_vec(&value)?.len() <= aexeo_core::content_revision_loop::MAX_DRAFT_BYTES,
@@ -226,7 +229,7 @@ pub fn content_adapter_projection(
     list_structure_complete: bool,
 ) -> Result<serde_json::Value> {
     anyhow::ensure!(
-        document.body.len() <= 100_000,
+        document.body.len() <= MAX_ADAPTER_OBSERVATIONS,
         "body exceeds projection limit"
     );
     // Bound the input before building the masked and literal copies. Separators
@@ -314,7 +317,12 @@ pub fn content_adapter_projection(
         );
     }
     if links_available {
-        out["link_destinations"] = serde_json::json!(content_link_destinations(document));
+        let destinations = content_link_destinations(document);
+        anyhow::ensure!(
+            destinations.len() <= MAX_ADAPTER_OBSERVATIONS,
+            "link observations exceed projection limit"
+        );
+        out["link_destinations"] = serde_json::json!(destinations);
     }
     bounded_adapter_projection(out)
 }
@@ -2186,6 +2194,26 @@ field = "slug"
         assert!(unavailable.get("literal_text").is_none());
         assert!(unavailable.get("paragraphs").is_none());
         assert!(unavailable.get("link_destinations").is_none());
+    }
+
+    #[test]
+    fn adapter_projection_rejects_too_many_links() {
+        let mut children = Vec::new();
+        for _ in 0..=MAX_ADAPTER_OBSERVATIONS {
+            children.push(serde_json::json!({"_type":"span", "text":"x", "marks":["link"]}));
+            children.push(serde_json::json!({"_type":"span", "text":" ", "marks":[]}));
+        }
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{
+                "children":children, "markDefs":[{"_key":"link", "_type":"link", "href":"https://example.test"}]
+            }]
+        })).unwrap();
+        let error = content_adapter_projection(&document, [true; 4], false).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("link observations exceed projection limit")
+        );
     }
 
     #[test]
