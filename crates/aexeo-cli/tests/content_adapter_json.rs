@@ -822,3 +822,48 @@ fn native_paths_map_structures_and_reject_misaligned_anchors() {
     fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
     assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
 }
+
+#[test]
+fn independent_structures_remain_checked_without_prose() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\nblocking=false\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\nblocking=false\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let mut projection = json!({"schema":"aexeo.content-adapter/v1", "text":null,
+        "headings":["Long heading"], "heading_levels":[2], "link_destinations":["http://example.test"],
+        "native_source_map":{"spans":[],"heading_paths":[["data","body",0]],"link_paths":[["data","body",1]]}});
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let output = run(&file, &preset, &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(report["gates"][1]["status"], "failed");
+    assert_eq!(report["gates"][2]["status"], "failed");
+    assert_eq!(
+        report["native_source_mapping"],
+        json!({"eligible":2,"mapped":2,"unmapped":0})
+    );
+    assert_eq!(
+        report["native_source_locations"][0]["path"],
+        json!(["data", "body", 0])
+    );
+    assert_eq!(
+        report["native_source_locations"][1]["path"],
+        json!(["data", "body", 1])
+    );
+    projection["native_source_map"]["spans"] = json!([{"start":0,"end":1,"path":["bad"]}]);
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+    projection["native_source_map"]["spans"] = json!([]);
+    projection
+        .as_object_mut()
+        .unwrap()
+        .remove("link_destinations");
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+}

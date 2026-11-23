@@ -588,9 +588,7 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
                 && projection.paragraphs.is_none()
                 && projection.block_ends.is_none()
                 && projection.lists.is_none()
-                && projection.link_destinations.is_none()
-                && projection.source_map.is_none()
-                && projection.native_source_map.is_none()),
+                && projection.source_map.is_none()),
         "text-dependent observations require projected text"
     );
     ensure!(
@@ -726,11 +724,14 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
     });
     let mut native_source_map = projection.native_source_map;
     if let Some(map) = &mut native_source_map {
+        if projection.text.is_none() {
+            ensure!(
+                map.spans.is_empty() && (map.heading_paths.is_some() || map.link_paths.is_some()),
+                "native prose spans require projected text"
+            );
+        }
         map.validate_and_index(
-            projection
-                .text
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("native source map requires projected text"))?,
+            projection.text.as_deref().unwrap_or(""),
             projection.headings.as_deref(),
             projection.link_destinations.as_deref(),
             lists.as_deref(),
