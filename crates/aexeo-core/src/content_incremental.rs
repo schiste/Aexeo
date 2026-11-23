@@ -1886,6 +1886,18 @@ mod tests {
             )
             .is_err()
         );
+        let mut base_complete = observed.clone();
+        base_complete.insert("b".into(), observation(&b, "https://b.example"));
+        let observed_baseline = IncrementalBaseline::prepare_adapted_with_partial_links(
+            snapshot.clone(),
+            preset.clone(),
+            scope,
+            None,
+            base_complete,
+            BTreeSet::new(),
+            None,
+        )
+        .unwrap();
         let baseline = IncrementalBaseline::prepare_adapted_with_partial_links(
             snapshot,
             preset,
@@ -1921,6 +1933,23 @@ mod tests {
         assert_eq!(reports["b"].gates[0].status, GateStatus::NotChecked);
         assert_eq!(reports["b"].gates[1].status, GateStatus::Passed);
         assert_eq!(reports["b"].summary.blocking_not_checked, 1);
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = observed_baseline.evaluate_with_partial_links(
+            &change,
+            std::slice::from_ref(&next),
+            &candidate,
+            &missing,
+            None,
+        )
+        else {
+            panic!("newly unavailable candidate must be evaluated")
+        };
+        assert_eq!((evaluated, reused), (2, 0));
+        assert_eq!(reports["b"].gates[0].status, GateStatus::NotChecked);
         let IncrementalEvaluation::Evaluated {
             reports,
             evaluated,
