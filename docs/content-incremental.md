@@ -224,5 +224,8 @@ to compare a reused in-process baseline with full item evaluation on the same
 synthetic 500-item plain-text snapshot and ten updates. Both timings include
 candidate overlay construction; the one-time baseline preparation is reported
 separately. The benchmark checks report equality and reuse counts before timing.
+It also reports candidate collection projection latency for 500 items with nine
+metadata fields each and ten updates; this measurement includes overlay
+construction and verifies every projected field before timing.
 It is a synthetic diagnostic, not a production latency target or a substitute
 for measurement on a host's own content and gates.
