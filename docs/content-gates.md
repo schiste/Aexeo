@@ -185,6 +185,8 @@ gates needing them remain unavailable. Hosts may supply their own content projec
 child report also have byte limits. The caller must manage idle timeouts and
 model costs. `--telemetry` emits aggregate counts and durations to stderr; total
 time includes waiting for the agent and evaluation time includes child startup.
+Telemetry records only whether the initial link snapshot was supplied and how
+many proposals supplied one, without their paths or destinations.
 No claim is made about semantic preservation, factual accuracy or publication
 readiness.
 

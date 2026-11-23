@@ -180,6 +180,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let mut proposal_number = 0usize;
+    let mut proposals_with_observations = 0usize;
     let mut evaluation_ms = 0.0;
     let outcome = content_revision_loop::revise(
         &initial,
@@ -239,6 +240,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                     candidate,
                     link_observations,
                 } => {
+                    proposals_with_observations += usize::from(link_observations.is_some());
                     *observations.borrow_mut() = link_observations;
                     Some(candidate)
                 }
@@ -262,7 +264,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
+            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
         );
     }
     Ok(match outcome.stop {

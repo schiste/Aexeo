@@ -468,5 +468,38 @@ fn revisions_use_only_observations_bound_to_each_candidate() {
         json!({"action":"submit", "candidate":candidate, "link_observations":first_snapshot}),
     );
     assert_eq!(stale.finish(), 2);
+
+    let mut measured = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content-revise",
+            "--input",
+            draft.to_str().unwrap(),
+            "--preset",
+            "test",
+            "--preset-source",
+            &source,
+            "--link-observations",
+            first_snapshot.to_str().unwrap(),
+            "--telemetry",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(
+        measured.stdin.take().unwrap(),
+        "{}",
+        json!({"action":"submit", "candidate":candidate, "link_observations":next_snapshot})
+    )
+    .unwrap();
+    let output = measured.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stderr.contains("example.org"));
+    assert!(!stderr.contains(first_snapshot.to_str().unwrap()));
+    let event: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(event["initial_link_observations"], true);
+    assert_eq!(event["proposals_with_link_observations"], 1);
     assert_eq!(fs::read_to_string(draft).unwrap(), initial);
 }
