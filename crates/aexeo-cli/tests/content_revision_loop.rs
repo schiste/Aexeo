@@ -312,3 +312,17 @@ fn adapter_projection_revisions_bind_exact_bytes_and_withhold_missing_capabiliti
     assert_eq!(session.finish(), 2);
     assert_eq!(fs::read_to_string(&draft).unwrap(), initial);
 }
+
+#[test]
+fn adapter_revision_rejects_changed_metadata_coverage() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("projection.json");
+    let policy = dir.path().join("policy.toml");
+    fs::write(&policy, preset(3)).unwrap();
+    fs::write(&draft, r#"{"schema":"aexeo.content-adapter/v1","text":"one","metadata":{},"observed_metadata_fields":[]}"#).unwrap();
+    let source = format!("test={}", policy.display());
+    let mut session = start(draft.to_str().unwrap(), &source, "adapter-json", &[]);
+    assert_eq!(session.read()["event"], "proposal_requested");
+    session.send(json!({"action":"submit", "candidate":r#"{"schema":"aexeo.content-adapter/v1","text":"one two three","metadata":{},"observed_metadata_fields":["description"]}"#}));
+    assert_eq!(session.finish(), 2);
+}

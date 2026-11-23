@@ -6,6 +6,7 @@ use aexeo_core::{
 };
 use anyhow::{Result, ensure};
 use serde::Deserialize;
+use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_OBSERVATIONS: usize = 100_000;
 
@@ -16,6 +17,10 @@ struct AdapterInput {
     text: Option<String>,
     #[serde(default)]
     literal_text: Option<String>,
+    #[serde(default)]
+    metadata: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    observed_metadata_fields: Option<Vec<String>>,
     #[serde(default)]
     headings: Option<Vec<String>>,
     #[serde(default)]
@@ -385,6 +390,41 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
                 && projection.source_map.is_none()),
         "text-dependent observations require projected text"
     );
+    ensure!(
+        projection
+            .metadata
+            .as_ref()
+            .is_none_or(|metadata| metadata.len() <= MAX_OBSERVATIONS),
+        "metadata value limit exceeded"
+    );
+    let observed_metadata_fields = projection
+        .observed_metadata_fields
+        .as_ref()
+        .map(|fields| -> Result<BTreeSet<String>> {
+            ensure!(
+                projection.metadata.is_some(),
+                "observed metadata fields require metadata"
+            );
+            ensure!(
+                fields.len() <= MAX_OBSERVATIONS,
+                "metadata observation limit exceeded"
+            );
+            let observed: BTreeSet<_> = fields.iter().cloned().collect();
+            ensure!(
+                observed.len() == fields.len()
+                    && fields.iter().all(|field| !field.trim().is_empty()),
+                "metadata observation fields must be nonempty and unique"
+            );
+            ensure!(
+                projection
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.keys().all(|field| observed.contains(field))),
+                "metadata values must have observed fields"
+            );
+            Ok(observed)
+        })
+        .transpose()?;
     if let Some(levels) = &projection.heading_levels {
         ensure!(
             projection
@@ -486,6 +526,7 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
         source_text: projection.text.clone(),
         text: projection.text,
         headings: projection.headings,
+        metadata: projection.metadata,
         ..Default::default()
     };
     Ok(AdapterProjection {
@@ -494,6 +535,7 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
         context: ContentContext {
             paragraphs,
             block_ends: projection.block_ends,
+            observed_metadata_fields,
             ..Default::default()
         },
         headings: projection.heading_levels,

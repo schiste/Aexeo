@@ -50,6 +50,20 @@ pub struct ContentContext {
     pub input_limit: Option<String>,
     /// Metadata keys whose values or absence were not observed by the adapter.
     pub unavailable_metadata_fields: Vec<String>,
+    /// If supplied, only these keys have observed values or observed absence.
+    pub observed_metadata_fields: Option<BTreeSet<String>>,
+}
+
+impl ContentContext {
+    fn metadata_field_unavailable(&self, field: &str) -> bool {
+        self.unavailable_metadata_fields
+            .iter()
+            .any(|item| item == field)
+            || self
+                .observed_metadata_fields
+                .as_ref()
+                .is_some_and(|observed| !observed.contains(field))
+    }
 }
 
 /// Builds an unmasked literal projection only when a numeric reference occurs.
@@ -4617,6 +4631,13 @@ impl ContentPreset {
                     if literal_input.is_err() {
                         reason =
                             Some("literal text projection does not match the observed text".into());
+                    } else if context.is_some_and(|context| {
+                        context.observed_metadata_fields.is_some()
+                            || !context.unavailable_metadata_fields.is_empty()
+                    }) {
+                        reason = Some(
+                            "partial metadata coverage cannot be passed to the extension".into(),
+                        );
                     } else {
                         match extensions
                             .map(|host| {
@@ -4680,7 +4701,7 @@ impl ContentPreset {
                         measurements.insert("as_of_yyyymmdd".into(), compact);
                     }
                     let unavailable =
-                        context.is_some_and(|ctx| ctx.unavailable_metadata_fields.contains(field));
+                        context.is_some_and(|ctx| ctx.metadata_field_unavailable(field));
                     if unavailable || input.metadata.is_none() {
                         reason = Some("metadata field is unavailable from this adapter".into());
                     } else if let Some(value) = input
@@ -4728,7 +4749,7 @@ impl ContentPreset {
                         measurements.insert("max_characters".into(), *max);
                     }
                     let unavailable =
-                        context.is_some_and(|ctx| ctx.unavailable_metadata_fields.contains(field));
+                        context.is_some_and(|ctx| ctx.metadata_field_unavailable(field));
                     if unavailable || input.metadata.is_none() {
                         reason = Some("metadata field is unavailable from this adapter".into());
                     } else if let Some(value) = input
@@ -4765,12 +4786,10 @@ impl ContentPreset {
                     measurements.insert("required_fields".into(), fields.len());
                     match &input.metadata {
                         Some(metadata) => {
-                            let unavailable = context
-                                .map(|ctx| ctx.unavailable_metadata_fields.as_slice())
-                                .unwrap_or_default();
                             let (mut unknown, mut present, mut missing) = (0, 0, 0);
                             for field in fields {
-                                if unavailable.contains(field) {
+                                if context.is_some_and(|ctx| ctx.metadata_field_unavailable(field))
+                                {
                                     unknown += 1;
                                 } else if metadata.get(field).is_some_and(|v| !v.trim().is_empty())
                                 {
@@ -6290,6 +6309,33 @@ max = 1
                 .iter()
                 .all(|gate| gate.status == GateStatus::NotChecked)
         );
+    }
+
+    #[test]
+    fn partial_metadata_never_reaches_external_host() {
+        struct NoCall;
+        impl ContentGateExtensions for NoCall {
+            fn evaluate(
+                &self,
+                _: &str,
+                _: &BTreeMap<String, String>,
+                _: &ContentInput,
+            ) -> Result<Option<Vec<ExtensionDiagnostic>>> {
+                panic!("partial metadata reached extension host")
+            }
+        }
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='external'\nkind='custom'\nextension='test'\n",
+        )
+        .unwrap();
+        let context = ContentContext {
+            observed_metadata_fields: Some(BTreeSet::new()),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&literal_input("abc"), None, Some(&NoCall), Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
     }
 
     #[test]
