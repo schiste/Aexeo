@@ -739,3 +739,28 @@ fn native_paths_map_prose_to_bounded_utf16_positions() {
     .unwrap();
     assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
 }
+
+#[test]
+fn native_paths_index_long_multibyte_spans_without_offset_drift() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad']\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let source = format!("{} bad", "🙂".repeat(4096));
+    fs::write(
+        &file,
+        serde_json::to_vec(&json!({"schema":"aexeo.content-adapter/v1", "text":source,
+        "native_source_map":{"spans":[{"start":0,"end":source.len(),"path":["data",0]}]}}))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = run(&file, &preset, &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["native_source_locations"][0]["utf16_offset"], 8193);
+}

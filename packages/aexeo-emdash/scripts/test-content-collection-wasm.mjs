@@ -35,8 +35,8 @@ assert.equal((await projectContentAdapter(adapted.document)).text, null);
 const mapped = adaptContentItem(cmsRow, { contentFields: ["content"], blockMappings: { unknownWidget: [] } });
 assert.equal((await projectContentAdapter(mapped.document)).text, "One.     Two.\nOne.     Two.");
 const cmsProjection = await projectAdaptedContentAdapter(mapped);
-assert.deepEqual(cmsProjection.native_source_map.spans[0].path, ["content", 0, "children", 0, "text"]);
-assert.deepEqual(cmsProjection.native_source_map.spans[3].path, ["content", 2, "children", 0, "text"]);
+assert.deepEqual(cmsProjection.native_source_map.spans[0].path, ["data", "content", 0, "children", 0, "text"]);
+assert.deepEqual(cmsProjection.native_source_map.spans[3].path, ["data", "content", 2, "children", 0, "text"]);
 const withoutSourcePaths = await projectAdaptedContentAdapter({ ...mapped, meta: { ...mapped.meta, bodySourcePaths: undefined, bodySourceSpanPaths: undefined } });
 assert.deepEqual(withoutSourcePaths.native_source_map.spans, []);
 

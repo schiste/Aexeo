@@ -415,7 +415,7 @@ projection suitable for Aexeo's `content --input-format adapter-json` or
 views of numeric citations and explicitly withholds unavailable capabilities.
 To start from a CMS row, use the same entry point's `adaptContentItem(row,
 options)` and pass the unchanged result to `projectAdaptedContentAdapter`.
-Its native paths refer to the original row's `data` object; spans that cannot
+Its native paths refer to the original row (including `data`); spans that cannot
 be linked to unchanged source paths are omitted. Explicitly
 configure content fields and component mappings to match the host renderer;
 unmapped components can make body capabilities unavailable. A mapping that
@@ -433,7 +433,7 @@ unavailable. Fields with unverified sources are withheld, and no fields are
 assumed observed when the document does not provide coverage. The export includes native paths for spans in the projected EmDash document
 when those observations fit the projection limits. `projectContentAdapter`
 paths refer to the projected document; `projectAdaptedContentAdapter` paths
-refer to the CMS row's `data` object. Bind either to the unchanged revision
+refer to the complete CMS row. Bind either to the unchanged revision
 before editing. The host must configure mappings that reflect its real CMS
 fields. Regenerate the export from each exact proposed snapshot, and retain
 the host's revision identity separately. The export does

@@ -143,7 +143,7 @@ function reportProjectionTelemetry(projection: ContentAdapterProjection, started
   });
 }
 
-/** Project an unchanged adapted CMS row; native paths are relative to its data object. */
+/** Project an unchanged adapted CMS row; native paths are relative to the complete row. */
 export async function projectAdaptedContentAdapter(
   adapted: AdaptedContent,
   onTelemetry?: (event: ContentAdapterProjectionTelemetry) => void,
