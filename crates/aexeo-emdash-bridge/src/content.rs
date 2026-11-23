@@ -2303,6 +2303,24 @@ field = "slug"
     }
 
     #[test]
+    fn empty_reference_target_does_not_hide_portable_text() {
+        for (href, expected) in [
+            ("#reference-", "First.2025 Next."),
+            ("#reference-real", "First.     Next."),
+        ] {
+            let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+                "route":"/test", "title":"Test", "body":[{
+                    "markDefs":[{"_key":"ref", "_type":"link", "href":href}],
+                    "children":[{"_type":"span", "text":"First."}, {"_type":"span", "text":"2025", "marks":["ref"]}, {"_type":"span", "text":" Next."}]
+                }]
+            })).unwrap();
+            let (input, _, _, literal) = content_input_with_context(&document);
+            assert_eq!(input.text.as_deref(), Some(expected), "{href}");
+            assert_eq!(literal.is_some(), href == "#reference-real");
+        }
+    }
+
+    #[test]
     fn adapter_projection_preserves_citations_and_observation_boundaries() {
         let document: EmdashDocument = serde_json::from_value(serde_json::json!({
             "route":"/test", "title":"Test", "body":[{

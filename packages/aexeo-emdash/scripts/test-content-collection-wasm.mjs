@@ -565,6 +565,22 @@ assert.equal(citedReport.source_locations.length, 31);
 assert.equal(JSON.stringify(citedDocument), originalCitations);
 console.log("WASM sentence analysis preserves reference markers and source locations");
 
+// A bare reference prefix is ambiguous and must remain visible to prose gates.
+for (const [href, expectedWords] of [["#reference-", 3], ["#reference-proof", 2]]) {
+  const record = { route: "/reference-prefix", title: "Reference", body: [{
+    markDefs: [{ _key: "ref", _type: "link", href }],
+    children: [
+      { _type: "span", text: "First " },
+      { _type: "span", text: "2025", marks: ["ref"] },
+      { _type: "span", text: " next." },
+    ],
+  }] };
+  const preset = "version=1\nname='reference-prefix'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+  const report = await evaluateContent(record, "reference-prefix", { "reference-prefix": preset });
+  assert.equal(report.gates[0].measurements.word_count, expectedWords, href);
+}
+console.log("WASM leaves ambiguous reference prefixes visible to prose checks");
+
 // Wikipedia-style citation targets are handled without changing literal text.
 const wikiCitedDocument = structuredClone(citedDocument);
 wikiCitedDocument.body[0].markDefs[0].href = "#cite_note-example-1";
