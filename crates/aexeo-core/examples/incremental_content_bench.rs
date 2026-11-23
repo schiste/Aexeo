@@ -6,7 +6,7 @@ use aexeo_contracts::content_gate_protocol::{
 use aexeo_core::{
     content_candidate::{CandidateItem, CandidateSnapshot, overlay_candidate},
     content_gate::{ContentInput, ContentPreset, ContentReport},
-    content_incremental::{IncrementalBaseline, IncrementalEvaluation},
+    content_incremental::{CollectionBaseline, IncrementalBaseline, IncrementalEvaluation},
 };
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
@@ -158,6 +158,58 @@ fn main() -> anyhow::Result<()> {
     println!(
         "{}",
         serde_json::json!({"name":"incremental_content/500_plain_items_10_updates", "items":500,"updates":10,"source_bytes_per_item":source.len(),"iterations":iterations,"evaluated":evaluated,"reused":reused,"prepare_ms":prepare_us as f64/1000.0,"incremental_p50_ms":percentile(&incremental,50),"incremental_p95_ms":percentile(&incremental,95),"full_p50_ms":percentile(&fresh,50),"full_p95_ms":percentile(&fresh,95),"result_sha256":checksum})
+    );
+    // Exercise the collection path separately: unlike the item benchmark,
+    // each projection must retain host-supplied metadata for the entire site.
+    let metadata_for = |id: &str| {
+        let mut fields = BTreeMap::from([("slug".into(), id.to_owned())]);
+        for index in 0..8 {
+            fields.insert(format!("field-{index}"), "content ".repeat(32));
+        }
+        fields
+    };
+    let metadata = snapshot
+        .items
+        .iter()
+        .map(|item| (item.entity_id.clone(), Some(metadata_for(&item.entity_id))))
+        .collect();
+    let collection_preset = ContentPreset::from_toml(
+        "version=1\nname='collection-bench'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n",
+    )?;
+    let collection = CollectionBaseline::prepare(snapshot.clone(), metadata, collection_preset)
+        .map_err(|e| anyhow::anyhow!(e.reason))?;
+    let mut collection_change = change.clone();
+    for entry in &mut collection_change.entries {
+        entry.metadata = Some(metadata_for(&entry.entity_id));
+    }
+    let projection = collection
+        .project_candidate(&collection_change, &after)
+        .map_err(|e| anyhow::anyhow!(e.reason))?;
+    let observed = projection.as_change_collection();
+    anyhow::ensure!(observed.complete && observed.items.len() == snapshot.items.len());
+    for (actual, expected) in observed.items.iter().zip(&candidate.items) {
+        anyhow::ensure!(
+            actual.id == expected.entity_id
+                && actual.metadata.as_ref() == Some(&metadata_for(&expected.entity_id)),
+            "collection metadata differs for {}",
+            expected.entity_id
+        );
+    }
+    let checksum = format!("{:x}", Sha256::digest(serde_json::to_vec(&projection)?));
+    let mut projection_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let start = Instant::now();
+        black_box(
+            collection
+                .project_candidate(black_box(&collection_change), black_box(&after))
+                .map_err(|e| anyhow::anyhow!(e.reason))?,
+        );
+        projection_samples.push(start.elapsed().as_micros());
+    }
+    projection_samples.sort_unstable();
+    println!(
+        "{}",
+        serde_json::json!({"name":"collection_projection/500_items_10_updates", "items":500,"updates":10,"metadata_fields_per_item":9,"custom_metadata_value_bytes":256,"iterations":iterations,"projection_p50_ms":percentile(&projection_samples,50),"projection_p95_ms":percentile(&projection_samples,95),"result_sha256":checksum})
     );
     Ok(())
 }
