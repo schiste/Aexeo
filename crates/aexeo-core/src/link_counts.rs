@@ -166,6 +166,7 @@ impl IncrementalLinkCounts {
         changes: &BTreeMap<String, Option<Vec<LinkEvidence>>>,
     ) -> Result<IncrementalLinkCountsReport, &'static str> {
         let mut affected = BTreeSet::new();
+        let mut replacement_sources_with_links = BTreeSet::new();
         let mut candidate_count = self.sources.len();
         for (source, replacement) in changes {
             if source.is_empty() {
@@ -182,16 +183,20 @@ impl IncrementalLinkCounts {
             } else {
                 candidate_count -= 1;
             }
-            for link in self
-                .sources
-                .get(source)
-                .into_iter()
-                .flatten()
-                .chain(replacement.iter().flatten())
-            {
+            for link in self.sources.get(source).into_iter().flatten() {
                 if let LinkResolution::Internal { url } = &link.resolution {
                     affected.insert(url.clone());
                 }
+            }
+            let mut replacement_has_internal = false;
+            for link in replacement.iter().flatten() {
+                if let LinkResolution::Internal { url } = &link.resolution {
+                    affected.insert(url.clone());
+                    replacement_has_internal = true;
+                }
+            }
+            if replacement_has_internal {
+                replacement_sources_with_links.insert(source.clone());
             }
         }
         let mut candidate_sources = BTreeSet::new();
@@ -200,9 +205,7 @@ impl IncrementalLinkCounts {
                 candidate_sources.extend(sources.iter().cloned());
             }
         }
-        if !affected.is_empty() {
-            candidate_sources.extend(changes.keys().cloned());
-        }
+        candidate_sources.extend(replacement_sources_with_links);
         let mut evidence = Vec::new();
         let mut sources_scanned = 0;
         for source in candidate_sources {
@@ -293,6 +296,43 @@ mod tests {
                 .contains_key(&LinkContext::Footer)
         );
         assert_eq!(target.evidence.len(), 3);
+    }
+
+    #[test]
+    fn incremental_bulk_additions_do_not_recount_sources_without_internal_links() {
+        let mut changes = BTreeMap::new();
+        for n in 0..1000 {
+            changes.insert(format!("https://example.org/empty-{n}"), Some(Vec::new()));
+        }
+        let external_source = "https://example.org/external-only";
+        changes.insert(
+            external_source.into(),
+            Some(extract_links(
+                "<a href='https://outside.example/'>external</a>",
+                external_source,
+                "https://example.org",
+                None,
+            )),
+        );
+        let source = "https://example.org/new";
+        let links = extract_links(
+            "<main><a href='/target'>target</a></main>",
+            source,
+            "https://example.org",
+            None,
+        );
+        changes.insert(source.into(), Some(links.clone()));
+        let report = IncrementalLinkCounts::new(BTreeMap::new())
+            .unwrap()
+            .evaluate(&changes)
+            .unwrap();
+        let full = count_links(links);
+        assert_eq!(report.candidate_sources, 1002);
+        assert_eq!(
+            report.destinations["https://example.org/target"],
+            Some(full.destinations[0].clone())
+        );
+        assert_eq!(report.sources_scanned, 1);
     }
 
     #[test]
