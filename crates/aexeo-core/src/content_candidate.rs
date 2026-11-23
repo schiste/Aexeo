@@ -92,22 +92,24 @@ fn validate_item(item: &CandidateItem) -> Result<(), &'static str> {
 }
 
 pub(crate) fn validate_inventory(items: &[CandidateItem]) -> Result<(), &'static str> {
-    validate_inventory_inner(items, true)
+    validate_inventory_inner(items.iter(), true)
 }
 
-fn validate_inventory_inner(
-    items: &[CandidateItem],
+fn validate_inventory_inner<'a>(
+    items: impl ExactSizeIterator<Item = &'a CandidateItem> + Clone,
     validate_items: bool,
 ) -> Result<(), &'static str> {
     const MAX_ITEMS: usize = 100_000;
     const MAX_LINKS: usize = 1_000_000;
     const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
+    const MAX_NON_SOURCE_BYTES: usize = 64 * 1024 * 1024;
     if items.len() > MAX_ITEMS {
         return Err("candidate inventory exceeds item limit");
     }
     let mut source_bytes = 0usize;
     let mut link_count = 0usize;
-    for item in items {
+    let mut non_source_bytes = 0usize;
+    for item in items.clone() {
         source_bytes = source_bytes
             .checked_add(item.source.len())
             .ok_or("candidate inventory exceeds source limit")?;
@@ -116,6 +118,22 @@ fn validate_inventory_inner(
             .ok_or("candidate inventory exceeds link limit")?;
         if source_bytes > MAX_SOURCE_BYTES || link_count > MAX_LINKS {
             return Err("candidate inventory exceeds resource limit");
+        }
+        let lengths = [
+            item.entity_id.len(),
+            item.public_path.len(),
+            item.media_type.len(),
+            item.revision.as_ref().map_or(0, String::len),
+            item.sha256.len(),
+        ];
+        for length in lengths
+            .into_iter()
+            .chain(item.links.iter().flatten().map(String::len))
+        {
+            non_source_bytes = non_source_bytes
+                .checked_add(length)
+                .filter(|&total| total <= MAX_NON_SOURCE_BYTES)
+                .ok_or("candidate inventory exceeds non-source byte limit")?;
         }
     }
     let mut ids = BTreeSet::new();
@@ -281,11 +299,11 @@ fn overlay_candidate_inner(
     if !projected.is_empty() {
         return Err("unexpected after projection");
     }
+    // Every candidate item is an unchanged reference to an already validated
+    // base or after item. Check the combined limits and route uniqueness before
+    // cloning, without hashing every source a second time.
+    validate_inventory_inner(items.values().copied(), false)?;
     let candidate_items: Vec<_> = items.into_values().cloned().collect();
-    // Every candidate item is an unchanged clone of an already validated base
-    // or after item. Recheck combined resource limits and route uniqueness,
-    // but avoid hashing every source a second time.
-    validate_inventory_inner(&candidate_items, false)?;
     let mut affected = BTreeSet::new();
     let candidate_ids: BTreeSet<&str> = candidate_items
         .iter()
@@ -640,6 +658,25 @@ mod tests {
             before: before.map(state),
             after: after.map(state),
         }
+    }
+
+    #[test]
+    fn combined_candidate_rejects_excessive_link_bytes_before_overlay() {
+        let (mut base, mut change) = setup();
+        base.items.truncate(1);
+        let large_link = format!("/{}", "x".repeat(33 * 1024 * 1024));
+        base.items[0].links = Some(vec![large_link.clone()]);
+        let mut created = item("new", "/new", "new", Some(vec![]));
+        created.links = Some(vec![large_link]);
+        assert!(validate_inventory(&base.items).is_ok());
+        assert!(validate_inventory(std::slice::from_ref(&created)).is_ok());
+        change
+            .entries
+            .push(entry("new", Operation::Create, None, Some(&created)));
+        assert!(matches!(
+            overlay_candidate(&base, &change, &[created]),
+            Err("candidate inventory exceeds non-source byte limit")
+        ));
     }
 
     #[test]
