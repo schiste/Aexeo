@@ -1686,8 +1686,12 @@ aexeo-cli composition --profile news --input composition.json --assemble > draft
 aexeo-cli content draft.txt --preset news-pacing --evidence-source composition=composition.json --format json
 ```
 
-The schema requires every field and rejects unknown fields. JSON Schema length
-bounds count Unicode scalar values, not visual characters or words. The CLI
+The schema requires every field, rejects unknown fields, and includes the
+per-field resource ceilings: at most 4,096 items per array and at most 1,000,000
+Unicode scalar values per string (or the profile's lower maximum). JSON Schema
+length bounds count Unicode scalar values, not visual characters, words or UTF-8
+bytes. Aggregate byte and item limits and assembly separators can still make a
+schema-valid composition unavailable. The CLI
 rejects duplicate JSON keys and limits input sizes. `--assemble` only emits text
 for an input satisfying the profile and does not add a trailing newline. If an
 editor intentionally accepts a bounds violation, `--allow-advisory-violations`

@@ -127,7 +127,8 @@ impl CompositionProfile {
         Ok(())
     }
 
-    /// Export a Draft 2020-12 schema equivalent to the structural checks.
+    /// Export Draft 2020-12 structural constraints and per-field resource bounds.
+    /// Aggregate UTF-8 and assembly limits are enforced separately by the evaluator.
     pub fn json_schema(&self) -> Result<Value> {
         self.validate()?;
         let mut properties = serde_json::Map::new();
@@ -136,9 +137,14 @@ impl CompositionProfile {
             if let Some(min) = field.min_characters {
                 text["minLength"] = json!(min);
             }
-            if let Some(max) = field.max_characters {
-                text["maxLength"] = json!(max);
-            }
+            // A Unicode scalar occupies at least one UTF-8 byte. The actual
+            // aggregate byte limit can be reached earlier for non-ASCII text.
+            text["maxLength"] = json!(
+                field
+                    .max_characters
+                    .unwrap_or(MAX_TEXT_BYTES)
+                    .min(MAX_TEXT_BYTES)
+            );
             let schema = if field.allowed_counts.is_empty() {
                 text
             } else {
@@ -156,7 +162,7 @@ impl CompositionProfile {
                         schema
                     })
                     .collect();
-                json!({"type":"array", "items":text, "anyOf":ranges})
+                json!({"type":"array", "items":text, "maxItems":MAX_ARRAY_ITEMS, "anyOf":ranges})
             };
             properties.insert(field.name.clone(), schema);
         }
@@ -364,6 +370,39 @@ impl CompositionProfile {
 mod tests {
     use super::*;
     const PROFILE: &str = "version=1\nname='test'\n[[fields]]\nname='hook'\nmax_characters=3\n[[fields]]\nname='examples'\nallowed_counts=[{max=2},{min=4}]\n";
+
+    #[test]
+    fn schema_exposes_per_field_resource_limits() {
+        let profile = CompositionProfile::from_toml(
+            "version=1\nname='limits'\n[[fields]]\nname='text'\n[[fields]]\nname='examples'\nallowed_counts=[{min=1}]\n",
+        )
+        .unwrap();
+        let schema = profile.json_schema().unwrap();
+        assert_eq!(schema["properties"]["text"]["maxLength"], MAX_TEXT_BYTES);
+        assert_eq!(
+            schema["properties"]["examples"]["maxItems"],
+            MAX_ARRAY_ITEMS
+        );
+        assert_eq!(
+            schema["properties"]["examples"]["items"]["maxLength"],
+            MAX_TEXT_BYTES
+        );
+        assert!(
+            profile
+                .assess(&json!({"text":"ok", "examples": vec!["x"; MAX_ARRAY_ITEMS]}))
+                .is_ok()
+        );
+        assert!(
+            profile
+                .assess(&json!({"text":"ok", "examples": vec!["x"; MAX_ARRAY_ITEMS + 1]}))
+                .is_err()
+        );
+        assert!(
+            profile
+                .assess(&json!({"text":"x".repeat(MAX_TEXT_BYTES + 1), "examples": ["x"]}))
+                .is_err()
+        );
+    }
 
     #[test]
     fn schema_and_validation_share_bounds_and_preserve_order() {
