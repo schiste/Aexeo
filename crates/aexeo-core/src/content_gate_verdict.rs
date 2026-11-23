@@ -1162,6 +1162,7 @@ fn verify_candidate_policy_coverage(
         has_collection,
         has_link_observations,
         None,
+        false,
     )
 }
 
@@ -1172,6 +1173,7 @@ fn verify_candidate_policy_coverage_with_evidence(
     has_collection: bool,
     has_link_observations: bool,
     sources: Option<&ChangeEvidenceInventory>,
+    plain_text_paragraphs: bool,
 ) -> Result<()> {
     preset.validate()?;
     let checks: std::collections::BTreeMap<_, _> = verdict
@@ -1279,6 +1281,37 @@ fn verify_candidate_policy_coverage_with_evidence(
                 && check.status != CheckStatus::NotChecked
             {
                 bail!("candidate evaluator cannot inspect structure in plain text");
+            }
+            let requires_paragraphs = matches!(
+                gate,
+                crate::content_gate::ContentGate::ParagraphCount { .. }
+                    | crate::content_gate::ContentGate::ParagraphLength { .. }
+                    | crate::content_gate::ContentGate::ParagraphCharacterLength { .. }
+                    | crate::content_gate::ContentGate::RepeatedParagraphOpenings { .. }
+                    | crate::content_gate::ContentGate::RepeatedSentenceOpenings { .. }
+                    | crate::content_gate::ContentGate::SentenceOpeningWindow { .. }
+                    | crate::content_gate::ContentGate::SentenceOpeningTerms { .. }
+                    | crate::content_gate::ContentGate::RepeatedPunctuation { .. }
+                    | crate::content_gate::ContentGate::TrailingIngClause { .. }
+                    | crate::content_gate::ContentGate::SimilarSentenceLengths { .. }
+                    | crate::content_gate::ContentGate::SentenceLengthVariance { .. }
+                    | crate::content_gate::ContentGate::InlineTripleCandidates { .. }
+                    | crate::content_gate::ContentGate::DuplicateParagraphs { .. }
+                    | crate::content_gate::ContentGate::SentenceLength {
+                        paragraphs_only: true,
+                        ..
+                    }
+                    | crate::content_gate::ContentGate::SentenceCharacterLength {
+                        paragraphs_only: true,
+                        ..
+                    }
+            );
+            if requires_paragraphs
+                && media_type == Some("text/plain")
+                && !plain_text_paragraphs
+                && check.status != CheckStatus::NotChecked
+            {
+                bail!("candidate evaluator cannot inspect unavailable paragraphs");
             }
             if !has_metadata
                 && matches!(
@@ -1436,6 +1469,7 @@ pub fn verify_draft_passing_candidate_with_content<
         context.decision.collection.is_some(),
         snapshots.is_some(),
         sources,
+        context.decision.plain_text_paragraphs,
     )?;
     if let Some(snapshots) = snapshots {
         verify_candidate_link_destinations(
@@ -3908,7 +3942,8 @@ mod tests {
                             &policy,
                             false,
                             false,
-                            Some(&sources)
+                            Some(&sources),
+                            false,
                         )
                         .is_ok()
                     );
@@ -3971,6 +4006,8 @@ mod tests {
             "kind='unique_collection_metadata'\nfield='slug'\n",
             "kind='list_item_count'\nflagged_counts=[3]\n",
             "kind='heading_hierarchy'\n",
+            "kind='paragraph_count'\nmin=1\n",
+            "kind='sentence_length'\nmax_words=20\nparagraphs_only=true\n",
             "kind='required_metadata'\nfields=['title']\n",
             "kind='metadata_length'\nfield='title'\nmin=1\n",
             "kind='metadata_age'\nfield='date'\nas_of='2026-01-01'\nmax_days=30\n",
@@ -4066,6 +4103,41 @@ mod tests {
                     verify(&forged).is_err(),
                     "forged evidence result must be rejected"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn candidate_policy_coverage_respects_paragraph_mode() {
+        for gate in [
+            "kind='paragraph_count'\nmin=1\n",
+            "kind='sentence_length'\nmax_words=20\nparagraphs_only=true\n",
+            "kind='sentence_character_length'\nmax_chars=80\nparagraphs_only=true\n",
+        ] {
+            let policy = ContentPreset::from_toml(&format!(
+                "version=1\nname='test'\n[[gates]]\nid='words'\n{gate}"
+            ))
+            .unwrap();
+            let mut change = change();
+            let mut verdict = evaluate(&change, 1).unwrap();
+            for status in [
+                CheckStatus::Passed,
+                CheckStatus::Failed,
+                CheckStatus::NotChecked,
+            ] {
+                verdict.checks[0].status = status;
+                for enabled in [false, true] {
+                    for media in ["text/plain", "text/markdown", "text/html"] {
+                        change.entries[0].media_type = media.into();
+                        let result = verify_candidate_policy_coverage_with_evidence(
+                            &verdict, &change, &policy, false, false, None, enabled,
+                        );
+                        assert_eq!(
+                            result.is_ok(),
+                            enabled || media != "text/plain" || status == CheckStatus::NotChecked
+                        );
+                    }
+                }
             }
         }
     }
