@@ -35,6 +35,21 @@ const incompleteProjection = await projectContentAdapter({ ...adapterDocument, b
 assert.equal(incompleteProjection.text, null);
 assert.equal(incompleteProjection.paragraphs, undefined);
 
+const metadataEvents = [];
+const metadataProjection = await projectContentAdapter({
+  ...adapterDocument, body_capabilities: [], title: "Real title", description: "unverified fallback",
+  description_source_observed: false, meta: { author: "Author", ignored: "private" },
+  unavailable_metadata_fields: ["author"], observed_metadata_fields: ["title", "description", "author", "reviewed"],
+}, event => metadataEvents.push(event));
+assert.equal(metadataProjection.text, null);
+assert.deepEqual(metadataProjection.metadata, { title: "Real title" });
+assert.deepEqual(metadataProjection.observed_metadata_fields, ["reviewed", "title"]);
+assert.equal(metadataEvents[0].metadata_values, 1);
+assert.equal(metadataEvents[0].observed_metadata_fields, 2);
+assert(!JSON.stringify(metadataEvents).includes("Real title"));
+assert.deepEqual(adapterProjection.metadata, {});
+assert.deepEqual(adapterProjection.observed_metadata_fields, []);
+
 const telemetryDocument = { route: "/telemetry", title: "Example", body: [] };
 const expectedTelemetryReport = await evaluateContent(telemetryDocument, "article");
 let telemetryCalls = 0;
