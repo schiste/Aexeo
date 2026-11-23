@@ -39,6 +39,33 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## CMS review feedback — 2026-11-19
 
+On 2026-11-23, the 0.9.5 npm archive built from commit `1212d515` was
+installed in isolation with EmDash 1.4.0. Its configured-plugin WASM regression
+suite passed. A read-only copy of the current evidence-room CMS record was
+evaluated with the installed package and an in-memory host: all 18 Portable
+Text blocks remained in order among 20 projected entries. The two unmapped
+components left body capabilities unavailable, so the article gate was
+persisted as `not_checked`; the selected body and rendered-page absence rules
+were not reported. This does not establish the components' rendered content,
+the deployed host configuration, or the correctness of other articles.
+The same installed package and in-memory host also preserved the 12, 14, 18
+and 27 Portable Text blocks in the four other CMS records from the original
+report. Their configured description values matched `seo_description || excerpt`;
+their minimal article gate passed. This is not a rendered-page or comprehensive
+editorial assessment. No CMS content was changed.
+
+The site's current `AskYourAi.astro` renders provider homepage links. A host
+may deliberately exclude this user-interface component from an editorial link
+projection, but an empty mapping does not mean that its rendered HTML has no
+links. Link-scope choices must be validated against the intended checks.
+
+The archive passed 416 package tests and the real-WASM suite. A second build
+from the same commit in a separate worktree produced the same archive SHA-256
+(`d15d56d273ea0028e9d5e00318cc5ed1546a255344244bbc7486dcc361bd9907`).
+Both builds used the same machine and tools; this is a local reproducibility
+check, not independent provenance. At that time npm still served 0.9.3;
+publishing 0.9.5 and host-side validation remain open.
+
 - [x] Preserve open-world CMS metadata coverage through the content gate and sandbox worker; unobserved fields do not produce missing-field findings and an incompatible worker is rejected. Older direct documents keep their prior semantics.
 - [x] Report observed revision input coverage separately for body, description
   mapping and unobserved rendered pages; add an advisory fragment preset and
