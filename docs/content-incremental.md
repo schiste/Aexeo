@@ -242,7 +242,9 @@ and returns only affected internal destinations. A `None` result means no
 observed links remain for that destination. It reuses the same context-aware
 counter as a full recount; source keys are ordered lexically, with evidence in
 its original source order. The baseline is immutable and can be reused for
-independent candidates. Evidence attributed to a different source, empty
+independent candidates. The result includes the number of candidate source
+observations scanned and the total number of candidate sources, without logging
+article contents. Evidence attributed to a different source, empty
 source keys, and removal of an unobserved source are rejected.
 
 This API does not establish that the host supplied every page or link, that

@@ -129,6 +129,16 @@ pub struct IncrementalLinkCounts {
     incoming: BTreeMap<String, BTreeSet<String>>,
 }
 
+/// Destination changes and aggregate work counters for one candidate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncrementalLinkCountsReport {
+    pub destinations: BTreeMap<String, Option<DestinationLinks>>,
+    /// Candidate source observations actually scanned to recount destinations.
+    pub sources_scanned: usize,
+    /// Source observations in the candidate inventory, including empty pages.
+    pub candidate_sources: usize,
+}
+
 impl IncrementalLinkCounts {
     /// Empty evidence is an observed page with no links, not an omitted page.
     pub fn new(sources: BTreeMap<String, Vec<LinkEvidence>>) -> Result<Self, &'static str> {
@@ -154,8 +164,9 @@ impl IncrementalLinkCounts {
     pub fn evaluate(
         &self,
         changes: &BTreeMap<String, Option<Vec<LinkEvidence>>>,
-    ) -> Result<BTreeMap<String, Option<DestinationLinks>>, &'static str> {
+    ) -> Result<IncrementalLinkCountsReport, &'static str> {
         let mut affected = BTreeSet::new();
+        let mut candidate_count = self.sources.len();
         for (source, replacement) in changes {
             if source.is_empty() {
                 return Err("source must not be empty");
@@ -165,6 +176,11 @@ impl IncrementalLinkCounts {
             }
             if let Some(evidence) = replacement {
                 validate_source(source, evidence)?;
+                if !self.sources.contains_key(source) {
+                    candidate_count += 1;
+                }
+            } else {
+                candidate_count -= 1;
             }
             for link in self
                 .sources
@@ -184,14 +200,18 @@ impl IncrementalLinkCounts {
                 candidate_sources.extend(sources.iter().cloned());
             }
         }
-        candidate_sources.extend(changes.keys().cloned());
+        if !affected.is_empty() {
+            candidate_sources.extend(changes.keys().cloned());
+        }
         let mut evidence = Vec::new();
+        let mut sources_scanned = 0;
         for source in candidate_sources {
             let observed = match changes.get(&source) {
                 Some(replacement) => replacement.as_ref(),
                 None => self.sources.get(&source),
             };
             if let Some(observed) = observed {
+                sources_scanned += 1;
                 evidence.extend(observed.iter().filter(|link| {
                     matches!(&link.resolution, LinkResolution::Internal { url } if affected.contains(url))
                 }).cloned());
@@ -201,7 +221,11 @@ impl IncrementalLinkCounts {
         for destination in count_links(evidence).destinations {
             result.insert(destination.destination.clone(), Some(destination));
         }
-        Ok(result)
+        Ok(IncrementalLinkCountsReport {
+            destinations: result,
+            sources_scanned,
+            candidate_sources: candidate_count,
+        })
     }
 }
 
@@ -346,7 +370,8 @@ mod tests {
                 )),
             ),
         ]);
-        let actual = baseline.evaluate(&changes).unwrap();
+        let report = baseline.evaluate(&changes).unwrap();
+        let actual = report.destinations;
         let mut candidate = sources;
         for (source, replacement) in &changes {
             match replacement {
@@ -369,6 +394,8 @@ mod tests {
                 full.destinations.iter().find(|d| d.destination == url)
             );
         }
+        assert_eq!(report.sources_scanned, 3);
+        assert_eq!(report.candidate_sources, 4);
         assert_eq!(actual.len(), 3);
         assert!(actual["https://example.org/one"].is_none());
         assert_eq!(
@@ -379,7 +406,13 @@ mod tests {
             3
         );
         assert!(!actual.contains_key("https://example.org/unrelated-target"));
-        assert!(baseline.evaluate(&BTreeMap::new()).unwrap().is_empty());
+        assert!(
+            baseline
+                .evaluate(&BTreeMap::new())
+                .unwrap()
+                .destinations
+                .is_empty()
+        );
     }
 
     #[test]
@@ -409,14 +442,97 @@ mod tests {
                 .evaluate(&BTreeMap::from([("missing".into(), None)]))
                 .is_err()
         );
+        let empty = baseline
+            .evaluate(&BTreeMap::from([(
+                "https://example.org/empty".into(),
+                Some(Vec::new()),
+            )]))
+            .unwrap();
+        assert!(empty.destinations.is_empty());
+        assert_eq!(empty.sources_scanned, 0);
+        assert_eq!(empty.candidate_sources, 2);
         assert!(
             baseline
                 .evaluate(&BTreeMap::from([(
                     "https://example.org/a".into(),
                     Some(Vec::new())
                 )]))
-                .unwrap()["https://example.org/x"]
+                .unwrap()
+                .destinations["https://example.org/x"]
                 .is_none()
         );
+    }
+
+    #[test]
+    fn incremental_matches_recount_across_source_change_combinations() {
+        let names = [
+            "https://example.org/a",
+            "https://example.org/b",
+            "https://example.org/c",
+        ];
+        let original = |source: &str| {
+            extract_links(
+                "<nav><a href='/one'>one</a></nav><main><a href='/two' rel='nofollow'>two</a></main>",
+                source,
+                "https://example.org",
+                None,
+            )
+        };
+        let replacement = |source: &str| {
+            extract_links(
+                "<main><a href='/two'>two</a><a href='/three'>three</a><a href='#jump'>jump</a></main>",
+                source,
+                "https://example.org",
+                None,
+            )
+        };
+        let sources: BTreeMap<_, _> = names
+            .iter()
+            .map(|source| ((*source).to_string(), original(source)))
+            .collect();
+        let baseline = IncrementalLinkCounts::new(sources.clone()).unwrap();
+        for mask in 0..64 {
+            let mut candidate = sources.clone();
+            let mut changes = BTreeMap::new();
+            for (index, source) in names.iter().enumerate() {
+                let value = match (mask >> (index * 2)) & 3 {
+                    0 => continue,
+                    1 => None,
+                    2 => Some(Vec::new()),
+                    _ => Some(replacement(source)),
+                };
+                match &value {
+                    Some(evidence) => {
+                        candidate.insert((*source).into(), evidence.clone());
+                    }
+                    None => {
+                        candidate.remove(*source);
+                    }
+                }
+                changes.insert((*source).into(), value);
+            }
+            let actual = baseline.evaluate(&changes).unwrap().destinations;
+            let full = count_links(candidate.into_values().flatten().collect());
+            for (url, destination) in &actual {
+                assert_eq!(
+                    destination.as_ref(),
+                    full.destinations
+                        .iter()
+                        .find(|item| &item.destination == url),
+                    "mask {mask}, {url}"
+                );
+            }
+            if mask != 0 {
+                assert!(actual.contains_key("https://example.org/one"));
+                assert!(actual.contains_key("https://example.org/two"));
+            }
+            assert_eq!(
+                actual.contains_key("https://example.org/three"),
+                names
+                    .iter()
+                    .enumerate()
+                    .any(|(index, _)| ((mask >> (index * 2)) & 3) == 3)
+            );
+        }
     }
 }
