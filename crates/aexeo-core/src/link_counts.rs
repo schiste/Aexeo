@@ -1,5 +1,6 @@
 //! Count distinct source pages per link context without inferring orphanhood.
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
@@ -39,12 +40,12 @@ pub struct LinkCounts {
 
 #[derive(Default)]
 struct Accumulator {
-    sources: BTreeSet<String>,
-    conditional: BTreeSet<String>,
-    nonconditional: BTreeSet<String>,
-    contexts: BTreeMap<LinkContext, BTreeSet<String>>,
-    followed: BTreeSet<String>,
-    rel: BTreeMap<String, BTreeSet<String>>,
+    sources: BTreeSet<Rc<str>>,
+    conditional: BTreeSet<Rc<str>>,
+    nonconditional: BTreeSet<Rc<str>>,
+    contexts: BTreeMap<LinkContext, BTreeSet<Rc<str>>>,
+    followed: BTreeSet<Rc<str>>,
+    rel: BTreeMap<String, BTreeSet<Rc<str>>>,
     evidence: Vec<LinkEvidence>,
 }
 
@@ -53,6 +54,10 @@ struct Accumulator {
 /// Absence from this report is not evidence that a page is an orphan.
 pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
     let mut destinations = BTreeMap::<String, Accumulator>::new();
+    // Each observed source can occur in many destinations and count sets.
+    // Share its allocation while retaining the original evidence unchanged.
+    let mut source_pool = BTreeSet::<Rc<str>>::new();
+    let mut last_source: Option<Rc<str>> = None;
     let mut same_document = Vec::new();
     let mut external = Vec::new();
     let mut unsupported = Vec::new();
@@ -60,27 +65,39 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
     for link in evidence {
         match &link.resolution {
             LinkResolution::Internal { url } => {
+                if last_source.as_deref() != Some(link.source.as_str()) {
+                    let source = match source_pool.get(link.source.as_str()) {
+                        Some(source) => Rc::clone(source),
+                        None => {
+                            let source: Rc<str> = Rc::from(link.source.as_str());
+                            source_pool.insert(Rc::clone(&source));
+                            source
+                        }
+                    };
+                    last_source = Some(source);
+                }
+                let source = last_source.as_ref().expect("source initialized above");
                 let destination = destinations.entry(url.clone()).or_default();
-                destination.sources.insert(link.source.clone());
+                destination.sources.insert(Rc::clone(source));
                 if link.is_nonconditional() {
-                    destination.nonconditional.insert(link.source.clone());
+                    destination.nonconditional.insert(Rc::clone(source));
                 } else {
-                    destination.conditional.insert(link.source.clone());
+                    destination.conditional.insert(Rc::clone(source));
                 }
                 destination
                     .contexts
                     .entry(link.context)
                     .or_default()
-                    .insert(link.source.clone());
+                    .insert(Rc::clone(source));
                 if link.rel.is_empty() {
-                    destination.followed.insert(link.source.clone());
+                    destination.followed.insert(Rc::clone(source));
                 }
                 for token in &link.rel {
                     destination
                         .rel
                         .entry(token.clone())
                         .or_default()
-                        .insert(link.source.clone());
+                        .insert(Rc::clone(source));
                 }
                 destination.evidence.push(link);
             }
@@ -296,6 +313,35 @@ mod tests {
                 .contains_key(&LinkContext::Footer)
         );
         assert_eq!(target.evidence.len(), 3);
+    }
+
+    #[test]
+    fn repeated_sources_keep_distinct_counts_across_rel_and_contexts() {
+        let mut links = extract_links(
+            "<nav><a href='/target' rel='nofollow'>menu</a></nav><main><a href='/target'>one</a><a href='/target' rel='nofollow ugc'>two</a><a href='/other'>other</a></main>",
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        );
+        links.extend(extract_links(
+            "<main><a href='/target' rel='ugc'>three</a></main>",
+            "https://example.org/second",
+            "https://example.org",
+            None,
+        ));
+        let result = count_links(links);
+        let target = result
+            .destinations
+            .iter()
+            .find(|d| d.destination.ends_with("/target"))
+            .unwrap();
+        assert_eq!(target.distinct_source_pages, 2);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Body], 2);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Navigation], 1);
+        assert_eq!(target.followed_source_pages, 1);
+        assert_eq!(target.source_pages_by_rel["nofollow"], 1);
+        assert_eq!(target.source_pages_by_rel["ugc"], 2);
+        assert_eq!(target.evidence.len(), 4);
     }
 
     #[test]

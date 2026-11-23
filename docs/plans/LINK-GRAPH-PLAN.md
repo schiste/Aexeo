@@ -467,6 +467,23 @@ identity. This comparison is not a complete BCP 47 validator.
   findings, persisted evidence and aggregate telemetry. This does not attest a
   deployment or complete crawl; real site and inventory validation remains open.
 
+- On 2026-11-23, the standalone static graph was exercised against the archived
+  Aeptus Preview candidate `67acfb31-b5a2-402f-bca7-c9b3947323f7` (source
+  `5f77df787b3d`, archive SHA-256
+  `a71adf85c69daaeca9f74bdcdcd9265a07c4fecd69d838764c421f02d5f1c289`).
+  The archive digest matched its manifest. A caller-generated path-to-URL map
+  supplied the assumed origin and mapped all 1,501 HTML files: the graph
+  reported 128,223 link observations, no missing or unused mappings, and
+  `inventory_missing` and `crawl_incomplete`. No CMS inventory, HTTP response,
+  deployment or freshness was verified by this offline exercise.
+  On this Mac, release builds before and after sharing source URLs in the
+  counters produced byte-identical compact JSON (69,191,184 bytes). Peak RSS
+  was about 847 MiB before and 822 MiB after in individual runs. Observed wall
+  times varied between 13.7 and 19.5 seconds; this is not a controlled speed
+  benchmark or a claim of a speed improvement. The report and map contain
+  content and remain in session scratch, while the optional telemetry is
+  aggregate-only.
+
 - Saved graph reports bind to the serialized audit they qualify. `report render`
   withholds qualifications for unbound or mismatched reports; the binding detects
   accidental mixups but is not authentication or proof of graph integrity.
