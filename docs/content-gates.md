@@ -114,8 +114,10 @@ links and does not validate URLs.
 Compose it with another preset using `extends`, and enable it only where the
 host renders Portable Text as rich text rather than interpreting Markdown.
 
-The same gate can review explicitly selected static HTML in `content` and
-`content-change`. It inspects projected prose outside HTML links, code,
+The same gate can review explicitly selected static HTML in `content`,
+`content-change`, and adapted incremental evaluation. An incremental baseline or
+candidate with a format or structure that cannot provide this observation remains
+`not_checked`; unchanged source is reused only under the existing input binding. It inspects projected prose outside HTML links, code,
 preformatted text and image alternative text; static parsing cannot establish
 actual browser visibility or rendering. Source positions and a complete review
 are supplied only for the conservative, validated HTML source-mapping subset;

@@ -211,6 +211,7 @@ fn validate_preset(
             && matches!(
                 gate,
                 ContentGate::ProseSentenceLengthVariance { .. }
+                    | ContentGate::LiteralMarkdownLinks { .. }
                     | ContentGate::ListItemCount { .. }
                     | ContentGate::LinkCount { .. }
                     | ContentGate::LinkDestinations { .. }
@@ -306,13 +307,17 @@ fn evaluate_item(
             (adapted.input, Some(adapted.context), count)
         }
         (ProjectionMode::Adapted(html_scope), "text/html") => {
+            let project = if preset
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::LiteralMarkdownLinks { .. }))
+            {
+                crate::html_content_adapter::html_content_with_literal_markdown_projection
+            } else {
+                crate::html_content_adapter::html_content_with_literal_projection
+            };
             let (adapted, levels, lists, literal_text) =
-                crate::html_content_adapter::html_content_with_literal_projection(
-                    &item.entity_id,
-                    &item.source,
-                    html_scope,
-                )
-                .map_err(unavailable)?;
+                project(&item.entity_id, &item.source, html_scope).map_err(unavailable)?;
             if preset
                 .gates
                 .iter()
@@ -3948,6 +3953,87 @@ mod tests {
                 snapshot,
                 preset,
                 HtmlContentScope::Main,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn literal_html_links_incremental_matches_full_and_withholds_unknown_inputs() {
+        use crate::html_content_adapter::{
+            HtmlContentScope, html_content_with_literal_markdown_projection,
+        };
+        let (mut snapshot, _, mut change) = fixture();
+        for item in &mut snapshot.items {
+            item.media_type = "text/html".into();
+            item.source =
+                "<main><p>Read [source](/guide).</p><code>[sample](/code)</code></main>".into();
+            item.sha256 = format!("{:x}", Sha256::digest(item.source.as_bytes()));
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n").unwrap();
+        let baseline = IncrementalBaseline::prepare_adapted_with_html_scope(
+            snapshot.clone(),
+            preset.clone(),
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        let mut next = snapshot.items[0].clone();
+        next.source =
+            "<main><p>Read <strong>[new]</strong>(/guide).</p><a href='/ok'>[real](/ok)</a></main>"
+                .into();
+        next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        );
+        update.media_type = next.media_type.clone();
+        change.entries.push(update);
+        let (adapted, _, _, _) = html_content_with_literal_markdown_projection(
+            &next.entity_id,
+            &next.source,
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        let expected = preset
+            .evaluate_with_context(&adapted.input, None, None, Some(&adapted.context))
+            .unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("expected evaluated")
+        };
+        assert_eq!(
+            serde_json::to_value(&reports["a"]).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(reports["a"].gates[0].findings.len(), 1);
+        assert_eq!(evaluated, 1);
+        assert_eq!(reused, snapshot.items.len() - 1);
+        for source in ["<main><p><b>[source](/x)</p></b></main>", "<p>No main</p>"] {
+            next.source = source.into();
+            next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+            change.entries[0].after = Some(state(&next));
+            assert!(
+                matches!(
+                    baseline.evaluate(&change, std::slice::from_ref(&next)),
+                    IncrementalEvaluation::NotChecked { .. }
+                ),
+                "{source}"
+            );
+        }
+        let mut unknown = snapshot;
+        unknown.items[0].media_type = "text/markdown".into();
+        assert!(
+            IncrementalBaseline::prepare_adapted_with_html_scope(
+                unknown,
+                preset,
+                HtmlContentScope::Main
             )
             .is_err()
         );

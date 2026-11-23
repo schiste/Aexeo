@@ -502,8 +502,10 @@ registry before considering the release delivered.
   single-content and change evaluators, with conservative source positions and
   aggregate opt-in telemetry ([#864](https://github.com/schiste/Aexeo/pull/864)).
   Code examples, native links and image alternative text are excluded; ambiguous
-  source mappings remain `not_checked`. This does not verify browser visibility,
-  link destinations or correctness of rendered output.
+  source mappings remain `not_checked`. Adapted incremental evaluation uses
+  the same observation and matches full evaluation, withholding unknown formats
+  and structures. This does not verify browser visibility, link destinations or
+  correctness of rendered output.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
   The single-content CLI accepts source- and destination-bound host link
