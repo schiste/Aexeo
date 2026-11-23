@@ -1284,6 +1284,7 @@ fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
             "--link-graph-url-map",
             map.to_str().unwrap(),
             "--link-graph-compact",
+            "--link-graph-telemetry",
         ])
         .output()
         .unwrap();
@@ -1292,6 +1293,8 @@ fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
         serde_json::from_slice(&compact_bytes).unwrap();
     assert_eq!(compact_bytes, serde_json::to_vec(&compact_report).unwrap());
     assert!(compact_bytes.len() < serde_json::to_vec_pretty(&compact_report).unwrap().len());
+    let compact_telemetry: serde_json::Value = serde_json::from_slice(&direct.stderr).unwrap();
+    assert_eq!(compact_telemetry["output_compact"], true);
     let direct_text = String::from_utf8_lossy(&direct.stdout);
     assert!(
         direct_text.contains("not verifiable: crawl incomplete"),
@@ -1318,6 +1321,7 @@ fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
     assert!(!text.contains("confirmed orphan"), "{text}");
     let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(telemetry["audit_bound"], true);
+    assert_eq!(telemetry["output_compact"], false);
     assert_eq!(telemetry["static_mapping_missing_count"], 1);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("unmapped.html"));
     let missing = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))

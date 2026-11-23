@@ -70,7 +70,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
         report.audit_sha256 = None;
     }
     if matches.get_flag("telemetry") {
-        emit_link_graph_telemetry(&report, started);
+        emit_link_graph_telemetry(&report, started, matches.get_flag("compact"));
     }
     let stdout = io::stdout();
     let writer = io::BufWriter::new(stdout.lock());
@@ -133,7 +133,7 @@ pub(super) fn link_graph_summary(graph: &LinkReport) -> serde_json::Value {
     })
 }
 
-pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
+pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, compact: bool) {
     let observed = report
         .links
         .destinations
@@ -186,6 +186,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "event": "link_graph_analysis",
         "version": 1,
         "audit_bound": report.audit_sha256.is_some(),
+        "output_compact": compact,
         "elapsed_us": started.elapsed().as_micros(),
         "page_count": report.pages.len(),
         "link_count": observed,

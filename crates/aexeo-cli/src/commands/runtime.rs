@@ -509,7 +509,11 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         )
         .with_context(|| format!("cannot write link graph report: {path}"))?;
         if submatches.get_flag("link-graph-telemetry") {
-            super::link_graph::emit_link_graph_telemetry(&graph, started);
+            super::link_graph::emit_link_graph_telemetry(
+                &graph,
+                started,
+                submatches.get_flag("link-graph-compact"),
+            );
         }
     }
     let audit_path = write_audit_artifact(

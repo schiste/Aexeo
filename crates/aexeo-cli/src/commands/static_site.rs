@@ -155,7 +155,11 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         )
         .map_err(|error| anyhow::anyhow!("cannot write link graph report {path}: {error}"))?;
         if submatches.get_flag("link-graph-telemetry") {
-            super::link_graph::emit_link_graph_telemetry(&graph, started);
+            super::link_graph::emit_link_graph_telemetry(
+                &graph,
+                started,
+                submatches.get_flag("link-graph-compact"),
+            );
         }
         graph_summary = Some(super::link_graph::link_graph_summary(&graph));
         link_notes = Some(aexeo_core::link_notes::LinkFindingNotes::from_report(
