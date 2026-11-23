@@ -16,6 +16,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run Aethyme Explore on the user task before broad manual search.
 - Verify answer candidates before concluding when trust_policy is not answer-safe.
 - Identify the nearest fast test or validation command before editing.
+- For GitHub Actions, check the conclusion of the exact run, job and step
+  before reporting a failure: an error annotation can come from an informative
+  check while the job succeeds. Preserve and investigate the annotation rather
+  than treating a green job as proof that the underlying issue is fixed.
 - For direct shell commands, use the session scratch path printed by `broker
   start` explicitly as an absolute path, including in `CARGO_TARGET_DIR` and
   `TMPDIR`. Relative paths can resolve from a package or script working directory
