@@ -1100,3 +1100,50 @@ fn editorial_pacing_incremental_requires_current_composition() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(lines(&output)[0]["result"]["status"], "not_checked");
 }
+
+#[test]
+fn adapted_html_literal_link_review_reports_and_reuses_without_exposing_content() {
+    let mut input = batch();
+    input["mode"] = json!("adapted_main");
+    input["preset"] = json!("review");
+    input["preset_sources"] = json!({"review":"version=1\nname='review'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\n"});
+    let base = "<main><p>Clear.</p></main>";
+    let proposal = "<main><p>See [private](/guide).</p></main>";
+    let base_hash = "98ed9b1d73b0ba596c943643e91e5c8876496e5c1b30a3ae6f4d1595c54a9cc7";
+    let proposal_hash = "6848dab0de08748007ec357ab935e00435ef97e98f70cbeceb7961fe5a4647d0";
+    let item = &mut input["snapshot"]["items"][0];
+    item["media_type"] = json!("text/html");
+    item["source"] = json!(base);
+    item["sha256"] = json!(base_hash);
+    for entry in input["proposals"].as_array_mut().unwrap() {
+        entry["change"]["entries"][0]["media_type"] = json!("text/html");
+        entry["change"]["entries"][0]["after"] = json!({"inline":proposal,"sha256":proposal_hash});
+        entry["after"][0]["media_type"] = json!("text/html");
+        entry["after"][0]["source"] = json!(proposal);
+        entry["after"][0]["sha256"] = json!(proposal_hash);
+    }
+    let output = run(&input, &["--telemetry"]);
+    let results = lines(&output);
+    assert_eq!(results.len(), 2);
+    for result in results {
+        assert_eq!(result["result"]["status"], "evaluated");
+        assert_eq!(result["result"]["reused"], 1);
+        assert_eq!(
+            result["result"]["reports"]["a"]["gates"][0]["findings"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            result["result"]["reports"]["b"]["gates"][0]["status"],
+            "passed"
+        );
+    }
+    let telemetry = String::from_utf8_lossy(&output.stderr);
+    assert!(!telemetry.contains("private"));
+    assert_eq!(
+        serde_json::from_str::<Value>(&telemetry).unwrap()["reused"],
+        2
+    );
+}
