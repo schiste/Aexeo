@@ -379,6 +379,33 @@ identity. This comparison is not a complete BCP 47 validator.
   inspection. This describes the archived HTML only: it neither rules out
   server redirects nor establishes what a later build serves. The real-site
   and inventory comparison remain open.
+  On 2026-11-23, another read-only comparison used the Preview CMS candidate
+  `67acfb31-b5a2-402f-bca7-c9b3947323f7` and its existing
+  [build artifact](https://github.com/Aeptus/website-and-content/actions/runs/45167245243),
+  source commit `5f77df787b3db692a6e97f809eaaca2da8c8c652`. The archive and
+  release-inputs digests match its candidate metadata, and the archive digest
+  matches CMS candidate status. The artifact manifest and CMS frozen candidate
+  contain the same 503 distinct collection/ID pairs and agree on inclusion,
+  native status, update time, content version, revision ID and version. Of its
+  472 included entries, 471 match the current separate CMS listing by version
+  and revision; one differs and is not currently included. These non-atomic
+  observations do not establish a complete inventory, freshness or deployed
+  surface equivalence. Eight English glossary category HTML files contain a
+  robots `noindex` tag and no canonical, hreflang, meta refresh or obvious
+  direct location assignment under simple textual checks; the archive's
+  `_redirects` file contains no glossary category rule. This does not exclude
+  server redirects, other script behavior or alternate metadata syntax, and
+  does not establish current HTTP behavior or confirm orphan findings. An
+  unauthenticated HEAD request to one category on 2026-11-23 returned a 302 to
+  Cloudflare Access; this response does not reveal the underlying route status.
+  A static graph run on the 1,501 archived HTML files, with caller-inferred
+  public URLs, mapped every file and observed 128,223 links; aggregate telemetry
+  reported 75,340 conditional links and 163.86 seconds on a local debug build.
+  This single debug run is not a performance benchmark. The 105.9 MB report
+  declared the crawl incomplete, no inventory reconciliation, and missing HTTP
+  response status, headers, snapshot date and surface identity; it cannot confirm
+  any orphan. The candidate also includes a selected draft, and this local
+  analysis does not attest deployment or actual routes.
 - [x] Mark links with `hidden` on themselves or an ancestor as conditional
   observations, including redirect credit; expose evidence and aggregate opt-in
   telemetry. HTML alone does not establish CSS or script visibility.
