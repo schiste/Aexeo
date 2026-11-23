@@ -479,7 +479,9 @@ identity. This comparison is not a complete BCP 47 validator.
   included one selected draft, so it is not an inventory of published pages.
   On this Mac, release builds before and after sharing source URLs in the
   counters produced byte-identical compact JSON (69,191,184 bytes). Peak RSS
-  was about 847 MiB before and 822 MiB after in individual runs. Observed wall
+  was about 847 MiB before and 822 MiB after in individual runs; the final
+  panic-free cache variant also produced identical output at about 760 MiB.
+  Observed wall
   times varied between 13.7 and 19.5 seconds; this is not a controlled speed
   benchmark or a claim of a speed improvement. The report and map contain
   content and remain in session scratch, while the optional telemetry is
