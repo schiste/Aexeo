@@ -271,7 +271,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, c
 #[cfg(test)]
 mod output_tests {
     use super::write_graph_json;
-    use std::io::{self, Read, Write};
+    use std::io::{self, Write};
 
     #[test]
     fn streamed_output_matches_existing_json_and_compact_json() {
