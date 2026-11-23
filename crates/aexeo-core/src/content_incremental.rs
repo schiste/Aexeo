@@ -955,6 +955,7 @@ pub struct CollectionBaseline {
     snapshot: ValidatedCandidateSnapshot,
     metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
     preset: ContentPreset,
+    fields: BTreeSet<String>,
 }
 
 /// A host-projected candidate collection that can be borrowed by the existing
@@ -1020,20 +1021,29 @@ impl CollectionBaseline {
         preset
             .validate()
             .map_err(|_| unavailable("invalid content preset"))?;
-        if preset.gates.is_empty()
-            || preset
-                .gates
-                .iter()
-                .any(|gate| !matches!(gate, ContentGate::UniqueCollectionMetadata { .. }))
-        {
+        if preset.gates.is_empty() {
             return Err(unavailable(
                 "preset contains gates outside collection metadata scope",
             ));
+        }
+        let mut fields = BTreeSet::new();
+        for gate in &preset.gates {
+            let ContentGate::UniqueCollectionMetadata {
+                field, group_by, ..
+            } = gate
+            else {
+                return Err(unavailable(
+                    "preset contains gates outside collection metadata scope",
+                ));
+            };
+            fields.insert(field.clone());
+            fields.extend(group_by.iter().cloned());
         }
         Ok(Self {
             snapshot,
             metadata,
             preset,
+            fields,
         })
     }
 
@@ -1133,7 +1143,7 @@ impl CollectionBaseline {
         &self,
         change: &Change,
         overlay: &CandidateOverlay,
-        fields: Option<&BTreeSet<&str>>,
+        fields: Option<&BTreeSet<String>>,
     ) -> Result<ProjectedCandidateCollection, NotChecked> {
         // Borrow the owned baseline and change projections until the final
         // collection is assembled; cloning the entire baseline here would
@@ -1180,8 +1190,8 @@ impl CollectionBaseline {
                             .iter()
                             .filter_map(|field| {
                                 metadata
-                                    .get(*field)
-                                    .map(|value| ((*field).to_owned(), value.clone()))
+                                    .get(field)
+                                    .map(|value| (field.clone(), value.clone()))
                             })
                             .collect(),
                     }),
@@ -1207,19 +1217,7 @@ impl CollectionBaseline {
         change: &Change,
         overlay: &CandidateOverlay,
     ) -> Result<ContentReport, NotChecked> {
-        let fields: BTreeSet<&str> = self
-            .preset
-            .gates
-            .iter()
-            .flat_map(|gate| match gate {
-                ContentGate::UniqueCollectionMetadata {
-                    field, group_by, ..
-                } => [Some(field.as_str()), group_by.as_deref()],
-                _ => unreachable!("collection preset was validated at preparation"),
-            })
-            .flatten()
-            .collect();
-        let projected = self.project_overlay_fields(change, overlay, Some(&fields))?;
+        let projected = self.project_overlay_fields(change, overlay, Some(&self.fields))?;
         let input = ContentInput {
             id: self.snapshot.scope.clone(),
             ..Default::default()
