@@ -778,6 +778,8 @@ registry before considering the release delivered.
   ([PR #705](https://github.com/schiste/Aexeo/pull/705)). Hidden or malformed
   structures remain unmapped; this does not validate browser rendering or
   translation quality.
+  Block elements nested inside bidirectional inline elements also leave source
+  positions unmapped, consistent with the other supported inline elements.
   Conservatively map explicitly nested HTML `aside` and `address` containers;
   hidden and malformed structures remain unmapped. This is static source
   mapping, not a browser visibility guarantee.
