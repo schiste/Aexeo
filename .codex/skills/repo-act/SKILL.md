@@ -125,6 +125,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `packages/aexeo-emdash`, run `npm run build:wasm && npm run build:ts &&
   npm run build:bundle && npm run test:wasm`. TypeScript alone does not create
   `dist/content.js`, which the WASM tests import.
+  When changing bridge exports, also synchronize the worker's shared WASM
+  declaration and run `npm run check:dts --prefix packages/aexeo-crawl-worker`;
+  the plugin build alone does not check the worker copy. Rebuild the worker WASM
+  and run its workerd tests when the bridge interface changes.
   The build bundles private modules into public entry points instead of emitting
   every internal JavaScript file. Exercise integration tests through a shipped
   entry point such as `dist/configured.js`, not a private `dist/*.js` path.
