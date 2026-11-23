@@ -1,7 +1,39 @@
 // Run after the plugin build: this exercises the real WASM, not the mock bridge.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { evaluateContent, evaluateContentCollection, projectContentInput, projectLinkDestinations } from "../dist/content.js";
+import { evaluateContent, evaluateContentCollection, adaptContentItem, projectContentAdapter, projectContentInput, projectLinkDestinations } from "../dist/content.js";
+
+const adapterDocument = { route: "/article", title: "Article", body: [{
+  children: [{ _type: "span", text: "One." }, { _type: "span", text: "[12]", marks: ["ref"] }, { _type: "span", text: " Two." }],
+  markDefs: [{ _key: "ref", _type: "link", href: "#cite_note-source-12" }],
+}] };
+const projectionEvents = [];
+const adapterProjection = await projectContentAdapter(adapterDocument, event => projectionEvents.push(event));
+assert.equal(projectionEvents.length, 1);
+assert.equal(projectionEvents[0].text_observed, true);
+assert.equal(projectionEvents[0].literal_projection_supplied, true);
+assert(!JSON.stringify(projectionEvents).includes("cite_note"));
+assert.deepEqual(await projectContentAdapter(adapterDocument, () => { throw new Error("telemetry failed"); }), adapterProjection);
+assert.equal(adapterProjection.text, "One.     Two.");
+assert.equal(adapterProjection.literal_text, "One.[12] Two.");
+assert.deepEqual(adapterProjection.link_destinations, ["#cite_note-source-12"]);
+assert.equal(adapterProjection.paragraphs[0].end, 13);
+// Exercise the shipped entry point from a CMS row, retaining prose around unknown components.
+const cmsRow = { id: "sample", type: "articles", slug: "sample", status: "published", locale: "en", data: {
+  content: [{ _type: "block", ...adapterDocument.body[0] }, { _type: "unknownWidget", message: "opaque" }, { _type: "block", ...adapterDocument.body[0] }],
+} };
+const adapted = adaptContentItem(cmsRow, { contentFields: ["content"] });
+assert.equal(adapted.document.body.length, 3);
+assert.equal(adapted.document.body[0].children[0].text, "One.");
+assert.equal(adapted.document.body[2].children[0].text, "One.");
+assert.equal(adapted.meta.unmappedComponents.entries[0].type, "unknownWidget");
+assert.equal((await projectContentAdapter(adapted.document)).text, null);
+const mapped = adaptContentItem(cmsRow, { contentFields: ["content"], blockMappings: { unknownWidget: [] } });
+assert.equal((await projectContentAdapter(mapped.document)).text, "One.     Two.\nOne.     Two.");
+
+const incompleteProjection = await projectContentAdapter({ ...adapterDocument, body_capabilities: [] });
+assert.equal(incompleteProjection.text, null);
+assert.equal(incompleteProjection.paragraphs, undefined);
 
 const telemetryDocument = { route: "/telemetry", title: "Example", body: [] };
 const expectedTelemetryReport = await evaluateContent(telemetryDocument, "article");

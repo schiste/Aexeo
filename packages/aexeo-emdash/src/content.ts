@@ -1,7 +1,11 @@
 import { addProseVarianceMeasurements, emitTelemetry, listReviewMeasurements } from "./telemetry.js";
 import type { ListReviewTelemetry } from "./telemetry.js";
-import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
+import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectContentAdapter as projectContentAdapterWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
+
+/** Adapt an EmDash row using explicit host field and component mappings. */
+export { adaptContentItem } from "./adapter.js";
+export type { AdaptContentOptions, AdaptedContent, EmdashContentItem, CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
 
 export interface ContentGateResult {
   gate_id: string;
@@ -79,6 +83,49 @@ export interface ExternalGateResult {
 /** Project the same input the evaluator will give a trusted extension. */
 export async function projectContentInput(document: EmdashDocument, evidenceSources?: Record<string, string>): Promise<ExtensionInput> {
   return JSON.parse(await projectContentInputWasm(JSON.stringify(document), evidenceSources === undefined ? undefined : JSON.stringify(evidenceSources))) as ExtensionInput;
+}
+
+/** Body observations for the CLI's adapter-json format; contains content and URLs. */
+export interface ContentAdapterProjection {
+  schema: "aexeo.content-adapter/v1";
+  text: string | null;
+  literal_text?: string;
+  headings?: string[];
+  heading_levels?: number[];
+  paragraphs?: Array<{ start: number; end: number; list_item?: boolean }>;
+  block_ends?: number[];
+  lists?: Array<{ item_count: number; depth: number }>;
+  link_destinations?: string[];
+}
+
+/** Aggregate projection coverage; never includes content, URLs or document identity. */
+export interface ContentAdapterProjectionTelemetry {
+  projection_ms: number;
+  text_observed: boolean;
+  headings_observed: boolean;
+  paragraphs_observed: boolean;
+  lists_observed: boolean;
+  links_observed: boolean;
+  literal_projection_supplied: boolean;
+}
+
+/** Export observed body capabilities; metadata and native source coordinates are not included. */
+export async function projectContentAdapter(
+  document: EmdashDocument,
+  onTelemetry?: (event: ContentAdapterProjectionTelemetry) => void,
+): Promise<ContentAdapterProjection> {
+  const started = onTelemetry ? performance.now() : 0;
+  const projection = JSON.parse(await projectContentAdapterWasm(JSON.stringify(document))) as ContentAdapterProjection;
+  if (onTelemetry) emitTelemetry(onTelemetry, {
+    projection_ms: performance.now() - started,
+    text_observed: projection.text !== null,
+    headings_observed: projection.headings !== undefined,
+    paragraphs_observed: projection.paragraphs !== undefined,
+    lists_observed: projection.lists !== undefined,
+    links_observed: projection.link_destinations !== undefined,
+    literal_projection_supplied: projection.literal_text !== undefined,
+  });
+  return projection;
 }
 
 /** Snapshot and link occurrences in adapter order. This may contain private content and URLs. */

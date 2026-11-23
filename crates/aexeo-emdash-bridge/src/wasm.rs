@@ -343,6 +343,17 @@ pub fn project_content_input_js(
         .map_err(|error| JsError::new(&format!("failed to serialize input: {error}")))
 }
 
+/// Export observed body capabilities as an adapter-json projection.
+#[wasm_bindgen(js_name = "projectContentAdapter")]
+pub fn project_content_adapter_js(document_json: &str) -> Result<String, JsError> {
+    let (document, capabilities, lists_complete) = parse_content_document(document_json)?;
+    let projection =
+        crate::content::content_adapter_projection(&document, capabilities, lists_complete)
+            .map_err(|error| JsError::new(&format!("failed to project content: {error:#}")))?;
+    serde_json::to_string(&projection)
+        .map_err(|error| JsError::new(&format!("failed to serialize projection: {error}")))
+}
+
 /// Project the exact snapshot and ordered link occurrences for an external observer.
 /// Returns JSON null when the adapter cannot supply complete link destinations.
 #[wasm_bindgen(js_name = "projectLinkDestinations")]

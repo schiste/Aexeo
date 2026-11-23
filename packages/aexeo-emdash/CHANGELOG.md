@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Expose the CMS row adapter and export bounded body observations for CLI content and revision workflows. Numeric citations retain separate rhythm and literal views, unavailable capabilities stay unassessed, and optional aggregate telemetry excludes content and identifiers. Hosts remain responsible for mappings and revision identity.
+
 ## [0.9.5]
 
 - Preserve sentence boundaries and source positions for decimal numbers written with Arabic-Indic and Persian digits, including across Portable Text spans. This does not establish general Arabic segmentation or translation quality.
