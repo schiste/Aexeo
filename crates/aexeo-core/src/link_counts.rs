@@ -65,7 +65,12 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
     for link in evidence {
         match &link.resolution {
             LinkResolution::Internal { url } => {
-                if last_source.as_deref() != Some(link.source.as_str()) {
+                let source = if let Some(source) = last_source
+                    .as_ref()
+                    .filter(|source| source.as_ref() == link.source.as_str())
+                {
+                    Rc::clone(source)
+                } else {
                     let source = match source_pool.get(link.source.as_str()) {
                         Some(source) => Rc::clone(source),
                         None => {
@@ -74,30 +79,30 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
                             source
                         }
                     };
-                    last_source = Some(source);
-                }
-                let source = last_source.as_ref().expect("source initialized above");
+                    last_source = Some(Rc::clone(&source));
+                    source
+                };
                 let destination = destinations.entry(url.clone()).or_default();
-                destination.sources.insert(Rc::clone(source));
+                destination.sources.insert(Rc::clone(&source));
                 if link.is_nonconditional() {
-                    destination.nonconditional.insert(Rc::clone(source));
+                    destination.nonconditional.insert(Rc::clone(&source));
                 } else {
-                    destination.conditional.insert(Rc::clone(source));
+                    destination.conditional.insert(Rc::clone(&source));
                 }
                 destination
                     .contexts
                     .entry(link.context)
                     .or_default()
-                    .insert(Rc::clone(source));
+                    .insert(Rc::clone(&source));
                 if link.rel.is_empty() {
-                    destination.followed.insert(Rc::clone(source));
+                    destination.followed.insert(Rc::clone(&source));
                 }
                 for token in &link.rel {
                     destination
                         .rel
                         .entry(token.clone())
                         .or_default()
-                        .insert(Rc::clone(source));
+                        .insert(Rc::clone(&source));
                 }
                 destination.evidence.push(link);
             }
