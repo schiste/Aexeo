@@ -1077,5 +1077,5 @@ missing fields retain observed prose but make body capabilities unavailable.
   gains a field, so downstream exhaustive struct literals require an update.
 - [ ] Verify the resulting published package and host configuration separately;
   this projection does not establish rendered metadata, source freshness or
-  publication authorization. Native Portable Text source coordinates remain
-  outside this adapter projection.
+  publication authorization. Native Portable Text paths are host-supplied,
+  revision-bound observations; absent or unverifiable paths stay unmapped.
