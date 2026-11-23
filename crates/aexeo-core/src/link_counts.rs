@@ -329,6 +329,13 @@ mod tests {
             "https://example.org",
             None,
         ));
+        // Sources can recur after another source, not only in page order.
+        links.extend(extract_links(
+            "<main><a href='/target' rel='nofollow'>four</a></main>",
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        ));
         let result = count_links(links);
         let target = result
             .destinations
@@ -341,7 +348,7 @@ mod tests {
         assert_eq!(target.followed_source_pages, 1);
         assert_eq!(target.source_pages_by_rel["nofollow"], 1);
         assert_eq!(target.source_pages_by_rel["ugc"], 2);
-        assert_eq!(target.evidence.len(), 4);
+        assert_eq!(target.evidence.len(), 5);
     }
 
     #[test]

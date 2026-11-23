@@ -475,7 +475,8 @@ identity. This comparison is not a complete BCP 47 validator.
   supplied the assumed origin and mapped all 1,501 HTML files: the graph
   reported 128,223 link observations, no missing or unused mappings, and
   `inventory_missing` and `crawl_incomplete`. No CMS inventory, HTTP response,
-  deployment or freshness was verified by this offline exercise.
+  deployment or freshness was verified by this offline exercise. The candidate
+  included one selected draft, so it is not an inventory of published pages.
   On this Mac, release builds before and after sharing source URLs in the
   counters produced byte-identical compact JSON (69,191,184 bytes). Peak RSS
   was about 847 MiB before and 822 MiB after in individual runs. Observed wall
