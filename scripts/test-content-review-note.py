@@ -234,12 +234,26 @@ class FeedbackTests(unittest.TestCase):
         exported = module.export_review(self.corpus, note)
         self.assertEqual(exported["events"][0]["reviewer_status"], "passed")
         self.assertEqual(exported["events"][0]["report_binding"], "unverified")
+        self.assertEqual(exported["events"][0]["report_binding_scope"], "none")
         self.assertNotIn("private justification", json.dumps(exported))
 
     def test_report_fingerprint_rejects_stale_inputs_and_marks_legacy(self):
         self.assertEqual(module.capture(self.text, self.report, "length", "e1")["report_binding"], "unverified")
         self.report["input_fingerprint"] = {"version": 1, "text_sha256": hashlib.sha256(self.text.encode()).hexdigest(), "metadata_sha256": None}
         self.assertEqual(module.capture(self.text, self.report, "length", "e1")["report_binding"], "verified")
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "reviewer", "manual")
+        self.assertEqual(note["report_binding_scope"], "text_and_metadata")
+        event = module.export_review(self.corpus, note)["events"][0]
+        self.assertEqual(event["report_binding_scope"], "text_and_metadata")
+        bound = module.bind_review(self.corpus, note)
+        self.assertEqual(bound["examples"][0]["review"]["report_binding_scope"], "text_and_metadata")
+        bound["examples"][0]["review"]["report_binding_scope"] = "none"
+        with self.assertRaisesRegex(ValueError, "binding scope"):
+            module._corpus_module().validate_corpus(bound)
+        for invalid in ("none", None, "complete"):
+            note["report_binding_scope"] = invalid
+            with self.assertRaisesRegex(ValueError, "binding scope"):
+                module.export_review(self.corpus, note)
         with self.assertRaisesRegex(ValueError, "fingerprint"):
             module.capture(self.text + "changed", self.report, "length", "e1")
         with self.assertRaisesRegex(ValueError, "fingerprint"):

@@ -52,6 +52,7 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
         raise ValueError("report input fingerprint does not match the text and metadata")
     else:
         note["report_binding"] = "verified"
+    note["report_binding_scope"] = "text_and_metadata" if note["report_binding"] == "verified" else "none"
     if "input_format" in report:
         if report["input_format"] not in ("text", "paragraph-text", "markdown", "html", "adapter-json"):
             raise ValueError("invalid report input format")
@@ -97,6 +98,9 @@ def _review_event(corpus, note, module, version):
         if note["report_binding"] not in {"verified", "unverified"}:
             raise ValueError("invalid report binding")
         event["report_binding"] = note["report_binding"]
+    module.validate_report_binding_scope(note)
+    if "report_binding_scope" in note:
+        event["report_binding_scope"] = note["report_binding_scope"]
     return event
 
 
@@ -140,7 +144,7 @@ def bind_review(corpus, note, accept_human_label=False):
                       "text_sha256": event["text_sha256"], "expected": item["expected"]}
     if "metadata_sha256" in event:
         item["review"]["metadata_sha256"] = event["metadata_sha256"]
-    for key in ("resolved_policy_fingerprint", "report_binding", "content_projection", "input_format"):
+    for key in ("resolved_policy_fingerprint", "report_binding", "report_binding_scope", "content_projection", "input_format"):
         if key in event:
             item["review"][key] = copy.deepcopy(event[key])
     if label_changed:

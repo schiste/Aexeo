@@ -221,6 +221,17 @@ def validate_corpus(corpus):
                 validate_policy_fingerprint(review["resolved_policy_fingerprint"])
             if "report_binding" in review and (not isinstance(review["report_binding"], str) or review["report_binding"] not in {"verified", "unverified"}):
                 raise ValueError("invalid review report binding")
+            validate_report_binding_scope(review)
+
+
+def validate_report_binding_scope(value):
+    """Check optional declared capture scope without upgrading legacy records."""
+    if "report_binding_scope" not in value:
+        return
+    expected = {"verified": "text_and_metadata", "unverified": "none"}
+    binding = value.get("report_binding")
+    if not isinstance(binding, str) or binding not in expected or expected[binding] != value["report_binding_scope"]:
+        raise ValueError("invalid report binding scope")
 
 
 def aggregate_blind_review_events(corpus, split, review_log):
@@ -330,6 +341,7 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
         binding = event.get("report_binding", "unverified")
         if not isinstance(binding, str) or binding not in binding_counts:
             raise ValueError("invalid report binding")
+        validate_report_binding_scope(event)
         fingerprint = event.get("resolved_policy_fingerprint")
         if "resolved_policy_fingerprint" in event:
             validate_policy_fingerprint(fingerprint)
