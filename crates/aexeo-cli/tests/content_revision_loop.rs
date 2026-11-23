@@ -268,3 +268,47 @@ fn proposal_request_includes_original_markdown_finding_location() {
     assert_eq!(session.read()["stop"], "satisfied");
     assert_eq!(session.finish(), 0);
 }
+
+#[test]
+fn adapter_projection_revisions_bind_exact_bytes_and_withhold_missing_capabilities() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("projection.json");
+    let policy = dir.path().join("policy.toml");
+    fs::write(
+        &policy,
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=3\nblocking=true\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nblocking=true\n",
+    )
+    .unwrap();
+    let initial =
+        r#"{"schema":"aexeo.content-adapter/v1","text":"one","paragraphs":[{"start":0,"end":3}]}"#;
+    let revised = r#"{"schema":"aexeo.content-adapter/v1","text":"one two three","paragraphs":[{"start":0,"end":13}]}"#;
+    fs::write(&draft, initial).unwrap();
+    let source = format!("test={}", policy.display());
+    let mut session = start(draft.to_str().unwrap(), &source, "adapter-json", &[]);
+    let request = session.read();
+    assert_eq!(request["event"], "proposal_requested");
+    session.send(json!({"action":"submit", "candidate":revised}));
+    let result = session.read();
+    assert_eq!(result["stop"], "satisfied");
+    assert_eq!(result["report"]["input_format"], "adapter-json");
+    assert_eq!(
+        result["candidate_sha256"],
+        result["report"]["input_fingerprint"]["text_sha256"]
+    );
+    assert_eq!(session.finish(), 0);
+    assert_eq!(fs::read_to_string(&draft).unwrap(), initial);
+
+    let mut session = start(draft.to_str().unwrap(), &source, "adapter-json", &[]);
+    assert_eq!(session.read()["event"], "proposal_requested");
+    session.send(json!({"action":"submit", "candidate":r#"{"schema":"aexeo.content-adapter/v1","text":"one two three"}"#}));
+    let result = session.read();
+    assert_eq!(result["stop"], "incomplete");
+    assert_eq!(result["report"]["gates"][1]["status"], "not_checked");
+    assert_eq!(session.finish(), 2);
+
+    let mut session = start(draft.to_str().unwrap(), &source, "adapter-json", &[]);
+    assert_eq!(session.read()["event"], "proposal_requested");
+    session.send(json!({"action":"submit", "candidate":r#"{"schema":"aexeo.content-adapter/v1","text":"abc","text":"different"}"#}));
+    assert_eq!(session.finish(), 2);
+    assert_eq!(fs::read_to_string(&draft).unwrap(), initial);
+}

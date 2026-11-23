@@ -25,7 +25,7 @@ Options:
 
       --input-format <input-format>
           [default: markdown]
-          [possible values: text, paragraph-text, markdown, html]
+          [possible values: text, paragraph-text, markdown, html, adapter-json]
 
       --html-scope <html-scope>
           HTML scope; requires HTML input
