@@ -276,7 +276,7 @@ class PortableComparison(unittest.TestCase):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])
         verdict = copy.deepcopy(self.previous['verdict'])
-        for kind in ('editorial_pacing', 'custom', 'site_group', 'site_audit', 'link_reachability', 'evidence_anchors',
+        for kind in ('literal_markdown_links', 'editorial_pacing', 'custom', 'site_group', 'site_audit', 'link_reachability', 'evidence_anchors',
                      'structured_fact', 'evidence_review', 'evidence_review_age'):
             policy['gates'][0]['kind'] = kind
             for blocking in (True, False):
@@ -287,6 +287,22 @@ class PortableComparison(unittest.TestCase):
                 for status in ('passed', 'failed'):
                     verdict['checks'][0]['status'] = status
                     with self.subTest(kind=kind, status=status, blocking=blocking):
+                        with self.assertRaises(VerificationError):
+                            require_policy_coverage(policy, change, False, verdict)
+
+    def test_literal_markdown_check_requires_html_observation_per_item(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        policy['gates'][0]['kind'] = 'literal_markdown_links'
+        for media in ('text/plain', 'text/markdown', 'text/html'):
+            change['entries'][0]['media_type'] = media
+            for status in ('passed', 'failed', 'not_checked'):
+                verdict['checks'][0]['status'] = status
+                with self.subTest(media=media, status=status):
+                    if media == 'text/html' or status == 'not_checked':
+                        require_policy_coverage(policy, change, False, verdict)
+                    else:
                         with self.assertRaises(VerificationError):
                             require_policy_coverage(policy, change, False, verdict)
 

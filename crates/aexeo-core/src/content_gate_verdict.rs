@@ -1224,7 +1224,7 @@ fn verify_candidate_policy_coverage_with_evidence(
                 gate,
                 crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
             );
-        let verify = |id: String, entity: &str| -> Result<()> {
+        let verify = |id: String, entity: &str, media_type: Option<&str>| -> Result<()> {
             let check = checks
                 .get(id.as_str())
                 .filter(|check| check.blocking == gate.blocking())
@@ -1240,6 +1240,16 @@ fn verify_candidate_policy_coverage_with_evidence(
             ) && check.status != CheckStatus::NotChecked
             {
                 bail!("candidate evaluator cannot execute site or custom gates");
+            }
+            if matches!(
+                gate,
+                crate::content_gate::ContentGate::LiteralMarkdownLinks { .. }
+            ) && media_type != Some("text/html")
+                && check.status != CheckStatus::NotChecked
+            {
+                bail!(
+                    "candidate evaluator cannot inspect literal Markdown links in this media type"
+                );
             }
             let available = sources.and_then(|items| items.get(entity));
             let has = |key: &str| available.is_some_and(|items| items.contains_key(key));
@@ -1267,12 +1277,13 @@ fn verify_candidate_policy_coverage_with_evidence(
             Ok(())
         };
         if collection_gate {
-            verify(scoped_id("collection", "", gate.id()), "")?;
+            verify(scoped_id("collection", "", gate.id()), "", None)?;
         } else {
             for entry in &entries {
                 verify(
                     scoped_id("gate", &entry.entity_id, gate.id()),
                     &entry.entity_id,
+                    Some(entry.media_type.as_str()),
                 )?;
             }
         }
@@ -3797,6 +3808,7 @@ mod tests {
     fn candidate_policy_coverage_rejects_claimed_execution_without_host_capabilities() {
         let change = change();
         for kind in [
+            "literal_markdown_links",
             "editorial_pacing",
             "custom",
             "site_group",
@@ -3875,6 +3887,7 @@ mod tests {
         }
         let change = change();
         for gate in [
+            "kind='literal_markdown_links'\n",
             "kind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='q'\n",
             "kind='editorial_pacing'\nsource='s'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n",
         ] {
