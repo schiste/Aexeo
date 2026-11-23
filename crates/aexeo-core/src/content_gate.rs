@@ -248,7 +248,7 @@ fn http_url_end(
     text: &str,
     start: usize,
     block_end: Option<usize>,
-    starts_block: bool,
+    starts_segment: bool,
 ) -> Option<usize> {
     const MAX_URL_BYTES: usize = 2048;
     let tail = text.get(start..)?;
@@ -262,9 +262,25 @@ fn http_url_end(
         return None;
     }
     if start > 0
-        && !starts_block
+        && !starts_segment
         && !text[..start].chars().next_back().is_some_and(|c| {
-            c.is_whitespace() || matches!(c, '(' | '[' | '{' | '«' | '“' | '\'' | '"')
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '(' | '['
+                        | '{'
+                        | '«'
+                        | '“'
+                        | '\''
+                        | '"'
+                        | ':'
+                        | ';'
+                        | ','
+                        | '—'
+                        | '–'
+                        | '،'
+                        | '：'
+                )
         })
     {
         return None;
@@ -346,7 +362,12 @@ fn for_each_sentence(
                 .iter()
                 .copied()
                 .find(|&end| end > offset);
-            if let Some(end) = http_url_end(text, offset, following_block, block_end) {
+            if let Some(end) = http_url_end(
+                text,
+                offset,
+                following_block,
+                block_end || offset == segment_start,
+            ) {
                 protected_url_end = end;
             }
         }
@@ -5440,6 +5461,31 @@ mod tests {
             let report = preset.evaluate(&literal_input(text)).unwrap();
             assert_eq!(report.gates[0].measurements["sentence_count"], 2, "{text}");
         }
+    }
+
+    #[test]
+    fn sentence_urls_after_punctuation_and_at_new_sentence_boundaries() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=20\n",
+        )
+        .unwrap();
+        for text in [
+            "See:https://example.org/v1.2?x=1. Next sentence.",
+            "See—https://example.org/v1.2?x=1. Next sentence.",
+            "رابط،https://example.org/v1.2?x=1. Next sentence.",
+            "First.https://example.org/v1.2?x=1. Next sentence.",
+        ] {
+            let expected = if text.starts_with("First.") { 3 } else { 2 };
+            let report = preset.evaluate(&literal_input(text)).unwrap();
+            assert_eq!(
+                report.gates[0].measurements["sentence_count"], expected,
+                "{text}"
+            );
+        }
+        assert_eq!(
+            http_url_end("wordhttps://example.org", 4, None, false),
+            None
+        );
     }
 
     #[test]
