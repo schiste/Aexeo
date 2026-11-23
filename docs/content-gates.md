@@ -602,6 +602,16 @@ are not joined. Example, including an optional source map:
                "heading_offsets":[0]}}
 ```
 
+For numeric citation labels already masked in `text`, an adapter may provide
+`literal_text` with the unmasked projection. Sentence and rhythm checks use
+`text`; literal term and external checks use `literal_text`. The evaluator
+requires identical byte and character positions and permits differences only
+where supported numeric reference characters are masked by corresponding
+spaces. An invalid alternate projection leaves dependent checks `not_checked`.
+The host must establish that masked labels really are citations; byte
+compatibility does not prove that claim. The original JSON, including both
+views, remains bound to the input fingerprint.
+
 Each supplied observation array is the host's assertion that the observation is
 complete; an empty array is observed empty, while an omitted or null array is
 unavailable. The optional source-map arrays can describe partial locations.
