@@ -801,6 +801,39 @@ If a historical revision has missing or malformed data instead of an object,
 the revision audit returns `not_checked` with reason `revision_data_invalid`. A failed initial CMS read returns `not_checked` with reason `revision_read_failed`, without exposing the host error. If a later current-record read fails, an evaluated report remains available but revision and locale status are `unknown` until a subsequent read succeeds.
 It does not evaluate or store a report for that revision.
 
+### Audit an exact CMS revision over MCP
+
+Configured-mode hosts can opt in to revision audits and select an editorial
+preset for the collections they intend to assess:
+
+```ts
+aexeoPlugin({
+  revisionAudits: true,
+  contentPreset: { name: "article-editorial", collections: ["blog_posts"] },
+})
+```
+
+Choose the preset and collection mappings appropriate to the host. This option
+requests `content:revisions:read`; the EmDash host must implement
+`content.getRevision` and approve the capability. The host must also expose and
+consent to the plugin MCP tools. Installing the package alone does not enable
+revision access, configure a preset, or expose tools through an existing MCP
+connection. Check the connected tool catalog and host permissions after deployment.
+
+Call `audit_revision` with `collection`, `id`, and the immutable `revision` ID;
+creating a report requires `plugins:manage`. Retrieve the stored report with
+`get_audit` and its `audit_id`; reading requires `plugins:read`. Reports can
+contain findings or excerpts, so protect access as for the underlying revision.
+If the host cannot supply the revision, checks report `not_checked`. The report
+also indicates whether the audited revision is still current; a stale or
+unknown status does not establish the status of current content.
+
+The audit uses the revision snapshot, not rendered HTML or current SEO-panel
+fields. Runtime evidence and external gate providers are not invoked. Inspect
+coverage and each `not_checked` result. A pass does not establish factual
+accuracy, currency, or permission to publish. See the repository README for
+optional historical locale and link observation providers and their limits.
+
 ### Audit a CMS fragment
 
 Enable revision audits and explicitly map each field to its preset in `contentPreset.fragmentFieldsByCollection`, for example `{ posts: { intro: "fragment-readable" } }`. Call `audit_revision` with `collection`, `id`, `revision` and `field: "intro"`. The saved report identifies fragment scope, field and preset. An unconfigured or unavailable field returns `not_checked`; omit `field` for the existing whole-content audit. The host must expose the MCP tool with its revision access and permissions. This review does not establish factual accuracy or authorize publication.
