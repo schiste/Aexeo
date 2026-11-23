@@ -123,3 +123,22 @@ configuration and should not be assumed appropriate for Arabic. The hosted UI,
 current rendered pages, production configuration, source lists, cross-page
 state and matching website release were not observed. The local website checkout
 was behind its remote and cannot establish the deployed renderer version.
+
+## Preview deployment status observation, 23 November 2026
+
+A read-only `getStaticPublishStatus` call reported a pending dispatch with a
+scheduled time of 20 November and a last dispatch marked unsuccessful on
+4 November. These are fields reported by the CMS, not independent proof that
+no later dispatch occurred or that a deployed site is stale. The same response
+listed build [44270994656](https://github.com/Aeptus/website-and-content/actions/runs/44270994656)
+from 18 November as its latest build report.
+
+The existing GitHub log for that build shows that the informative Aexeo static
+check ran and returned exit code 1 after generating an audit report. It listed
+75 distinct problems, including missing canonical findings on five pages and an
+editorial brief route without a matching audited HTML route. The encompassing
+step and Preview deployment succeeded because the check was informative. This
+observation establishes neither that the reported conditions still exist in a
+later deployment nor that each finding reflects a defect in rendered pages.
+The previously documented redirect, inventory, route and release-identity
+limitations continue to apply. No CMS content or deployment was changed.
