@@ -30,6 +30,28 @@ unavailable check may become a pass.
 
 ## Aexeo delivery and limits
 
+- [Aexeo #868](https://github.com/schiste/Aexeo/pull/868),
+  [#869](https://github.com/schiste/Aexeo/pull/869),
+  [#870](https://github.com/schiste/Aexeo/pull/870) and
+  [Aethyme #1966](https://github.com/schiste/Aethyme/pull/1966) reject
+  fabricated completed collection checks when no collection projection was
+  supplied. Real CLI interoperability tests cover unavailable and forged
+  results; these checks do not establish collection completeness or freshness.
+- [Aexeo #871](https://github.com/schiste/Aexeo/pull/871) and
+  [Aethyme #1968](https://github.com/schiste/Aethyme/pull/1968) require
+  unavailable item metadata gates to remain `not_checked`; an observed empty
+  metadata object remains distinct from a missing projection. [Aexeo #872](https://github.com/schiste/Aexeo/pull/872)
+  and [Aethyme #1969](https://github.com/schiste/Aethyme/pull/1969) likewise
+  reject claims that plain-text paragraph checks ran without the bound host
+  paragraph option. The native comparator has an end-to-end regression for
+  both option values. These comparisons do not authenticate the evaluator or
+  the host's data and cannot authorize publication.
+- [Aexeo #867](https://github.com/schiste/Aexeo/pull/867) and
+  [Aethyme #1965](https://github.com/schiste/Aethyme/pull/1965) reject
+  completed structural checks on plain-text input; [Aethyme #1967](https://github.com/schiste/Aethyme/pull/1967)
+  also rejects unsupported link-snapshot media types. Availability of a
+  projection is a prerequisite for assessment, not proof of its correctness.
+
 - [Aexeo #859](https://github.com/schiste/Aexeo/pull/859) and
   [Aethyme #1962](https://github.com/schiste/Aethyme/pull/1962) require an
   explicit per-entity link observation before a portable verifier accepts a
