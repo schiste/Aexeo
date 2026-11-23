@@ -1921,6 +1921,24 @@ mod tests {
         assert_eq!(reports["b"].gates[0].status, GateStatus::NotChecked);
         assert_eq!(reports["b"].gates[1].status, GateStatus::Passed);
         assert_eq!(reports["b"].summary.blocking_not_checked, 1);
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate_with_partial_links(
+            &change,
+            std::slice::from_ref(&next),
+            &BTreeMap::new(),
+            &BTreeSet::from(["a".into(), "b".into()]),
+            None,
+        )
+        else {
+            panic!("unavailable candidate must retain partial results")
+        };
+        assert_eq!((evaluated, reused), (1, 1));
+        assert_eq!(reports["a"].gates[0].status, GateStatus::NotChecked);
+        assert_eq!(reports["a"].gates[1].status, GateStatus::Passed);
         let mut complete = candidate.clone();
         complete.insert("b".into(), observation(&b, "https://b.example"));
         let IncrementalEvaluation::Evaluated {
