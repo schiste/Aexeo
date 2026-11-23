@@ -238,6 +238,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   assert it matches the actual TypeScript exporter and pass those same bytes to
   the Rust or CLI consumer. Cover incomplete and unknown inputs separately;
   a fixture or CMS listing alone does not establish a matching rendered site.
+- For EmDash source paths, test the actual adapted row: paths are relative to
+  the complete CMS record and include `data`, while projected-document paths
+  start at `body`. Verify UTF-16 offsets after non-BMP characters and withhold
+  paths for spans without an unchanged source; bind edits to the same revision.
 - For JavaScript URL checks matching Rust inventory rules, test empty fragment
   markers explicitly: `new URL("https://example.org/a#").hash` is empty even
   though the original URL has a fragment marker that Rust rejects.
