@@ -320,6 +320,7 @@ def validate_link_evidence(snapshot, change):
                 or set(item) != {'version', 'source_sha256', 'destinations', 'observations'}
                 or type(item['version']) is not int or item['version'] != 1
                 or entry is None or entry.get('after') is None
+                or entry.get('media_type') not in {'text/markdown', 'text/html'}
                 or item['source_sha256'] != entry['after']['sha256']
                 or not isinstance(item['destinations'], list) or not isinstance(item['observations'], list)
                 or len(item['destinations']) != len(item['observations'])

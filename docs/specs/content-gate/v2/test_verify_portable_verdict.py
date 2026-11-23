@@ -410,6 +410,9 @@ class PortableComparison(unittest.TestCase):
                                 'severity': 'warning', 'blocking': False})
         self.artifacts['resolved_policy'] = self.encoded(policy)
         change = json.loads(self.artifacts['change'])
+        change['entries'][0]['media_type'] = 'text/markdown'
+        self.fixture['after'][0]['media_type'] = 'text/markdown'
+        self.artifacts['change'] = self.encoded(change)
         entry = change['entries'][0]
         snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {
             entry['entity_id']: {'version': 1, 'source_sha256': entry['after']['sha256'],
@@ -634,8 +637,26 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             validate_schema(envelope, schema)
 
+    def test_link_observations_require_supported_media(self):
+        change = json.loads(self.artifacts['change'])
+        snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {'article': {
+            'version': 1, 'source_sha256': change['entries'][0]['after']['sha256'],
+            'destinations': [], 'observations': []}}}
+        for media in ('text/plain', 'text/markdown', 'text/html'):
+            change['entries'][0]['media_type'] = media
+            with self.subTest(media=media):
+                if media == 'text/plain':
+                    with self.assertRaises(VerificationError):
+                        validate_link_evidence(snapshot, change)
+                else:
+                    validate_link_evidence(snapshot, change)
+        snapshot['entries'] = {}
+        change['entries'][0]['media_type'] = 'text/plain'
+        validate_link_evidence(snapshot, change)
+
     def test_link_evidence_is_strictly_bound_to_change_entries(self):
         change = json.loads(self.artifacts['change'])
+        change['entries'][0]['media_type'] = 'text/markdown'
         snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {'article': {
             'version': 1, 'source_sha256': change['entries'][0]['after']['sha256'],
             'destinations': ['https://example.org/'], 'observations': ['reachable']}}}
@@ -662,6 +683,9 @@ class PortableComparison(unittest.TestCase):
     def test_rebound_link_evidence_still_requires_valid_shape_and_profile(self):
         self.assertFalse(self.check()['publication_authorized'])
         change = json.loads(self.artifacts['change'])
+        change['entries'][0]['media_type'] = 'text/markdown'
+        self.fixture['after'][0]['media_type'] = 'text/markdown'
+        self.artifacts['change'] = self.encoded(change)
         candidate = overlay(self.fixture['base'], change, self.fixture['after'])
         snapshot = {'version': 1, 'change_id': change['change_id'], 'entries': {'article': {
             'version': 1, 'source_sha256': change['entries'][0]['after']['sha256'],
