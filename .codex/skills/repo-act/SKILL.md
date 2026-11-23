@@ -359,6 +359,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For public Rust structs, check downstream struct-literal compatibility as well
   as serialized compatibility: adding a field can break callers even when
   Serde still accepts older JSON.
+- For generated schemas, compare expressible per-field resource ceilings with
+  evaluator limits and test valid and invalid boundaries with an independent
+  validator. Document limits the schema cannot guarantee, including aggregate
+  UTF-8 bytes, total items and assembly overhead; character counts are not bytes.
 - For JSON Schema identifier patterns ending in `$`, test a valid identifier
   followed by a newline: common regex engines match before that newline. Enforce
   exact lengths as well as the pattern and test both valid and invalid lengths.
