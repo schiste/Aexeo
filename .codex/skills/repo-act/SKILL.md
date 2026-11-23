@@ -17,9 +17,12 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Verify answer candidates before concluding when trust_policy is not answer-safe.
 - Identify the nearest fast test or validation command before editing.
 - For direct shell commands, use the session scratch path printed by `broker
-  start` explicitly; `AETHYME_SESSION_SCRATCH_DIR` is supplied to commands run
-  by the broker and may be unset in the interactive shell. Check that a variable
-  is nonempty before using it as an output directory, and quote paths with spaces.
+  start` explicitly as an absolute path, including in `CARGO_TARGET_DIR` and
+  `TMPDIR`. Relative paths can resolve from a package or script working directory
+  instead of the worktree root. `AETHYME_SESSION_SCRATCH_DIR` is supplied to
+  commands run by the broker and may be unset in the interactive shell. Check that
+  a variable is nonempty before using it as an output directory, and quote paths
+  with spaces.
 - In a reused worktree, check required local executables (such as
   `node_modules/.bin/tsc`) even when broker preparation is not configured.
   Cleanup can leave a partial `node_modules` directory, so its presence alone
