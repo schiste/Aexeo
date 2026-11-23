@@ -1,7 +1,6 @@
 //! What the text and Markdown audit reports show of a run's link report: the
 //! qualification of each legacy `LNK002`/`LNK004` finding and a short coverage
-//! summary. Built only when a run has a report; a report without one renders
-//! exactly as before.
+//! summary. Without a report, inbound-link coverage is explicitly unverified.
 use std::collections::BTreeMap;
 
 use crate::link_findings::LegacyLinkConclusion;
@@ -24,7 +23,7 @@ pub struct LinkFindingNotes {
 }
 
 /// How many of a group's findings the report confirms and how many it cannot
-/// verify. Findings it does not qualify count in neither.
+/// verify. Inbound-link findings absent from the graph count as unverified.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct LinkFindingCounts {
     pub confirmed: usize,
@@ -53,7 +52,7 @@ impl LinkFindingNotes {
             reasons.push("conditional link visibility unknown");
         }
         let unverifiable_reason = if reasons.is_empty() {
-            "page not eligible".to_string()
+            "page not eligible or absent from graph".to_string()
         } else {
             reasons.join(" / ")
         };
@@ -93,6 +92,9 @@ impl LinkFindingNotes {
                     | LegacyLinkConclusion::NotInReport
                     | LegacyLinkConclusion::ConditionalInbound,
                 ) => {
+                    counts.not_verifiable += 1;
+                }
+                None if matches!(rule_id, "LNK002" | "LNK004") => {
                     counts.not_verifiable += 1;
                 }
                 // Disproven findings are suppressed before rendering.
@@ -245,7 +247,7 @@ mod tests {
         assert!(text.contains(
             "Start here (2 of 2 distinct problems):\n   \
              1. [warning] LNK002 no inbound links observed in the analyzed pages: /zulu (confirmed orphan) (on crawl/zulu/index.html)\n   \
-             2. [warning] LNK002 no inbound links observed in the analyzed pages: /alpha (not verifiable: page not eligible) (on crawl/alpha/index.html)\n"
+             2. [warning] LNK002 no inbound links observed in the analyzed pages: /alpha (not verifiable: page not eligible or absent from graph) (on crawl/alpha/index.html)\n"
         ), "{text}");
         assert!(
             text.contains(
@@ -257,7 +259,9 @@ mod tests {
         );
         assert!(text.contains("pages: /zulu (confirmed orphan)\n"), "{text}");
         assert!(
-            text.contains("pages: /alpha (not verifiable: page not eligible)\n"),
+            text.contains(
+                "pages: /alpha (not verifiable: page not eligible or absent from graph)\n"
+            ),
             "{text}"
         );
     }
@@ -294,12 +298,12 @@ mod tests {
             counts,
             LinkFindingCounts {
                 confirmed: 1,
-                not_verifiable: 1
+                not_verifiable: 2
             }
         );
         assert_eq!(
             notes.describe("LNK004", counts).as_deref(),
-            Some("1 confirmed / 1 not verifiable: page not eligible")
+            Some("1 confirmed / 2 not verifiable: page not eligible or absent from graph")
         );
         assert_eq!(notes.describe("LNK004", LinkFindingCounts::default()), None);
     }
@@ -333,7 +337,42 @@ mod tests {
     }
 
     #[test]
-    fn without_a_report_every_output_is_unchanged() {
+    fn a_finding_missing_from_the_graph_never_counts_as_confirmed() {
+        let notes = notes(true, true);
+        let counts = notes.count([
+            ("LNK002", "crawl/zulu/index.html"),
+            ("LNK002", "crawl/missing/index.html"),
+            ("SEO001", "crawl/missing/index.html"),
+        ]);
+        assert_eq!(counts.confirmed, 1);
+        assert_eq!(counts.not_verifiable, 1);
+    }
+
+    #[test]
+    fn low_inbound_count_discloses_unverified_coverage() {
+        let mut finding = orphan("example");
+        finding.rule_id = "LNK004".into();
+        finding.message = "page has only one inbound internal link".into();
+        let artifact = crate::reporting::build_audit_artifact(
+            "crawl",
+            &[finding],
+            AuditStatus::Complete,
+            None,
+            None,
+        );
+        for output in [
+            render_text_artifact(&artifact, "ok", None),
+            render_markdown_artifact(&artifact, None),
+        ] {
+            assert!(
+                output.contains("coverage not verified: no link graph report"),
+                "{output}"
+            );
+        }
+    }
+
+    #[test]
+    fn without_a_report_inbound_coverage_is_explicitly_unknown() {
         let artifact = artifact();
         let text = render_text_artifact(&artifact, "ok", None);
         assert_eq!(
@@ -346,6 +385,10 @@ mod tests {
             render_markdown_artifact_with_links(&artifact, None, None)
         );
         for output in [&text, &markdown] {
+            assert!(
+                output.contains("coverage not verified: no link graph report"),
+                "{output}"
+            );
             assert!(
                 !output.contains("Link graph") && !output.contains("orphan)"),
                 "{output}"
