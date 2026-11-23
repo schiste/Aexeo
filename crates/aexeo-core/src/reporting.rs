@@ -788,7 +788,7 @@ pub fn render_text_artifact_with_links(
         let mut lines = vec![success_message.to_string()];
         if let Some(notes) = links {
             lines.push(String::new());
-            lines.extend(notes.summary_lines(false));
+            lines.extend(notes.summary_lines_for_findings(false, &artifact.findings));
             lines.pop();
         }
         if let Some(path) = audit_path {
@@ -805,7 +805,7 @@ pub fn render_text_artifact_with_links(
     }
     lines.extend(priority_lines(&artifact.findings, false, links));
     if let Some(notes) = links {
-        lines.extend(notes.summary_lines(false));
+        lines.extend(notes.summary_lines_for_findings(false, &artifact.findings));
     }
 
     // Per-layer breakdown — gives the editor a one-glance read of which
@@ -924,7 +924,7 @@ pub fn render_markdown_artifact_with_links(
     lines.push(String::new());
     lines.extend(priority_lines(&artifact.findings, true, links));
     if let Some(notes) = links {
-        lines.extend(notes.summary_lines(true));
+        lines.extend(notes.summary_lines_for_findings(true, &artifact.findings));
     }
     lines.push("## Summary".to_string());
     lines.push(format!("- Total findings: `{}`", artifact.summary.total));

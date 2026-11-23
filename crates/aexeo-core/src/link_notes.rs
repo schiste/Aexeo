@@ -122,7 +122,8 @@ impl LinkFindingNotes {
         }
     }
 
-    /// The `Link graph` block of the text or Markdown report.
+    /// The `Link graph` block using the graph’s own qualified findings.
+    /// Audit rendering instead counts only the findings present in the audit.
     pub fn summary_lines(&self, markdown: bool) -> Vec<String> {
         let counts = LinkFindingCounts {
             confirmed: self
@@ -137,6 +138,24 @@ impl LinkFindingNotes {
                 .filter(|conclusion| **conclusion != LegacyLinkConclusion::Confirmed)
                 .count(),
         };
+        self.summary_lines_with_counts(markdown, counts)
+    }
+
+    /// Summarize the findings actually present in the rendered audit.
+    pub(crate) fn summary_lines_for_findings(
+        &self,
+        markdown: bool,
+        findings: &[aexeo_contracts::Finding],
+    ) -> Vec<String> {
+        let counts = self.count(
+            findings
+                .iter()
+                .map(|finding| (finding.rule_id.as_str(), finding.path.as_str())),
+        );
+        self.summary_lines_with_counts(markdown, counts)
+    }
+
+    fn summary_lines_with_counts(&self, markdown: bool, counts: LinkFindingCounts) -> Vec<String> {
         let mut coverage = format!(
             "Crawl complete: {}",
             if self.crawl_complete { "yes" } else { "no" }
@@ -349,6 +368,25 @@ mod tests {
     }
 
     #[test]
+    fn summaries_count_only_displayed_findings_including_unmatched_pages() {
+        let artifact = crate::reporting::build_audit_artifact(
+            "crawl",
+            &[orphan("missing")],
+            AuditStatus::Complete,
+            None,
+            None,
+        );
+        let notes = notes(true, true);
+        for output in [
+            render_text_artifact_with_links(&artifact, "ok", None, Some(&notes)),
+            render_markdown_artifact_with_links(&artifact, None, Some(&notes)),
+        ] {
+            assert!(output.contains("LNK002/LNK004 findings: 0 confirmed, 1 not verifiable, 1 suppressed as disproven"), "{output}");
+            assert!(output.contains("/missing (not verifiable:"), "{output}");
+        }
+    }
+
+    #[test]
     fn low_inbound_count_discloses_unverified_coverage() {
         let mut finding = orphan("example");
         finding.rule_id = "LNK004".into();
@@ -405,7 +443,7 @@ mod tests {
         assert_eq!(
             render_text_artifact_with_links(&clean, "ok", None, Some(&notes(true, true))),
             "ok\n\nLink graph:\n  Crawl complete: yes\n  \
-             LNK002/LNK004 findings: 1 confirmed, 1 not verifiable, 1 suppressed as disproven\n  \
+             LNK002/LNK004 findings: 0 confirmed, 0 not verifiable, 1 suppressed as disproven\n  \
              Graph report: graph.json"
         );
     }
