@@ -164,6 +164,19 @@ last evaluated candidate. The agent must retain that candidate itself. The
 initial file is never changed; applying a revision remains a separate explicit
 action. Reports and proposals can contain private content.
 
+For a targeted edit, use `{"action":"patch","base_sha256":"...",
+"start_byte":0,"end_byte":5,"replacement":"..."}`. Copy `base_sha256`
+from the current `proposal_requested.candidate_sha256`; it binds the exact
+complete candidate supplied to the evaluator. The half-open range uses UTF-8
+byte offsets in the original candidate source, not character indices or offsets
+in a projected report. Equal start and end insert text. Stale digests, out of
+range offsets and offsets splitting a UTF-8 character are rejected. The caller
+retains the full resulting candidate, and the normal revision budget, cycle
+check and re-evaluation apply. A patch preserves bytes outside its range, but
+it does not prove that the change preserves meaning or citations. For each
+candidate needing link observations, provide a newly bound snapshot as with a
+full submission.
+
 The default is Markdown, all configured gates and three proposals. Set
 `--input-format` to `text`, `paragraph-text`, `markdown` or `html`, use
 `--html-scope main` for a scoped HTML review, and use the same repeatable
@@ -185,8 +198,9 @@ gates needing them remain unavailable. Hosts may supply their own content projec
 child report also have byte limits. The caller must manage idle timeouts and
 model costs. `--telemetry` emits aggregate counts and durations to stderr; total
 time includes waiting for the agent and evaluation time includes child startup.
-Telemetry records only whether the initial link snapshot was supplied and how
-many proposals supplied one, without their paths or destinations.
+Telemetry records the aggregate number of accepted patch proposals, whether the
+initial link snapshot was supplied and how many proposals supplied one, without
+content, paths or destinations.
 No claim is made about semantic preservation, factual accuracy or publication
 readiness.
 
