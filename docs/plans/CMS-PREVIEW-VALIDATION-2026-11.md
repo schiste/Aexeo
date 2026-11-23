@@ -142,3 +142,24 @@ observation establishes neither that the reported conditions still exist in a
 later deployment nor that each finding reflects a defect in rendered pages.
 The previously documented redirect, inventory, route and release-identity
 limitations continue to apply. No CMS content or deployment was changed.
+
+## Archived static candidate audit, 23 November 2026
+
+Website [PR #649](https://github.com/Aeptus/website-and-content/pull/649)
+fixed report discovery and collection for the site project. A subsequent
+[manual audit](https://github.com/Aeptus/website-and-content/actions/runs/45265855222)
+failed before Aexeo ran: the site build's strict i18n check reported English
+beta-form copy. It produced no audit JSON, so it cannot establish current
+Preview findings.
+
+Separately, [test run 45267658328](https://github.com/Aeptus/website-and-content/actions/runs/45267658328)
+used the candidate-audit workflow introduced by merged website
+[PR #651](https://github.com/Aeptus/website-and-content/pull/651) against the
+retained static candidate from run 45167245243, source commit
+`5f77df787b3db692a6e97f809eaaca2da8c8c652`. The workflow verified the source
+run and candidate archive, audited without pulling the CMS or rebuilding, and
+uploaded its candidate metadata, JSON report and rendered context. The report
+contained 6 errors and 6,960 warnings; 2,215 contextual findings had no missing
+source page. The audit step returned failure for the findings, as intended.
+This archived candidate is not proof of current Preview deployment, CMS
+inventory completeness, freshness, factual accuracy or publication readiness.
