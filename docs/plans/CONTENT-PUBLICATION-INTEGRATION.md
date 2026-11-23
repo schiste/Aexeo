@@ -30,6 +30,16 @@ unavailable check may become a pass.
 
 ## Aexeo delivery and limits
 
+- [Aexeo #859](https://github.com/schiste/Aexeo/pull/859) and
+  [Aethyme #1962](https://github.com/schiste/Aethyme/pull/1962) require an
+  explicit per-entity link observation before a portable verifier accepts a
+  completed link reachability check. A snapshot that omits the entity requires
+  `not_checked`, including for plain-text input; an explicit empty observation
+  is needed when a checked entity has no links. Tests cover fabricated matching
+  verdicts and honest unavailable checks. Twelve interprocess tests passed
+  with both CLIs built from the fixes. These results do not authenticate the
+  observer, establish freshness or authorize publication.
+
 - [Aexeo #853](https://github.com/schiste/Aexeo/pull/853) supports editorial
   pacing in adapted incremental evaluation with per-entity composition
   snapshots; changed evidence invalidates reuse and stale or missing inputs stay
@@ -84,9 +94,9 @@ unavailable check may become a pass.
   this evaluator received no per-item evidence sources, and link reachability
   claims without link observations. Both candidate verifiers also reject a
   completed link check that contradicts explicitly partial observations or a
-  pass that contradicts a not-found observation. Missing snapshot entries and
-  source freshness remain host responsibilities; these checks do not
-  authenticate the evaluator or sources.
+  pass that contradicts a not-found observation. Missing entity entries require
+  `not_checked`; source authenticity and freshness remain host responsibilities.
+  These checks do not authenticate the evaluator or sources.
 - [#525](https://github.com/schiste/Aexeo/pull/525) and
   [#528](https://github.com/schiste/Aexeo/pull/528) provide bounded in-memory
   incremental evaluation for a subset of independent plain-text gates, with
