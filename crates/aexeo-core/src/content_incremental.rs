@@ -235,7 +235,6 @@ fn validate_preset(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn evaluate_item(
     preset: &ContentPreset,
     item: &CandidateItem,
@@ -243,7 +242,6 @@ fn evaluate_item(
     metadata: Option<&BTreeMap<String, String>>,
     link_snapshot: Option<&crate::content_gate_verdict::LinkObservationSnapshot>,
     evidence: Option<&BTreeMap<String, String>>,
-    partial_links: bool,
     partial_results: bool,
 ) -> Result<ContentReport, NotChecked> {
     let classify_prose = preset
@@ -342,7 +340,7 @@ fn evaluate_item(
                     }
                     (adapted.input, Some(adapted.context), Some(count))
                 }
-                Err(reason) if partial_links && link_snapshot.is_none() => (
+                Err(reason) if partial_results && link_snapshot.is_none() => (
                     ContentInput {
                         id: item.entity_id.clone(),
                         ..Default::default()
@@ -728,7 +726,6 @@ impl IncrementalBaseline {
                         .as_ref()
                         .and_then(|map| map.get(&item.entity_id)),
                     evidence.as_ref().and_then(|map| map.get(&item.entity_id)),
-                    partial_links,
                     partial_results,
                 )?,
             );
@@ -1146,7 +1143,6 @@ impl IncrementalBaseline {
                     fields,
                     observations.and_then(|map| map.get(&item.entity_id)),
                     evidence.and_then(|map| map.get(&item.entity_id)),
-                    self.partial_links,
                     self.partial_results,
                 )?
             };
@@ -2404,7 +2400,6 @@ mod tests {
                 None,
                 candidate.get(&item.entity_id),
                 false,
-                false,
             )
             .unwrap();
             assert_eq!(
@@ -2545,7 +2540,6 @@ mod tests {
                 None,
                 None,
                 None,
-                false,
                 false,
             )
             .unwrap();
