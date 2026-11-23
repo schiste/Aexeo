@@ -28,6 +28,13 @@ enum Proposal {
         candidate: String,
         link_observations: Option<String>,
     },
+    Patch {
+        base_sha256: String,
+        start_byte: usize,
+        end_byte: usize,
+        replacement: String,
+        link_observations: Option<String>,
+    },
     Decline {},
 }
 
@@ -181,6 +188,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     let mut stdout = stdout.lock();
     let mut proposal_number = 0usize;
     let mut proposals_with_observations = 0usize;
+    let mut patch_proposals = 0usize;
     let mut evaluation_ms = 0.0;
     let outcome = content_revision_loop::revise(
         &initial,
@@ -214,11 +222,12 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
             *current_report.borrow_mut() = Some(report);
             Ok(typed)
         },
-        |_, _| {
+        |candidate, _| {
             proposal_number += 1;
+            let candidate_sha256 = super::feedback::text_hash(candidate.as_bytes());
             serde_json::to_writer(
                 &mut stdout,
-                &json!({"event":"proposal_requested", "version":1, "proposal":proposal_number, "report":current_report.borrow().as_ref()}),
+                &json!({"event":"proposal_requested", "version":1, "proposal":proposal_number, "candidate_sha256":candidate_sha256, "report":current_report.borrow().as_ref()}),
             )?;
             writeln!(stdout)?;
             stdout.flush()?;
@@ -244,6 +253,36 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                     *observations.borrow_mut() = link_observations;
                     Some(candidate)
                 }
+                Proposal::Patch {
+                    base_sha256,
+                    start_byte,
+                    end_byte,
+                    replacement,
+                    link_observations,
+                } => {
+                    if base_sha256 != candidate_sha256 {
+                        user_bail!("patch base digest does not match the current candidate");
+                    }
+                    if start_byte > end_byte
+                        || end_byte > candidate.len()
+                        || !candidate.is_char_boundary(start_byte)
+                        || !candidate.is_char_boundary(end_byte)
+                    {
+                        user_bail!("patch range must use valid UTF-8 byte boundaries");
+                    }
+                    let revised_len = candidate.len() - (end_byte - start_byte);
+                    if replacement.len() > MAX_DRAFT_BYTES - revised_len {
+                        user_bail!("patched draft exceeds byte limit");
+                    }
+                    patch_proposals += 1;
+                    let mut revised = String::with_capacity(revised_len + replacement.len());
+                    revised.push_str(&candidate[..start_byte]);
+                    revised.push_str(&replacement);
+                    revised.push_str(&candidate[end_byte..]);
+                    proposals_with_observations += usize::from(link_observations.is_some());
+                    *observations.borrow_mut() = link_observations;
+                    Some(revised)
+                }
                 Proposal::Decline {} => None,
             })
         },
@@ -264,7 +303,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
+            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "patch_proposals":patch_proposals, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
         );
     }
     Ok(match outcome.stop {

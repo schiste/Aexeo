@@ -124,6 +124,45 @@ fn multi_format_revisions_evaluate_real_candidates_without_writing_sources() {
     }
 }
 #[test]
+fn source_bound_patches_preserve_unedited_unicode_and_reject_stale_or_invalid_ranges() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft");
+    let policy = dir.path().join("policy");
+    let initial = "Élan";
+    fs::write(&draft, initial).unwrap();
+    fs::write(&policy, preset(3)).unwrap();
+    let source = format!("test={}", policy.display());
+
+    let mut session = start(draft.to_str().unwrap(), &source, "text", &[]);
+    let request = session.read();
+    session.send(
+        json!({"action":"patch", "base_sha256":request["candidate_sha256"],
+        "start_byte":initial.len(), "end_byte":initial.len(), "replacement":" deux mots"}),
+    );
+    let done = session.read();
+    assert_eq!(done["stop"], "satisfied");
+    assert_eq!(done["report"]["gates"][0]["status"], "passed");
+    assert_eq!(session.finish(), 0);
+    assert_eq!(fs::read_to_string(&draft).unwrap(), initial);
+
+    for (start_byte, end_byte, stale) in
+        [(0, 0, true), (1, 2, false), (0, 99, false), (3, 2, false)]
+    {
+        let mut session = start(draft.to_str().unwrap(), &source, "text", &[]);
+        let request = session.read();
+        let digest = if stale {
+            json!("stale")
+        } else {
+            request["candidate_sha256"].clone()
+        };
+        session.send(json!({"action":"patch", "base_sha256":digest,
+            "start_byte":start_byte, "end_byte":end_byte, "replacement":"ignored"}));
+        assert_ne!(session.finish(), 0);
+        assert_eq!(fs::read_to_string(&draft).unwrap(), initial);
+    }
+}
+
+#[test]
 fn loop_stops_on_cycle_exhaustion_and_decline() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("draft");
@@ -241,6 +280,7 @@ fn telemetry_is_aggregate_and_does_not_include_draft() {
     let event: Value = serde_json::from_str(&telemetry).unwrap();
     assert_eq!(event["event"], "content_revision_loop");
     assert_eq!(event["evaluations"], 1);
+    assert_eq!(event["patch_proposals"], 0);
     assert!(event["evaluation_ms"].as_f64().is_some());
     assert!(event["elapsed_ms"].as_f64().is_some());
 }
