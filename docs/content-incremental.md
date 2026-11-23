@@ -231,3 +231,23 @@ measurement evaluates a collection uniqueness gate over that same candidate,
 checking its completed result and emitting a result digest.
 It is a synthetic diagnostic, not a production latency target or a substitute
 for measurement on a host's own content and gates.
+
+### Incremental observed link counts
+
+`link_counts::IncrementalLinkCounts` is an in-process advisory helper for hosts
+that already maintain per-source `LinkEvidence`. Construct it with a complete
+observation for each supplied source, including explicit empty vectors for
+pages without links. `evaluate` accepts whole-source replacements or removals
+and returns only affected internal destinations. A `None` result means no
+observed links remain for that destination. It reuses the same context-aware
+counter as a full recount; source keys are ordered lexically, with evidence in
+its original source order. The baseline is immutable and can be reused for
+independent candidates. Evidence attributed to a different source, empty
+source keys, and removal of an unobserved source are rejected.
+
+This API does not establish that the host supplied every page or link, that
+observations are fresh, that redirects or canonical aliases resolve, or that a
+zero count proves an orphan. Same-document jumps are excluded from incoming
+counts. It does not update the rendered-site audit, emit findings, or authorize
+publication; the host must apply the returned destination changes to a report
+and independently establish its inventory and snapshot guarantees.
