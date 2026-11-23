@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 use url::Url;
 
-#[cfg(test)]
-use crate::link_graph::resolve_link;
-use crate::link_graph::{LinkResolution, LinkResolver, same_crawl_origin};
+use crate::link_graph::{LinkResolution, LinkResolver, resolve_link, same_crawl_origin};
 use crate::site::route_from_urlish;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
