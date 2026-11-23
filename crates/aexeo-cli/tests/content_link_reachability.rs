@@ -184,6 +184,7 @@ fn host_link_snapshot_is_bound_to_source_and_order_for_markdown_and_html() {
         let logs = String::from_utf8_lossy(&output.stderr);
         assert!(logs.contains("content_link_snapshot"));
         assert!(!logs.contains("example.org"));
+        assert!(!logs.contains(&snapshot_hash));
         value["observations"] = serde_json::json!(["reachable", "reachable"]);
         fs::write(&snapshot, serde_json::to_vec(&value).unwrap()).unwrap();
         let complete = run();
