@@ -336,6 +336,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   confirm it is accepted without the target guard and rejected with it; an
   unrelated validation error can otherwise make a regression test pass. Use a
   prior build or an isolated in-memory mutation, leaving tracked code unchanged.
+- For candidate resource limits, test base and proposed inventories that each
+  fit separately but exceed the limit when combined. Include non-source bytes
+  such as link destinations, and check the combined bound before cloning. A
+  rejected inventory must not become a complete impact result.
 - When a gate depends on a host-supplied source, check the candidate policy
   coverage classifications in both Rust and the independent Python verifier.
   Test missing sources for passed and failed claims, blocking and advisory
