@@ -2603,11 +2603,17 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                 )
             }
             "text/html" => {
-                match crate::html_content_adapter::html_content_with_literal_projection(
-                    &entry.entity_id,
-                    &text,
-                    html_scope,
-                ) {
+                let project = if item_preset.gates.iter().any(|gate| {
+                    matches!(
+                        gate,
+                        crate::content_gate::ContentGate::LiteralMarkdownLinks { .. }
+                    )
+                }) {
+                    crate::html_content_adapter::html_content_with_literal_markdown_projection
+                } else {
+                    crate::html_content_adapter::html_content_with_literal_projection
+                };
+                match project(&entry.entity_id, &text, html_scope) {
                     Ok((adapted, levels, list_items, literal_text)) => {
                         literal_projection = literal_text;
                         if item_preset.gates.iter().any(|gate| {
@@ -6446,6 +6452,45 @@ mod tests {
             verify_external_input_binding(&verdict, &change, &policy, 1024, 1024, false, None)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn scoped_html_change_reviews_literal_markdown_links() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\nblocking=true\n").unwrap();
+        for (source, expected) in [
+            ("<main><p>See [source](/x).</p></main>", VerdictStatus::Fail),
+            (
+                "<main><p><code>[example](/x)</code></p></main>",
+                VerdictStatus::Pass,
+            ),
+            (
+                "<main><p><b>[source](/x)</p></b></main>",
+                VerdictStatus::NotChecked,
+            ),
+        ] {
+            let mut change = change();
+            change.entries[0].media_type = "text/html".into();
+            let state = change.entries[0].after.as_mut().unwrap();
+            state.inline = Some(source.into());
+            state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            let verdict = evaluate_change_with_collection_and_html_scope(
+                &change,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                ChangeEvaluationHost {
+                    options: ChangeEvaluationOptions::default(),
+                    extensions: None,
+                },
+                None,
+                HtmlContentScope::Main,
+            )
+            .unwrap();
+            assert_eq!(verdict.status, expected, "{source}");
+        }
     }
 
     #[test]

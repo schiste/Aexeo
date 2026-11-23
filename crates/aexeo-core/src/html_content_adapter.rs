@@ -28,6 +28,9 @@ enum Event {
     EndListItem {
         paragraphs_before: usize,
     },
+    EndLiteralExcluded {
+        start: usize,
+    },
 }
 
 /// Which part of the supplied static HTML to project.
@@ -125,6 +128,25 @@ pub fn html_content_with_literal_projection(
     source: &str,
     scope: HtmlContentScope,
 ) -> Result<HtmlLiteralProjection, &'static str> {
+    html_content_with_literal_markdown_option(id, source, scope, false)
+}
+
+/// Project static HTML and opt in to literal Markdown link review. The review
+/// is withheld unless the conservative source map validates the entire scope.
+pub fn html_content_with_literal_markdown_projection(
+    id: impl Into<String>,
+    source: &str,
+    scope: HtmlContentScope,
+) -> Result<HtmlLiteralProjection, &'static str> {
+    html_content_with_literal_markdown_option(id, source, scope, true)
+}
+
+fn html_content_with_literal_markdown_option(
+    id: impl Into<String>,
+    source: &str,
+    scope: HtmlContentScope,
+    observe_literal_links: bool,
+) -> Result<HtmlLiteralProjection, &'static str> {
     if source.len() > MAX_CONTENT_INPUT_BYTES {
         return Err("HTML exceeds the content input byte limit");
     }
@@ -165,6 +187,7 @@ pub fn html_content_with_literal_projection(
     let mut stack = vec![Event::Enter(root)];
     let mut text = String::new();
     let mut literal_projection = crate::content_gate::ReferenceLiteralProjection::default();
+    let mut literal_excluded = Vec::new();
     let mut headings = Vec::new();
     let mut heading_levels = Vec::new();
     let mut ranges = Vec::new();
@@ -191,6 +214,9 @@ pub fn html_content_with_literal_projection(
                 block_ends.push(text.len());
                 text.push('\n');
             }
+            Event::EndLiteralExcluded { start } => {
+                literal_excluded.push((start, text.len()));
+            }
             Event::EndListItem { paragraphs_before } => {
                 list_item_depth -= 1;
                 unrepresented_list_item |= ranges.len() == paragraphs_before;
@@ -207,6 +233,11 @@ pub fn html_content_with_literal_projection(
                     NodeData::Text { contents } => text.push_str(&contents.borrow()),
                     NodeData::Element { name, attrs, .. } => {
                         let tag = name.local.as_ref();
+                        if observe_literal_links
+                            && matches!(tag, "a" | "code" | "pre" | "kbd" | "samp" | "textarea")
+                        {
+                            stack.push(Event::EndLiteralExcluded { start: text.len() });
+                        }
                         if tag == "li" {
                             list_item_depth += 1;
                             stack.push(Event::EndListItem {
@@ -236,7 +267,11 @@ pub fn html_content_with_literal_projection(
                             && let Some(alt) =
                                 attrs.iter().find(|attr| attr.name.local.as_ref() == "alt")
                         {
+                            let start = text.len();
                             text.push_str(&alt.value);
+                            if observe_literal_links {
+                                literal_excluded.push((start, text.len()));
+                            }
                         }
                         if tag == "br" {
                             text.push('\n');
@@ -297,6 +332,12 @@ pub fn html_content_with_literal_projection(
         cursor = start;
     }
     let literal_text = literal_projection.finish(&text);
+    let literal_markdown_links =
+        if observe_literal_links && html_source_map_with_scope(source, &text, scope).is_some() {
+            observe_literal_markdown_links(&text, &literal_excluded)
+        } else {
+            None
+        };
     Ok((
         HtmlContent {
             input: ContentInput {
@@ -309,6 +350,7 @@ pub fn html_content_with_literal_projection(
             context: ContentContext {
                 paragraphs: Some(paragraphs),
                 block_ends: Some(block_ends),
+                literal_markdown_links,
                 ..Default::default()
             },
             destinations,
@@ -317,6 +359,40 @@ pub fn html_content_with_literal_projection(
         (!root_inside_list && !unrepresented_list_item).then_some(paragraph_list_items),
         literal_text,
     ))
+}
+
+// Mask excluded HTML regions with equal-length whitespace, preserving the
+// projected byte offsets and line breaks for source mapping. This is advisory:
+// static HTML does not establish browser visibility.
+fn observe_literal_markdown_links(
+    text: &str,
+    excluded: &[(usize, usize)],
+) -> Option<Vec<(usize, usize)>> {
+    let mut candidate = text.as_bytes().to_vec();
+    let mut ranges = excluded.to_vec();
+    ranges.sort_unstable();
+    let mut masked_until = 0;
+    for (start, end) in ranges {
+        if start > end || end > candidate.len() {
+            return None;
+        }
+        for byte in &mut candidate[start.max(masked_until)..end.max(masked_until)] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+        masked_until = masked_until.max(end);
+    }
+    let candidate = std::str::from_utf8(&candidate).ok()?;
+    let offsets = crate::markdown_adapter::literal_markdown_link_offsets(candidate).ok()?;
+    if offsets.len() > MAX_HTML_CONTENT_NODES {
+        return None;
+    }
+    let index = crate::text_index::LineIndex::new(text);
+    offsets
+        .into_iter()
+        .map(|offset| index.position(text, offset))
+        .collect()
 }
 
 // Bound source-map memory even for entity-heavy or newline-heavy documents.
@@ -1159,6 +1235,59 @@ pub fn gate_source_positions_with_links(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn literal_markdown_html_review_excludes_links_and_code_and_maps_source() {
+        let source = "<main><p>See [évi<strong>dence</strong>](/guide) now.</p><p><a href=\"/real\">[actual](/real)</a> <code>[sample](/code)</code></p><pre>[example](/example)</pre><img alt=\"[alt](/image)\"></main>";
+        let (adapted, _, _, _) =
+            html_content_with_literal_markdown_projection("x", source, HtmlContentScope::Main)
+                .unwrap();
+        let positions = adapted.context.literal_markdown_links.as_ref().unwrap();
+        assert_eq!(positions.len(), 1);
+        let preset = crate::content_gate::ContentPreset::from_toml(
+            "version=1\nname='links'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\n",
+        )
+        .unwrap();
+        let report = preset
+            .evaluate_with_context(&adapted.input, None, None, Some(&adapted.context))
+            .unwrap();
+        assert_eq!(report.gates[0].findings.len(), 1);
+        let map = html_source_map_with_scope(
+            source,
+            adapted.input.text.as_deref().unwrap(),
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        let positions = gate_source_positions(
+            &map,
+            source,
+            &adapted.input,
+            &preset.gates[0],
+            &report.gates[0],
+        )
+        .unwrap();
+        assert_eq!(positions, vec![Some((1, source.find("[évi").unwrap() + 1))]);
+    }
+
+    #[test]
+    fn literal_markdown_html_review_withholds_ambiguous_source_and_respects_scope() {
+        let malformed = "<p><b>[test](/x)</p></b>";
+        let (adapted, _, _, _) = html_content_with_literal_markdown_projection(
+            "x",
+            malformed,
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert!(adapted.context.literal_markdown_links.is_none());
+        let source = "<nav>[menu](/menu)</nav><main><p>Plain content.</p></main>";
+        let (adapted, _, _, _) =
+            html_content_with_literal_markdown_projection("x", source, HtmlContentScope::Main)
+                .unwrap();
+        assert_eq!(adapted.context.literal_markdown_links, Some(vec![]));
+        let (default, _, _, _) =
+            html_content_with_literal_projection("x", source, HtmlContentScope::Main).unwrap();
+        assert!(default.context.literal_markdown_links.is_none());
+    }
+
     #[test]
     fn structured_lists_require_matching_explicit_html_and_dom() {
         use crate::markdown_adapter::StructuredList;
