@@ -383,6 +383,9 @@ fn observe_literal_markdown_links(
         }
         masked_until = masked_until.max(end);
     }
+    if !candidate.contains(&b'[') {
+        return Some(Vec::new());
+    }
     let candidate = std::str::from_utf8(&candidate).ok()?;
     let offsets = crate::markdown_adapter::literal_markdown_link_offsets(candidate).ok()?;
     if offsets.len() > MAX_HTML_CONTENT_NODES {
