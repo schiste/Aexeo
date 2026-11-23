@@ -102,7 +102,7 @@ pub fn command_link_graph_incremental(matches: &ArgMatches) -> Result<i32> {
     let mut writer = io::BufWriter::new(stdout.lock());
     for path in matches
         .get_many::<String>("candidates")
-        .expect("candidates are required")
+        .ok_or_else(|| anyhow::anyhow!("at least one candidate is required"))?
     {
         let input = read_input(path)?;
         let result = baseline

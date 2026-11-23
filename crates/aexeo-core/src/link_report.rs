@@ -1248,7 +1248,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
 fn build_link_report_with(
     input: &LinkReportInput,
     mut extract: impl FnMut(&RenderedPage, &str, Option<&str>) -> (Vec<LinkEvidence>, HtmlLinkMetadata),
-    mut count: impl FnMut(Vec<LinkEvidence>) -> LinkCounts,
+    count: impl FnOnce(Vec<LinkEvidence>) -> LinkCounts,
 ) -> anyhow::Result<LinkReport> {
     anyhow::ensure!(
         input.version == 1,
@@ -1863,14 +1863,13 @@ impl LinkReportBaseline {
                 }
             }
         }
-        let mut links = Some(links);
         let report = build_link_report_with(
             input,
             |page, _, _| {
                 let cached = &pages[&page.url];
                 (cached.links.clone(), cached.metadata.clone())
             },
-            |_| links.take().expect("report counts links once"),
+            |_| links,
         )?;
         Ok(IncrementalLinkReport {
             report,
