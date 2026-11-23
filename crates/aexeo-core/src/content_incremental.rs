@@ -86,6 +86,7 @@ pub struct IncrementalBaseline {
     link_observations:
         Option<BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>>,
     partial_links: bool,
+    partial_results: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -234,6 +235,7 @@ fn validate_preset(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_item(
     preset: &ContentPreset,
     item: &CandidateItem,
@@ -242,6 +244,7 @@ fn evaluate_item(
     link_snapshot: Option<&crate::content_gate_verdict::LinkObservationSnapshot>,
     evidence: Option<&BTreeMap<String, String>>,
     partial_links: bool,
+    partial_results: bool,
 ) -> Result<ContentReport, NotChecked> {
     let classify_prose = preset
         .gates
@@ -413,7 +416,7 @@ fn evaluate_item(
             literal_projection.as_deref(),
         )
         .map_err(|_| unavailable("content evaluation failed"))?;
-    if !partial_links
+    if !partial_results
         && report
             .gates
             .iter()
@@ -588,6 +591,7 @@ impl IncrementalBaseline {
             link_observations,
             evidence,
             false,
+            false,
         )
     }
 
@@ -612,9 +616,36 @@ impl IncrementalBaseline {
             Some(observations),
             evidence,
             true,
+            true,
         )
     }
 
+    /// Retain individual unchecked gates when other item results can be assessed.
+    /// Inventories must still match their identities and observed links must be complete.
+    /// Callers must inspect each report and must not interpret an unchecked gate as a pass.
+    pub fn prepare_adapted_with_partial_results(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
+        observations: Option<
+            BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: Option<IncrementalEvidence>,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode_partial(
+            snapshot,
+            preset,
+            ProjectionMode::Adapted(html_scope),
+            metadata,
+            observations,
+            evidence,
+            false,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn prepare_with_mode_partial(
         snapshot: CandidateSnapshot,
         preset: ContentPreset,
@@ -625,6 +656,7 @@ impl IncrementalBaseline {
         >,
         evidence: Option<IncrementalEvidence>,
         partial_links: bool,
+        partial_results: bool,
     ) -> Result<Self, NotChecked> {
         let snapshot = ValidatedCandidateSnapshot::new(snapshot).map_err(unavailable)?;
         validate_scope(&snapshot, mode)?;
@@ -697,6 +729,7 @@ impl IncrementalBaseline {
                         .and_then(|map| map.get(&item.entity_id)),
                     evidence.as_ref().and_then(|map| map.get(&item.entity_id)),
                     partial_links,
+                    partial_results,
                 )?,
             );
         }
@@ -710,6 +743,7 @@ impl IncrementalBaseline {
             base_metadata: metadata,
             link_observations,
             partial_links,
+            partial_results,
         })
     }
 
@@ -1113,6 +1147,7 @@ impl IncrementalBaseline {
                     observations.and_then(|map| map.get(&item.entity_id)),
                     evidence.and_then(|map| map.get(&item.entity_id)),
                     self.partial_links,
+                    self.partial_results,
                 )?
             };
             reports.insert(item.entity_id.clone(), report);
@@ -1450,7 +1485,9 @@ impl ComposedBaseline {
         preset: ContentPreset,
         html_scope: crate::html_content_adapter::HtmlContentScope,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, None, None, None)
+        Self::prepare_with_observations(
+            snapshot, metadata, preset, html_scope, None, None, None, false,
+        )
     }
 
     /// Prepare both item and collection scopes with source-bound link observations.
@@ -1469,6 +1506,7 @@ impl ComposedBaseline {
             Some(observations),
             None,
             None,
+            false,
         )
     }
 
@@ -1492,6 +1530,7 @@ impl ComposedBaseline {
             observations,
             Some(evidence),
             None,
+            false,
         )
     }
 
@@ -1514,9 +1553,35 @@ impl ComposedBaseline {
             Some(observations),
             evidence,
             Some(unavailable_ids),
+            true,
         )
     }
 
+    /// Preserve unchecked item gates while still evaluating the collection scope.
+    /// Inventory identity and completeness requirements remain unchanged.
+    pub fn prepare_adapted_with_partial_results(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        observations: Option<
+            BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: Option<IncrementalEvidence>,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_observations(
+            snapshot,
+            metadata,
+            preset,
+            html_scope,
+            observations,
+            evidence,
+            None,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn prepare_with_observations(
         snapshot: CandidateSnapshot,
         metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
@@ -1527,6 +1592,7 @@ impl ComposedBaseline {
         >,
         evidence: Option<IncrementalEvidence>,
         unavailable_ids: Option<BTreeSet<String>>,
+        partial_results: bool,
     ) -> Result<Self, NotChecked> {
         preset
             .validate()
@@ -1558,6 +1624,20 @@ impl ComposedBaseline {
                 observations
                     .ok_or_else(|| unavailable("partial link observations are required"))?,
                 unavailable_ids,
+                evidence,
+            )?
+        } else if partial_results {
+            let item_metadata = items
+                .gates
+                .iter()
+                .any(is_item_metadata_gate)
+                .then(|| metadata.clone());
+            IncrementalBaseline::prepare_adapted_with_partial_results(
+                snapshot.clone(),
+                items,
+                html_scope,
+                item_metadata,
+                observations,
                 evidence,
             )?
         } else if let Some(evidence) = evidence {

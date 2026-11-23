@@ -42,6 +42,8 @@ struct Batch {
     #[serde(default)]
     preset_sources: BTreeMap<String, String>,
     mode: Mode,
+    #[serde(default)]
+    allow_partial_results: bool,
     #[serde(default, deserialize_with = "metadata_if_present")]
     base_metadata: Option<Metadata>,
     #[serde(default, deserialize_with = "observations_if_present")]
@@ -113,6 +115,7 @@ enum Baseline {
     Composed(Box<ComposedBaseline>),
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_baseline(
     snapshot: CandidateSnapshot,
     metadata: Option<Metadata>,
@@ -121,6 +124,7 @@ fn prepare_baseline(
     observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
     evidence: Option<IncrementalEvidence>,
     unavailable: Option<BTreeSet<String>>,
+    allow_partial_results: bool,
 ) -> Result<Baseline, NotChecked> {
     if unavailable.is_some() && observations.is_none() {
         return Err(NotChecked {
@@ -166,6 +170,15 @@ fn prepare_baseline(
                 unavailable,
                 evidence,
             )
+        } else if allow_partial_results {
+            ComposedBaseline::prepare_adapted_with_partial_results(
+                snapshot,
+                metadata,
+                preset,
+                scope,
+                observations,
+                evidence,
+            )
         } else if let Some(evidence) = evidence {
             ComposedBaseline::prepare_adapted_with_evidence(
                 snapshot,
@@ -207,6 +220,26 @@ fn prepare_baseline(
                 reason: "partial link inventory requires observations".into(),
             })?,
             unavailable,
+            evidence,
+        )
+        .map(Baseline::Items);
+    }
+    if allow_partial_results {
+        let scope = match mode {
+            Mode::Adapted => HtmlContentScope::Document,
+            Mode::AdaptedMain => HtmlContentScope::Main,
+            _ => {
+                return Err(NotChecked {
+                    reason: "partial results require an adapted mode".into(),
+                });
+            }
+        };
+        return IncrementalBaseline::prepare_adapted_with_partial_results(
+            snapshot,
+            preset,
+            scope,
+            metadata,
+            observations,
             evidence,
         )
         .map(Baseline::Items);
@@ -640,6 +673,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         batch.base_link_observations,
         batch.base_evidence,
         batch.base_link_unavailable,
+        batch.allow_partial_results,
     );
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     let mut totals = Totals::default();
@@ -854,7 +888,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "base_link_unavailable_count":base_link_unavailable_count, "candidate_link_unavailable_count":candidate_link_unavailable_count, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "allow_partial_results":batch.allow_partial_results, "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "base_link_unavailable_count":base_link_unavailable_count, "candidate_link_unavailable_count":candidate_link_unavailable_count, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
         );
     }
     Ok(if totals.not_checked != 0 {

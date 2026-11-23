@@ -2086,6 +2086,17 @@ projected in the selected scope, body-dependent gates for that item remain
 unchecked while other items can still be assessed. The CLI returns exit 2 for
 any such partial result, including advisory gates; never treat `evaluated` alone
 as a pass. Existing callers without the unavailable arrays keep strict behavior.
+For independently assessed item gates, a host can also opt into
+`"allow_partial_results": true` in an adapted batch. This preserves available
+item findings when another gate cannot run, for example when an identity's
+`base_metadata` entry is explicitly `null`. An empty metadata object instead
+means that the fields were observed and absent. The inventory must still cover
+exactly the base identities, candidate metadata must remain bound to its change,
+and other inventory validation is unchanged. Composed item and collection gates
+retain their own coverage. Any unchecked gate yields CLI exit 2, including
+advisory gates. The setting defaults to false and requires an adapted mode for
+item evaluation. Optional telemetry reports the setting without field values.
+
 The `--export-link-observations` template exporter reports unavailable IDs for
 unprojectable plain text or HTML, and includes empty arrays when needed to keep
 all proposals in the same partial mode. The host supplies actual observations;

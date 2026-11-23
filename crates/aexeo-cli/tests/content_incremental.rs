@@ -1448,3 +1448,105 @@ fn partial_link_batch_keeps_other_items_when_html_scope_is_unavailable() {
         "not_checked"
     );
 }
+
+#[test]
+fn partial_results_preserve_items_with_unavailable_metadata() {
+    let source = "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n";
+    let mut input = metadata_batch(source);
+    input["base_metadata"]["b"] = Value::Null;
+    let strict = run(&input, &[]);
+    assert_eq!(strict.status.code(), Some(2));
+    assert_eq!(lines(&strict)[0]["result"]["status"], "not_checked");
+
+    input["allow_partial_results"] = json!(true);
+    let output = run(&input, &["--telemetry"]);
+    assert_eq!(output.status.code(), Some(2));
+    let rows = lines(&output);
+    let result = &rows[0]["result"];
+    assert_eq!(result["status"], "evaluated");
+    assert_eq!(result["reports"]["a"]["gates"][1]["status"], "passed");
+    assert_eq!(result["reports"]["b"]["gates"][0]["status"], "passed");
+    assert_eq!(result["reports"]["b"]["gates"][1]["status"], "not_checked");
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["allow_partial_results"], true);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("description"));
+
+    // An observed empty projection is an actual missing value, not unknown.
+    input["base_metadata"]["b"] = json!({});
+    let empty = run(&input, &[]);
+    assert_eq!(empty.status.code(), Some(1));
+    assert_eq!(
+        lines(&empty)[0]["result"]["reports"]["b"]["gates"][1]["status"],
+        "failed"
+    );
+    input["base_metadata"]["b"] = Value::Null;
+
+    // A metadata-only change must invalidate the old unavailable report.
+    let item = input["snapshot"]["items"][0].clone();
+    let state = json!({"sha256":item["sha256"], "inline":"abc"});
+    input["proposals"][0]["change"]["entries"] = json!([{
+        "entity_id":"b", "operation":"update", "media_type":"text/plain",
+        "public_path":"/b", "before":state, "after":state,
+        "metadata":{"description":"now available"}
+    }]);
+    input["proposals"][0]["after"] = json!([item]);
+    input["proposals"].as_array_mut().unwrap().truncate(1);
+    let refreshed = run(&input, &[]);
+    assert_eq!(refreshed.status.code(), Some(0));
+    let row = &lines(&refreshed)[0]["result"];
+    assert_eq!(row["evaluated"], 1);
+    assert_eq!(row["reused"], 0);
+    assert_eq!(row["reports"]["b"]["gates"][1]["status"], "passed");
+
+    input["base_metadata"] = json!({});
+    assert_eq!(
+        lines(&run(&input, &[]))[0]["result"]["status"],
+        "not_checked"
+    );
+}
+
+#[test]
+fn partial_results_compose_item_and_collection_uncertainty() {
+    let source = "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n";
+    let mut input = metadata_batch(source);
+    input["base_metadata"]["b"] = Value::Null;
+    input["allow_partial_results"] = json!(true);
+    let output = run(&input, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    let rows = lines(&output);
+    let result = &rows[0]["result"];
+    assert_eq!(result["status"], "composed");
+    assert_eq!(
+        result["items"]["reports"]["b"]["gates"][0]["status"],
+        "passed"
+    );
+    assert_eq!(
+        result["items"]["reports"]["b"]["gates"][1]["status"],
+        "not_checked"
+    );
+    assert_eq!(result["collection"]["report"]["summary"]["not_checked"], 1);
+}
+
+#[test]
+fn partial_results_do_not_weaken_evidence_inventory_validation() {
+    let source = "version=1\nname='custom'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='abc'\nquote='quote'\n";
+    let mut input = metadata_batch(source);
+    input["base_metadata"]["b"] = Value::Null;
+    input["allow_partial_results"] = json!(true);
+    input["base_evidence"] = json!({"b":{"study":"quote"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["evidence"] = json!({"a":{"study":"quote"},"b":{"study":"quote"}});
+    }
+    let output = run(&input, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(lines(&output)[0]["result"]["status"], "evaluated");
+    input["proposals"][0]["evidence"]
+        .as_object_mut()
+        .unwrap()
+        .remove("b");
+    let output = run(&input, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    let rows = lines(&output);
+    assert_eq!(rows[0]["result"]["status"], "not_checked");
+    assert_eq!(rows[1]["result"]["status"], "evaluated");
+}
