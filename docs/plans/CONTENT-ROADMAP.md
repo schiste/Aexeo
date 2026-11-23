@@ -62,7 +62,7 @@ excluded the two `askYourAi` components. This is a host mapping assumption, not
 proof of rendered output. A separate local UTF-16 regression covered moved
 findings and changed candidate digests.
 
-Structural heading, link and list anchors are under review in
+Structural heading, link and list anchors are implemented in
 [#891](https://github.com/schiste/Aexeo/pull/891). Its local end-to-end trial
 mapped all three finding kinds to a synthetic CMS row; on the same real record,
 2 heading and 10 link paths resolved to text fields, while list structure was
