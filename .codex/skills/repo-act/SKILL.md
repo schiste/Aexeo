@@ -94,6 +94,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `cargo run -p aexeo-cli -- docs generate .`, then run `cargo run -p aexeo-cli -- docs check .`.
   After integrating another CLI change, regenerate and check the combined tree.
 - Run the fastest relevant test command first.
+- When comparing Rust performance across revisions, build each revision with a
+  separate clean `CARGO_TARGET_DIR` and verify the executable comes from that
+  build. Reusing a target directory with an archived tree can reuse stale
+  artifacts and invalidate the comparison. Use the same fixture and report
+  local measurement limits; one synthetic run is not a production guarantee.
 - For targeted Rust formatting, use the edition declared by the target crate or
   workspace (currently 2024 here). Invoking `rustfmt` with a different edition
   can change import ordering; check the focused file with the same edition or
