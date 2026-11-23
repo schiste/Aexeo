@@ -47,8 +47,8 @@ view for literal checks alongside their masked rhythm view
 ([#882](https://github.com/schiste/Aexeo/pull/882)). These checks do not prove
 that the host projection matches the CMS or the rendered page.
 
-[#884](https://github.com/schiste/Aexeo/pull/884) proposes exposing the native
-CMS adapter and an exporter for these projections. A synthetic installed-package
+[#884](https://github.com/schiste/Aexeo/pull/884) exposes the native CMS
+adapter and an exporter for these projections. A synthetic installed-package
 and WASM-to-CLI trial covered a failed check, a newly projected candidate and a
 passing recheck. Unmapped components left dependent observations unavailable.
 This is a local trial, not a deployed CMS action or a publication authorization.
