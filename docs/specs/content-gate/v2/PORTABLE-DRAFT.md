@@ -4,6 +4,14 @@ Status: proposal, not a released protocol or publication authorization. The
 existing experimental envelopes and their CLI flags are unchanged. A consumer
 must not treat an experimental envelope as this proposed version.
 
+For link reachability, a supplied observation inventory must include each
+changed entity for which the verdict claims a completed link check. A missing
+entity is unobserved and its check must be `not_checked`, even when an evaluator
+could have inferred an empty link list. Hosts can supply an explicit empty entry
+for a known empty list; the Rust verifier checks supplied destinations against
+the candidate source. This conservative rule prevents a matching but fabricated
+verdict from turning omitted evidence into a pass.
+
 ## Wire envelope
 
 The proposed envelope is a JSON object with exactly these required fields:

@@ -181,6 +181,7 @@ fn verify_link_observation_statuses(
     snapshots: &ChangeLinkSnapshots,
     preset: &ContentPreset,
     verdict: &Verdict,
+    change: &Change,
 ) -> Result<()> {
     use crate::content_gate::{ContentGate, LinkReachabilityObservation};
     let checks: std::collections::BTreeMap<_, _> = verdict
@@ -188,6 +189,23 @@ fn verify_link_observation_statuses(
         .iter()
         .map(|check| (check.id.as_str(), check))
         .collect();
+    for entry in &change.entries {
+        if entry.after.is_none() || snapshots.entries.contains_key(&entry.entity_id) {
+            continue;
+        }
+        for gate in &preset.gates {
+            if !matches!(gate, ContentGate::LinkReachability { .. }) {
+                continue;
+            }
+            let id = scoped_id("gate", &entry.entity_id, gate.id());
+            let check = checks
+                .get(id.as_str())
+                .ok_or_else(|| anyhow::anyhow!("link reachability check is missing"))?;
+            if check.status != CheckStatus::NotChecked {
+                bail!("link reachability status contradicts missing observations");
+            }
+        }
+    }
     for (entity, snapshot) in &snapshots.entries {
         let incomplete = snapshot
             .observations
@@ -1375,7 +1393,12 @@ pub fn verify_draft_passing_candidate_with_content<
             scope,
             Some(context.after),
         )?;
-        verify_link_observation_statuses(snapshots, context.decision.preset, &envelope.verdict)?;
+        verify_link_observation_statuses(
+            snapshots,
+            context.decision.preset,
+            &envelope.verdict,
+            context.decision.change,
+        )?;
     }
     Ok(())
 }
@@ -3746,7 +3769,19 @@ mod tests {
             snapshots.entries.get_mut("article").unwrap().observations[0] = observation;
             verdict.checks[0].status = status;
             assert_eq!(
-                verify_link_observation_statuses(&snapshots, &policy, &verdict).is_ok(),
+                verify_link_observation_statuses(&snapshots, &policy, &verdict, &change()).is_ok(),
+                valid
+            );
+        }
+        snapshots.entries.clear();
+        for (status, valid) in [
+            (CheckStatus::Passed, false),
+            (CheckStatus::Failed, false),
+            (CheckStatus::NotChecked, true),
+        ] {
+            verdict.checks[0].status = status;
+            assert_eq!(
+                verify_link_observation_statuses(&snapshots, &policy, &verdict, &change()).is_ok(),
                 valid
             );
         }
@@ -7043,6 +7078,53 @@ mod tests {
         assert!(
             verify_partial(&honest).is_err(),
             "partial observations were accepted as a completed check"
+        );
+        let mut absent = snapshots.clone();
+        absent.entries.clear();
+        let absent_context = CandidateLinkDecisionContext {
+            candidate: &advisory_candidate,
+            snapshots: &absent,
+        };
+        let mut honest_absent = evaluate_draft_portable_candidate_link_verdict(
+            &absent_context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            scope,
+        )
+        .unwrap();
+        let absent_evidence = LinkSnapshotDecisionContext {
+            offline: &advisory_decision,
+            snapshots: &absent,
+        }
+        .artifacts_with_html_scope(scope)
+        .unwrap()
+        .external_evidence;
+        let verify_absent = |verdict: &_| {
+            verify_draft_passing_candidate_with_content(
+                verdict,
+                &advisory_candidate,
+                scope,
+                Some(&absent_evidence),
+                &advisory_requirements,
+                &mut IndependentBytes(source.as_bytes().to_vec()),
+                1024,
+                1024,
+            )
+        };
+        assert!(verify_absent(&honest_absent).is_ok());
+        let link_check = honest_absent
+            .verdict
+            .checks
+            .iter_mut()
+            .find(|c| c.id == "gate:7:article:links")
+            .unwrap();
+        link_check.status = CheckStatus::Passed;
+        link_check.reason = None;
+        honest_absent.verdict.summary.not_checked -= 1;
+        honest_absent.verdict.summary.passed += 1;
+        assert!(
+            verify_absent(&honest_absent).is_err(),
+            "missing observations were accepted as a completed check"
         );
         // Referenced candidate states must support the same link evidence as
         // inline states, after independently checking the host-provided bytes.
