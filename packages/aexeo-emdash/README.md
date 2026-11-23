@@ -414,7 +414,9 @@ projection suitable for Aexeo's `content --input-format adapter-json` or
 `content-revise --input-format adapter-json`. It retains the masked and literal
 views of numeric citations and explicitly withholds unavailable capabilities.
 To start from a CMS row, use the same entry point's `adaptContentItem(row,
-options)` and pass its `.document` to `projectContentAdapter`. Explicitly
+options)` and pass the unchanged result to `projectAdaptedContentAdapter`.
+Its native paths refer to the original row's `data` object; spans that cannot
+be linked to unchanged source paths are omitted. Explicitly
 configure content fields and component mappings to match the host renderer;
 unmapped components can make body capabilities unavailable. A mapping that
 excludes a component is a host assertion that it adds no relevant content.
@@ -428,9 +430,12 @@ failures do not affect the export.
 The export includes metadata values and the fields explicitly observed by the
 adapter. A listed field with no value is observed absent; an unlisted field is
 unavailable. Fields with unverified sources are withheld, and no fields are
-assumed observed when the document does not provide coverage. Native block/span
-locations are omitted. The host must configure mappings that reflect its real
-CMS fields. Regenerate the export from each exact proposed snapshot, and retain
+assumed observed when the document does not provide coverage. The export includes native paths for spans in the projected EmDash document
+when those observations fit the projection limits. `projectContentAdapter`
+paths refer to the projected document; `projectAdaptedContentAdapter` paths
+refer to the CMS row's `data` object. Bind either to the unchanged revision
+before editing. The host must configure mappings that reflect its real CMS
+fields. Regenerate the export from each exact proposed snapshot, and retain
 the host's revision identity separately. The export does
 not establish that a component mapping matches the renderer, source freshness,
 or permission to publish. Some gates require capabilities this projection

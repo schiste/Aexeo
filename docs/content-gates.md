@@ -2062,3 +2062,15 @@ authenticate them. These experimental item and collection reports are not a
 publication verdict and do not establish site, source, or publication safety.
 
 For adapter JSON with partial metadata coverage, custom extension gates are reported as `not_checked` because the extension contract does not carry field coverage. The revision loop binds the metadata coverage fingerprint as well as metadata values and rejects changes to either between candidates.
+
+Adapter JSON can additionally carry `native_source_map.spans`: ordered,
+non-overlapping UTF-8 byte ranges in the projected `text`, each with a `path`
+of field names and nonnegative array indices and an optional zero-based
+`utf16_start`. JSON reports expose mapped prose findings in
+`native_source_locations` with the path and zero-based UTF-16 offset, plus
+`native_source_mapping` coverage. A gap or unsupported finding remains
+unmapped. The CLI checks bounds, Unicode boundaries and path shape; it cannot
+establish that host-supplied paths identify the original native snapshot or
+that a host transformation preserves UTF-16 offsets. The host must bind and
+verify those observations for the exact candidate. Paths can identify private
+content and are not included in aggregate telemetry.

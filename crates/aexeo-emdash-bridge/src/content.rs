@@ -212,11 +212,19 @@ fn content_input_with_context(
 // Must match the adapter-json reader's per-observation limit.
 const MAX_ADAPTER_OBSERVATIONS: usize = 100_000;
 
-fn bounded_adapter_projection(value: serde_json::Value) -> Result<serde_json::Value> {
-    anyhow::ensure!(
-        serde_json::to_vec(&value)?.len() <= aexeo_core::content_revision_loop::MAX_DRAFT_BYTES,
-        "serialized projection exceeds byte limit"
-    );
+fn bounded_adapter_projection(mut value: serde_json::Value) -> Result<serde_json::Value> {
+    let limit = aexeo_core::content_revision_loop::MAX_DRAFT_BYTES;
+    if serde_json::to_vec(&value)?.len() > limit {
+        // Native coordinates are optional. Preserve a usable content projection
+        // when their serialized overhead would exceed the shared input limit.
+        value
+            .as_object_mut()
+            .and_then(|object| object.remove("native_source_map"));
+        anyhow::ensure!(
+            serde_json::to_vec(&value)?.len() <= limit,
+            "serialized projection exceeds byte limit"
+        );
+    }
     Ok(value)
 }
 
@@ -248,8 +256,8 @@ pub fn content_adapter_projection_with_metadata(
 }
 
 /// Project observed body capabilities for the CLI host adapter contract.
-/// Metadata and source locations are omitted by this body-only helper. The
-/// metadata-aware projection carries explicitly observed CMS fields.
+/// Metadata is omitted by this body-only helper. Native paths identify spans
+/// in the projected document, not necessarily the original CMS record.
 pub fn content_adapter_projection(
     document: &EmdashDocument,
     capabilities: [bool; 4],
@@ -301,6 +309,32 @@ pub fn content_adapter_projection(
         "text exceeds projection limit"
     );
     out["text"] = serde_json::json!(text);
+    let mut native_spans = Vec::new();
+    let mut projected_start = 0usize;
+    let mut native_complete = true;
+    for (block_index, block) in document.body.iter().enumerate() {
+        if block_index > 0 {
+            projected_start += 1;
+        }
+        for (span_index, child) in block.children.iter().enumerate() {
+            let PortableTextChild::Span(span) = child;
+            let end = projected_start + span.text.len();
+            if !span.text.is_empty() {
+                if native_spans.len() == MAX_ADAPTER_OBSERVATIONS {
+                    native_complete = false;
+                    break;
+                }
+                native_spans.push(serde_json::json!({"start":projected_start,"end":end,"path":["body",block_index,"children",span_index,"text"]}));
+            }
+            projected_start = end;
+        }
+        if !native_complete {
+            break;
+        }
+    }
+    if native_complete {
+        out["native_source_map"] = serde_json::json!({"spans":native_spans});
+    }
     if let Some(literal) = literal {
         out["literal_text"] = serde_json::json!(literal);
     }
@@ -2215,10 +2249,19 @@ field = "slug"
         assert_eq!(projected["link_destinations"][0], "#cite_note-source-17");
         assert_eq!(projected["paragraphs"][0]["list_item"], false);
         assert!(projected.get("source_map").is_none());
+        assert_eq!(
+            projected["native_source_map"]["spans"][1]["path"],
+            serde_json::json!(["body", 0, "children", 1, "text"])
+        );
+        assert_eq!(
+            projected["native_source_map"]["spans"][1]["start"],
+            "Élan.".len()
+        );
 
         let unavailable = content_adapter_projection(&document, [false; 4], false).unwrap();
         assert!(unavailable["text"].is_null());
         assert!(unavailable.get("literal_text").is_none());
+        assert!(unavailable.get("native_source_map").is_none());
         assert!(unavailable.get("paragraphs").is_none());
         assert!(unavailable.get("link_destinations").is_none());
     }
