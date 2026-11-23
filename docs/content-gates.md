@@ -2080,10 +2080,12 @@ rejected. An empty unavailable array means every identity was observed. These
 fields must be omitted rather than set to `null` when the mode is not selected.
 A change to either availability or observed values triggers reevaluation.
 
-An unavailable reachability gate remains `not_checked`, even when other gates
-and entities can report their results. The CLI returns exit 2 for any such
-partial result, including advisory gates; never treat `evaluated` alone as a
-pass. Existing callers without the unavailable arrays keep strict behavior.
+Unavailable gates remain `not_checked`, even when other gates and entities can
+report their results. If an explicitly unavailable item's HTML cannot be
+projected in the selected scope, body-dependent gates for that item remain
+unchecked while other items can still be assessed. The CLI returns exit 2 for
+any such partial result, including advisory gates; never treat `evaluated` alone
+as a pass. Existing callers without the unavailable arrays keep strict behavior.
 The `--export-link-observations` template exporter reports unavailable IDs for
 unprojectable plain text or HTML, and includes empty arrays when needed to keep
 all proposals in the same partial mode. The host supplies actual observations;

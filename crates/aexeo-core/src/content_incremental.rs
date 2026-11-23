@@ -103,7 +103,8 @@ impl ProjectionMode {
     }
 }
 
-/// A complete report only for the narrowly specified independent item gates.
+/// Reports for supported independent item gates. In explicitly partial mode,
+/// reports can contain unchecked gates; callers must inspect their status.
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum IncrementalEvaluation {
@@ -318,29 +319,39 @@ fn evaluate_item(
             } else {
                 crate::html_content_adapter::html_content_with_literal_projection
             };
-            let (adapted, levels, lists, literal_text) =
-                project(&item.entity_id, &item.source, html_scope).map_err(unavailable)?;
-            if preset
-                .gates
-                .iter()
-                .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
-            {
-                structured_lists = adapted.input.text.as_deref().and_then(|projected| {
-                    crate::html_content_adapter::html_structured_lists(
-                        &item.source,
-                        projected,
-                        html_scope,
-                    )
-                });
+            match project(&item.entity_id, &item.source, html_scope) {
+                Ok((adapted, levels, lists, literal_text)) => {
+                    if wants_lists {
+                        structured_lists = adapted.input.text.as_deref().and_then(|projected| {
+                            crate::html_content_adapter::html_structured_lists(
+                                &item.source,
+                                projected,
+                                html_scope,
+                            )
+                        });
+                    }
+                    literal_projection = literal_text;
+                    paragraph_list_items = lists;
+                    heading_levels = Some(levels);
+                    let count = adapted.destinations.len();
+                    if wants_destinations {
+                        destinations = Some(adapted.destinations);
+                    }
+                    (adapted.input, Some(adapted.context), Some(count))
+                }
+                Err(reason) if partial_links && link_snapshot.is_none() => (
+                    ContentInput {
+                        id: item.entity_id.clone(),
+                        ..Default::default()
+                    },
+                    Some(crate::content_gate::ContentContext {
+                        input_limit: Some(reason.into()),
+                        ..Default::default()
+                    }),
+                    None,
+                ),
+                Err(reason) => return Err(unavailable(reason)),
             }
-            literal_projection = literal_text;
-            paragraph_list_items = lists;
-            heading_levels = Some(levels);
-            let count = adapted.destinations.len();
-            if wants_destinations {
-                destinations = Some(adapted.destinations);
-            }
-            (adapted.input, Some(adapted.context), Some(count))
         }
         (_, "text/plain") => {
             let paragraphs = mode != ProjectionMode::Plain;
@@ -402,13 +413,11 @@ fn evaluate_item(
             literal_projection.as_deref(),
         )
         .map_err(|_| unavailable("content evaluation failed"))?;
-    if report
-        .gates
-        .iter()
-        .any(|gate| gate.status == GateStatus::NotChecked
-            && !(partial_links && preset.gates.iter().any(|configured| {
-                matches!(configured, ContentGate::LinkReachability { id, .. } if id == &gate.gate_id)
-            })))
+    if !partial_links
+        && report
+            .gates
+            .iter()
+            .any(|gate| gate.status == GateStatus::NotChecked)
     {
         return Err(unavailable("a required item gate was not checked"));
     }

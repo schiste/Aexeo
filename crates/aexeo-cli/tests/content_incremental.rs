@@ -1384,3 +1384,67 @@ fn partial_link_template_marks_base_mode_when_only_candidate_is_unavailable() {
         );
     }
 }
+
+#[test]
+fn partial_link_batch_keeps_other_items_when_html_scope_is_unavailable() {
+    let mut input = batch();
+    input["mode"] = json!("adapted_main");
+    input["preset"] = json!("links");
+    input["preset_sources"] = json!({"links":"version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"});
+    input["snapshot"]["items"][0]["media_type"] = json!("text/html");
+    input["snapshot"]["items"][0]["source"] = json!("<nav>Missing main</nav>");
+    input["snapshot"]["items"][0]["sha256"] =
+        json!("6637dd03f5a38e10ff223c751f58dbd5b940931fbb4390e00c19a2111dfa3ddc");
+    let source = "[example](https://example.org)";
+    let digest = "b64cfc245d95ab25d38166f5a37f7263a0495a5588c728f959f3cb596e4a55d8";
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["after"][0]["source"] = json!(source);
+        proposal["after"][0]["sha256"] = json!(digest);
+        proposal["after"][0]["media_type"] = json!("text/markdown");
+        proposal["change"]["entries"][0]["after"]["inline"] = json!(source);
+        proposal["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+        proposal["change"]["entries"][0]["media_type"] = json!("text/markdown");
+    }
+    let output = run(&input, &["--export-link-observations"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut templates: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(templates["base_link_unavailable"], json!(["b"]));
+    input["base_link_unavailable"] = templates["base_link_unavailable"].take();
+    input["base_link_observations"] = templates["base_link_observations"].take();
+    for (i, proposal) in input["proposals"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        proposal["link_unavailable"] = templates["proposals"][i]["link_unavailable"].take();
+        proposal["link_observations"] = templates["proposals"][i]["link_observations"].take();
+        proposal["link_observations"]["a"]["observations"][0] = json!("reachable");
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows = lines(&output);
+    assert_eq!(rows[0]["result"]["status"], "evaluated");
+    assert_eq!(
+        rows[0]["result"]["reports"]["a"]["gates"][0]["status"],
+        "passed"
+    );
+    assert_eq!(
+        rows[0]["result"]["reports"]["b"]["gates"][0]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        rows[0]["result"]["reports"]["b"]["gates"][1]["status"],
+        "not_checked"
+    );
+}
