@@ -109,6 +109,8 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                if entry.get('after') is not None]
     item_media = {entry['entity_id']: entry['media_type'] for entry in change['entries']
                   if entry.get('after') is not None}
+    item_metadata = {entry['entity_id']: entry.get('metadata') for entry in change['entries']
+                     if entry.get('after') is not None}
     ids = set()
     expected_count = 0
     for gate in policy['gates']:
@@ -155,6 +157,9 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                                  'duplicate_headings', 'prose_sentence_length_variance'}
                     and check.get('status') != 'not_checked'):
                 raise VerificationError('candidate evaluator cannot inspect structure in plain text')
+            if (kind in {'required_metadata', 'metadata_length', 'metadata_age'}
+                    and item_metadata.get(entity) is None and check.get('status') != 'not_checked'):
+                raise VerificationError('candidate evaluator cannot inspect unavailable metadata')
             if kind in {'editorial_pacing', 'evidence_anchors', 'structured_fact', 'evidence_review', 'evidence_review_age'}:
                 required = ['source'] + (['review'] if kind in {'evidence_review', 'evidence_review_age'} else [])
                 item_sources = sources.get(entity, {}) if sources is not None else {}

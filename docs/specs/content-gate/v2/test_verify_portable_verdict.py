@@ -289,6 +289,29 @@ class PortableComparison(unittest.TestCase):
                         with self.assertRaises(VerificationError):
                             require_policy_coverage(policy, change, False, verdict)
 
+    def test_missing_metadata_cannot_be_reported_as_checked(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        for kind in ('required_metadata', 'metadata_length', 'metadata_age'):
+            policy['gates'][0]['kind'] = kind
+            for metadata in (None, {}):
+                if metadata is None:
+                    change['entries'][0].pop('metadata', None)
+                else:
+                    change['entries'][0]['metadata'] = metadata
+                for blocking in (True, False):
+                    policy['gates'][0]['blocking'] = blocking
+                    verdict['checks'][0]['blocking'] = blocking
+                    for status in ('passed', 'failed', 'not_checked'):
+                        verdict['checks'][0]['status'] = status
+                        with self.subTest(kind=kind, metadata=metadata, blocking=blocking, status=status):
+                            if metadata is not None or status == 'not_checked':
+                                require_policy_coverage(policy, change, False, verdict)
+                            else:
+                                with self.assertRaises(VerificationError):
+                                    require_policy_coverage(policy, change, False, verdict)
+
     def test_unavailable_host_capabilities_cannot_be_reported_as_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])
