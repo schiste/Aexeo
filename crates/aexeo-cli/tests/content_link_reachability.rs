@@ -170,6 +170,15 @@ fn host_link_snapshot_is_bound_to_source_and_order_for_markdown_and_html() {
         fs::write(&snapshot, serde_json::to_vec(&value).unwrap()).unwrap();
         let output = run();
         let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let snapshot_hash: String = digest(&SHA256, &fs::read(&snapshot).unwrap())
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            report["input_fingerprint"]["link_observations_sha256"],
+            snapshot_hash
+        );
         assert_eq!(report["gates"][0]["status"], "not_checked");
         assert_eq!(report["gates"][0]["findings"].as_array().unwrap().len(), 1);
         let logs = String::from_utf8_lossy(&output.stderr);
@@ -180,6 +189,16 @@ fn host_link_snapshot_is_bound_to_source_and_order_for_markdown_and_html() {
         let complete = run();
         assert!(complete.status.success());
         let report: serde_json::Value = serde_json::from_slice(&complete.stdout).unwrap();
+        let changed_hash: String = digest(&SHA256, &fs::read(&snapshot).unwrap())
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_ne!(snapshot_hash, changed_hash);
+        assert_eq!(
+            report["input_fingerprint"]["link_observations_sha256"],
+            changed_hash
+        );
         assert_eq!(report["gates"][0]["status"], "passed");
         value["destinations"] =
             serde_json::json!(["https://example.org/b", "https://example.org/a"]);

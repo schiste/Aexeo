@@ -199,7 +199,12 @@ A snapshot from different candidate bytes or destinations is rejected. Omitting
 one from a proposal does not reuse the previous snapshot: selected checks that
 need it remain `not_checked`. The host chooses whether and how to observe links;
 the loop performs no network check and does not establish observation freshness
-or authenticity. Snapshot files and reports may contain private URLs.
+or authenticity. When the JSON report contains an `input_fingerprint`, a
+supplied snapshot additionally produces `link_observations_sha256`, the SHA-256
+of the exact UTF-8 file bytes read for that evaluation. It is omitted when no
+snapshot is supplied, including live link checks. Retaining the snapshot allows
+later byte comparison; the digest does not verify the host, observation freshness
+or the eventual publication. Snapshot files, hashes and reports may be sensitive.
 
 The CLI also accepts `content-revise --input projection.json --input-format
 adapter-json --preset PRESET`. Each proposal must be a complete, freshly
