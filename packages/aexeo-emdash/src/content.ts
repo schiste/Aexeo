@@ -92,7 +92,7 @@ export interface ContentAdapterProjection {
   text: string | null;
   literal_text?: string;
   /** Path coordinates are relative to the snapshot documented by the projection function. */
-  native_source_map?: { spans: Array<{ start: number; end: number; path: Array<string | number>; utf16_start?: number }> };
+  native_source_map?: { spans: Array<{ start: number; end: number; path: Array<string | number>; utf16_start?: number }>; heading_paths?: Array<Array<string | number> | null>; link_paths?: Array<Array<string | number> | null>; list_paths?: Array<Array<string | number> | null> };
   metadata?: Record<string, string>;
   observed_metadata_fields?: string[];
   headings?: string[];
@@ -115,6 +115,7 @@ export interface ContentAdapterProjectionTelemetry {
   metadata_values?: number;
   observed_metadata_fields?: number;
   native_source_spans?: number;
+  native_structure_paths?: { headings?: number; links?: number; lists?: number };
 }
 
 /** Export observed body and CMS metadata; native paths identify the projected document. */
@@ -139,7 +140,14 @@ function reportProjectionTelemetry(projection: ContentAdapterProjection, started
     literal_projection_supplied: projection.literal_text !== undefined,
     ...(projection.metadata === undefined ? {} : { metadata_values: Object.keys(projection.metadata).length }),
     ...(projection.observed_metadata_fields === undefined ? {} : { observed_metadata_fields: projection.observed_metadata_fields.length }),
-    ...(projection.native_source_map === undefined ? {} : { native_source_spans: projection.native_source_map.spans.length }),
+    ...(projection.native_source_map === undefined ? {} : {
+      native_source_spans: projection.native_source_map.spans.length,
+      native_structure_paths: {
+        ...(projection.native_source_map.heading_paths === undefined ? {} : { headings: projection.native_source_map.heading_paths.filter(Boolean).length }),
+        ...(projection.native_source_map.link_paths === undefined ? {} : { links: projection.native_source_map.link_paths.filter(Boolean).length }),
+        ...(projection.native_source_map.list_paths === undefined ? {} : { lists: projection.native_source_map.list_paths.filter(Boolean).length }),
+      },
+    }),
   });
 }
 
@@ -152,17 +160,25 @@ export async function projectAdaptedContentAdapter(
   const projection = await projectContentAdapter(adapted.document);
   if (projection.native_source_map) {
     const encoder = new TextEncoder();
-    projection.native_source_map.spans = projection.native_source_map.spans.flatMap(span => {
-      const [body, block, children, child, text] = span.path;
-      if (span.path.length !== 5 || body !== "body" || children !== "children" || text !== "text" ||
-          typeof block !== "number" || typeof child !== "number" || !Number.isSafeInteger(block) || !Number.isSafeInteger(child) || block < 0 || child < 0) return [];
+    const mapPath = (original: Array<string | number>): Array<string | number> | null => {
+      const [body, block, children, child, text] = original;
+      if (original.length !== 5 || body !== "body" || children !== "children" || text !== "text" ||
+          typeof block !== "number" || typeof child !== "number" || !Number.isSafeInteger(block) || !Number.isSafeInteger(child) || block < 0 || child < 0) return null;
       const blockPath = adapted.meta.bodySourcePaths?.[block];
       const path = blockPath ? [...blockPath, "children", child, "text"] : adapted.meta.bodySourceSpanPaths?.[block]?.[child];
       const validPath = path && path.length > 0 && path.length <= 32 && path.every(part =>
         typeof part === "string" ? part.length > 0 && encoder.encode(part).length <= 256 : Number.isSafeInteger(part) && part >= 0,
       );
-      return validPath ? [{ ...span, path }] : [];
+      return validPath ? path : null;
+    };
+    projection.native_source_map.spans = projection.native_source_map.spans.flatMap(span => {
+      const path = mapPath(span.path);
+      return path ? [{ ...span, path }] : [];
     });
+    for (const key of ["heading_paths", "link_paths", "list_paths"] as const) {
+      const paths = projection.native_source_map[key];
+      if (paths) projection.native_source_map[key] = paths.map(path => path ? mapPath(path) : null);
+    }
     // The CLI binds and reads the entire projection under this shared limit.
     // Paths are optional when their serialized overhead exceeds the budget.
     if (encoder.encode(JSON.stringify(projection)).length > 16 * 1024 * 1024) delete projection.native_source_map;
