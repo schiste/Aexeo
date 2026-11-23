@@ -2469,7 +2469,8 @@ fn the_text_report_qualifies_orphan_findings_only_with_a_link_report() {
         &inventory,
         &["--link-graph-output", "graph.json"],
     );
-    let finding = "LNK002 [hard/high] no inbound links observed in the analyzed pages: /orphan";
+    let finding =
+        "LNK002 [heuristic/medium] no inbound links observed in the analyzed pages: /orphan";
     assert!(
         text.contains(&format!("{finding} (confirmed orphan)\n")),
         "{text}"

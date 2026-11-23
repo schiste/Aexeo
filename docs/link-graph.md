@@ -543,8 +543,8 @@ With `--link-graph-output`, the crawl's text report shows each remaining
 finding list and in "Start here":
 
 ```text
-- crawl/orphan/index.html:1:1 LNK002 [hard/high] no inbound links observed in the analyzed pages: /orphan (confirmed orphan)
-- crawl/old/index.html:1:1 LNK002 [hard/high] no inbound links observed in the analyzed pages: /old (not verifiable: crawl incomplete / no inventory)
+- crawl/orphan/index.html:1:1 LNK002 [heuristic/medium] no inbound links observed in the analyzed pages: /orphan (confirmed orphan)
+- crawl/old/index.html:1:1 LNK002 [heuristic/medium] no inbound links observed in the analyzed pages: /old (not verifiable: crawl incomplete / no inventory)
 ```
 
 A finding that is not `confirmed` is "not verifiable", with the report's most

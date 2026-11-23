@@ -26,7 +26,7 @@
 ## `links`
 
 - `LNK001`: broken internal link
-- `LNK002`: orphan page
+- `LNK002`: no observed inbound internal links
 - `LNK003`: weak internal anchor text
 - `LNK004`: insufficient inbound internal links
 
