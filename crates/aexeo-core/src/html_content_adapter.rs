@@ -1445,7 +1445,12 @@ mod tests {
             crate::text_index::LineIndex::new(source)
                 .position(source, source.find("Next").unwrap())
         );
-        for href in ["#cite_note-", "#cite_note_other", "/ordinary"] {
+        for href in [
+            "#reference-",
+            "#cite_note-",
+            "#cite_note_other",
+            "/ordinary",
+        ] {
             let html = format!("<p>Élan.<a href='{href}'>2025</a> Next.</p>");
             assert!(
                 html_content("x", &html)

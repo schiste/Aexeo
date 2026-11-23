@@ -1825,6 +1825,7 @@ mod tests {
                 .position(source, source.find("Next").unwrap())
         );
         for link in [
+            "[2025](#reference-)",
             "[2025](#cite_note-)",
             "[Source 2025](#cite_note-example)",
             "[2025](#cite_note_other)",

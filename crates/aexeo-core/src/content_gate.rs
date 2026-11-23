@@ -232,10 +232,10 @@ fn sentence_is_quoted(
 /// Whether a fragment identifies a supported reference target. This only
 /// recognizes target conventions; it does not establish that the source exists.
 pub fn numeric_reference_destination(href: &str) -> bool {
-    href.starts_with("#reference-")
-        || href
-            .strip_prefix("#cite_note-")
+    ["#reference-", "#cite_note-"].iter().any(|prefix| {
+        href.strip_prefix(prefix)
             .is_some_and(|suffix| !suffix.is_empty())
+    })
 }
 
 fn supported_decimal_digit(ch: char) -> bool {
