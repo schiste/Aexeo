@@ -4631,10 +4631,9 @@ impl ContentPreset {
                     if literal_input.is_err() {
                         reason =
                             Some("literal text projection does not match the observed text".into());
-                    } else if context.is_some_and(|context| {
-                        context.observed_metadata_fields.is_some()
-                            || !context.unavailable_metadata_fields.is_empty()
-                    }) {
+                    } else if context
+                        .is_some_and(|context| context.observed_metadata_fields.is_some())
+                    {
                         reason = Some(
                             "partial metadata coverage cannot be passed to the extension".into(),
                         );
