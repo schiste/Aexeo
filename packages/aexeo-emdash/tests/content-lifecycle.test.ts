@@ -364,7 +364,7 @@ describe("Refresh racing a save", () => {
     expect(result.errors).toContain("Sitewide checks unavailable: content changed during refresh.");
   });
 
-  it("withholds a route reassigned to another record during refresh", async () => {
+  it("preserves a route reassigned to another record during refresh", async () => {
     const { ctx, store } = host([item("a", OLD, "listed")]);
     ctx.content.getPublicUrl = async () => "https://example.com/shared";
     await save(ctx, item("a", OLD, "before"), returning("BEFORE"));
@@ -383,9 +383,7 @@ describe("Refresh racing a save", () => {
     release();
     await refreshing;
     expect(titleAt(store, "/shared")).toBe("replacement");
-    expect(store.get(findingsKey("/shared"))).toMatchObject({
-      findings: [], assessment: { status: "error", reason: "route_collision" },
-    });
+    expect(rulesAt(store, "/shared")).toEqual(["REPLACEMENT"]);
   });
 
   it("keeps a document created after its collection was listed", async () => {

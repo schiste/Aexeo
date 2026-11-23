@@ -1080,9 +1080,6 @@ export async function evaluateAndPersistAll(
     // this read and the following write remains possible.
     if (initial === null ? current !== null : !sameStoredDocument(initial, current)) {
       changedRoutes.add(route);
-      if (current && (current.meta.id !== stored.meta.id || current.meta.collection !== stored.meta.collection)) {
-        await markRouteCollision(ctx, route, current, [current.meta.collection, stored.meta.collection]);
-      }
       continue;
     }
     if (!isOlderRevision(stored.meta.updatedAt, current?.meta.updatedAt)) {
