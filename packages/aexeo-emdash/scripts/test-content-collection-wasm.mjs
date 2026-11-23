@@ -1,7 +1,7 @@
 // Run after the plugin build: this exercises the real WASM, not the mock bridge.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { evaluateContent, evaluateContentCollection, adaptContentItem, projectContentAdapter, projectContentInput, projectLinkDestinations } from "../dist/content.js";
+import { evaluateContent, evaluateContentCollection, adaptContentItem, projectContentAdapter, projectAdaptedContentAdapter, projectContentInput, projectLinkDestinations } from "../dist/content.js";
 
 const adapterDocument = { route: "/article", title: "Article", body: [{
   children: [{ _type: "span", text: "One." }, { _type: "span", text: "[12]", marks: ["ref"] }, { _type: "span", text: " Two." }],
@@ -18,6 +18,10 @@ assert.equal(adapterProjection.text, "One.     Two.");
 assert.equal(adapterProjection.literal_text, "One.[12] Two.");
 assert.deepEqual(adapterProjection.link_destinations, ["#cite_note-source-12"]);
 assert.equal(adapterProjection.paragraphs[0].end, 13);
+assert.deepEqual(adapterProjection.native_source_map.spans.map(span => span.path), [
+  ["body", 0, "children", 0, "text"], ["body", 0, "children", 1, "text"], ["body", 0, "children", 2, "text"],
+]);
+assert.equal(projectionEvents[0].native_source_spans, 3);
 // Exercise the shipped entry point from a CMS row, retaining prose around unknown components.
 const cmsRow = { id: "sample", type: "articles", slug: "sample", status: "published", locale: "en", data: {
   content: [{ _type: "block", ...adapterDocument.body[0] }, { _type: "unknownWidget", message: "opaque" }, { _type: "block", ...adapterDocument.body[0] }],
@@ -30,6 +34,11 @@ assert.equal(adapted.meta.unmappedComponents.entries[0].type, "unknownWidget");
 assert.equal((await projectContentAdapter(adapted.document)).text, null);
 const mapped = adaptContentItem(cmsRow, { contentFields: ["content"], blockMappings: { unknownWidget: [] } });
 assert.equal((await projectContentAdapter(mapped.document)).text, "One.     Two.\nOne.     Two.");
+const cmsProjection = await projectAdaptedContentAdapter(mapped);
+assert.deepEqual(cmsProjection.native_source_map.spans[0].path, ["data", "content", 0, "children", 0, "text"]);
+assert.deepEqual(cmsProjection.native_source_map.spans[3].path, ["data", "content", 2, "children", 0, "text"]);
+const withoutSourcePaths = await projectAdaptedContentAdapter({ ...mapped, meta: { ...mapped.meta, bodySourcePaths: undefined, bodySourceSpanPaths: undefined } });
+assert.deepEqual(withoutSourcePaths.native_source_map.spans, []);
 
 const incompleteProjection = await projectContentAdapter({ ...adapterDocument, body_capabilities: [] });
 assert.equal(incompleteProjection.text, null);

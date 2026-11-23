@@ -77,6 +77,15 @@ impl GateTimer {
 }
 
 #[derive(serde::Serialize)]
+struct NativeSourceLocation<'a> {
+    gate_id: &'a str,
+    finding_index: usize,
+    source: &'static str,
+    path: &'a [serde_json::Value],
+    utf16_offset: usize,
+}
+
+#[derive(serde::Serialize)]
 struct SourceLocation<'a> {
     gate_id: &'a str,
     finding_index: usize,
@@ -294,6 +303,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut adapter_source = None;
     let mut host_projection = None;
     let mut host_source_map = None;
+    let mut native_source_map = None;
     // The event exists only on request and never contains content, paths, or URLs.
     let mut html_projection = (measuring
         && args.get_one::<String>("input-format").map(String::as_str) == Some("html"))
@@ -428,11 +438,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "link_destinations": adapted.destinations.as_ref().map(Vec::len),
                 "paragraph_list_classification": adapted.paragraph_list_items.is_some(),
                 "source_spans": adapted.source_map.as_ref().map(|map| map.span_count()),
+                "native_source_spans": adapted.native_source_map.as_ref().map(|map| map.span_count()),
                 "heading_offsets": adapted.source_map.as_ref().map(|map| map.heading_offset_count()),
                 "link_offsets": adapted.source_map.as_ref().map(|map| map.link_offset_count()),
                 "list_anchors": adapted.source_map.as_ref().map(|map| map.list_anchor_count())
             }));
             host_source_map = adapted.source_map;
+            native_source_map = adapted.native_source_map;
             literal_projection = adapted.literal_text;
             adapter_source = Some(data);
             structured_lists = adapted.lists;
@@ -637,6 +649,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
+    let mut native_source_locations = Vec::new();
     let plain_source = if source_map.is_none() && source_complete && !adapter_json {
         input
             .source_text
@@ -728,7 +741,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             .then(|| map.source_index())
     });
     let host_projected_index = input.text.as_deref().and_then(|text| {
-        host_has_prose_findings.then(|| aexeo_core::text_index::LineIndex::new(text))
+        (host_has_prose_findings || native_source_map.is_some())
+            .then(|| aexeo_core::text_index::LineIndex::new(text))
     });
     let plain_index = plain_source
         .filter(|_| {
@@ -743,6 +757,28 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         })
         .map(aexeo_core::text_index::LineIndex::new);
     for (gate, result) in preset.gates.iter().zip(&report.gates) {
+        if aexeo_core::source_mapping::prose_gate_has_positions(gate)
+            && let (Some(map), Some(index), Some(text)) = (
+                &native_source_map,
+                &host_projected_index,
+                input.text.as_deref(),
+            )
+        {
+            for (finding_index, finding) in result.findings.iter().enumerate() {
+                if let Some((path, utf16_offset)) = index
+                    .offset(text, finding.line, finding.column)
+                    .and_then(|offset| map.position(text, offset))
+                {
+                    native_source_locations.push(NativeSourceLocation {
+                        gate_id: &result.gate_id,
+                        finding_index,
+                        source: "host_supplied_native_path",
+                        path,
+                        utf16_offset,
+                    });
+                }
+            }
+        }
         let hierarchy_positions = if let (
             ContentGate::HeadingHierarchy { initial_level, .. },
             Some(levels),
@@ -953,6 +989,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         output["source_mapping"] = serde_json::json!({
             "eligible": eligible_findings, "mapped": mapped_findings, "unmapped": unmapped_findings
         });
+        if native_source_map.is_some() {
+            output["native_source_locations"] = serde_json::to_value(&native_source_locations)?;
+            output["native_source_mapping"] = serde_json::json!({"eligible": eligible_findings, "mapped": native_source_locations.len(), "unmapped": eligible_findings.saturating_sub(native_source_locations.len())});
+        }
         if mapping_available {
             output["source_locations"] = serde_json::to_value(&source_locations)?;
         }
@@ -964,9 +1004,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
         if adapter_json {
             output["source_location_capability"] = serde_json::json!({
-                "status": if host_source_map.is_some() { "host_supplied_spans" } else { "unavailable" },
+                "status": if host_source_map.is_some() { "host_supplied_spans" } else if native_source_map.is_some() { "host_supplied_native_paths" } else { "unavailable" },
                 "finding_coordinates": "projected_text",
-                "source_coordinates": if host_source_map.is_some() { Some("host_supplied_source_text") } else { None }
+                "source_coordinates": if host_source_map.is_some() { Some("host_supplied_source_text") } else if native_source_map.is_some() { Some("host_supplied_native_path") } else { None }
             });
         }
         if args.get_one::<String>("html-scope").map(String::as_str) == Some("main") {

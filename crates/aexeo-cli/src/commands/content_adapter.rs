@@ -35,6 +35,8 @@ struct AdapterInput {
     link_destinations: Option<Vec<String>>,
     #[serde(default)]
     source_map: Option<HostSourceMap>,
+    #[serde(default)]
+    native_source_map: Option<NativeSourceMap>,
 }
 
 #[derive(Deserialize)]
@@ -51,6 +53,106 @@ struct Paragraph {
 struct List {
     item_count: usize,
     depth: usize,
+}
+
+/// Host-supplied paths into the exact native content snapshot. Paths and their
+/// correspondence to native content remain the host's responsibility.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct NativeSourceMap {
+    spans: Vec<NativeSourceSpan>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeSourceSpan {
+    start: usize,
+    end: usize,
+    path: Vec<serde_json::Value>,
+    #[serde(default)]
+    utf16_start: usize,
+    #[serde(skip)]
+    checkpoints: Vec<(usize, usize)>,
+}
+
+impl NativeSourceMap {
+    fn validate_and_index(&mut self, projected: &str) -> Result<()> {
+        ensure!(
+            self.spans.len() <= MAX_OBSERVATIONS,
+            "native span limit exceeded"
+        );
+        let mut previous_end = 0;
+        for span in &mut self.spans {
+            ensure!(
+                span.start >= previous_end && span.end > span.start,
+                "native spans must be nonempty, ordered and nonoverlapping"
+            );
+            let text = projected
+                .get(span.start..span.end)
+                .ok_or_else(|| anyhow::anyhow!("invalid native span range"))?;
+            ensure!(
+                !span.path.is_empty()
+                    && span.path.len() <= 32
+                    && span.path.iter().all(|part| match part {
+                        serde_json::Value::String(value) => !value.is_empty() && value.len() <= 256,
+                        serde_json::Value::Number(value) => value
+                            .as_u64()
+                            .is_some_and(|index| index <= 9_007_199_254_740_991),
+                        _ => false,
+                    }),
+                "native path must contain bounded field names or nonnegative indices"
+            );
+            let mut units = 0usize;
+            for (index, (offset, character)) in text.char_indices().enumerate() {
+                if index % 128 == 0 {
+                    span.checkpoints.push((offset, units));
+                }
+                units = units
+                    .checked_add(character.len_utf16())
+                    .ok_or_else(|| anyhow::anyhow!("native UTF-16 offset overflow"))?;
+            }
+            ensure!(
+                span.utf16_start
+                    .checked_add(units)
+                    .is_some_and(|end| end <= 9_007_199_254_740_991),
+                "native UTF-16 offset exceeds interoperable integer range"
+            );
+            previous_end = span.end;
+        }
+        Ok(())
+    }
+
+    pub(super) fn position<'a>(
+        &'a self,
+        projected: &str,
+        offset: usize,
+    ) -> Option<(&'a [serde_json::Value], usize)> {
+        let index = self
+            .spans
+            .partition_point(|span| span.start <= offset)
+            .checked_sub(1)?;
+        let span = self.spans.get(index)?;
+        if offset >= span.end {
+            return None;
+        }
+        let relative = offset - span.start;
+        let checkpoint = span
+            .checkpoints
+            .partition_point(|&(start, _)| start <= relative)
+            .checked_sub(1)?;
+        let (start, units) = span.checkpoints[checkpoint];
+        let prefix = projected.get((span.start + start)..offset)?;
+        Some((
+            &span.path,
+            span.utf16_start
+                .checked_add(units)?
+                .checked_add(prefix.encode_utf16().count())?,
+        ))
+    }
+
+    pub(super) fn span_count(&self) -> usize {
+        self.spans.len()
+    }
 }
 
 /// Source bytes and byte-identical host-declared prose and heading locations.
@@ -370,6 +472,7 @@ pub(super) struct AdapterProjection {
     pub paragraph_list_items: Option<Vec<bool>>,
     pub destinations: Option<Vec<String>>,
     pub source_map: Option<HostSourceMap>,
+    pub native_source_map: Option<NativeSourceMap>,
 }
 
 pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
@@ -387,7 +490,8 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
                 && projection.block_ends.is_none()
                 && projection.lists.is_none()
                 && projection.link_destinations.is_none()
-                && projection.source_map.is_none()),
+                && projection.source_map.is_none()
+                && projection.native_source_map.is_none()),
         "text-dependent observations require projected text"
     );
     ensure!(
@@ -521,6 +625,15 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
             })
             .collect()
     });
+    let mut native_source_map = projection.native_source_map;
+    if let Some(map) = &mut native_source_map {
+        map.validate_and_index(
+            projection
+                .text
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("native source map requires projected text"))?,
+        )?;
+    }
     let input = ContentInput {
         id,
         source_text: projection.text.clone(),
@@ -543,5 +656,6 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
         paragraph_list_items,
         destinations: projection.link_destinations,
         source_map: projection.source_map,
+        native_source_map,
     })
 }
