@@ -603,3 +603,46 @@ fn host_list_anchors_reject_wrong_bytes_order_and_utf8_boundaries() {
     fs::write(&file, serde_json::to_vec(&missing).unwrap()).unwrap();
     assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
 }
+
+#[test]
+fn adapter_numeric_citations_keep_rhythm_and_literal_checks_distinct() {
+    use serde_json::{Value, json};
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(
+        &preset,
+        "version=1\nname='custom'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[12]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n",
+    )
+    .unwrap();
+    let file = dir.path().join("adapter.json");
+    let projection = json!({
+        "schema":"aexeo.content-adapter/v1",
+        "text":"One.     Two.",
+        "literal_text":"One.[12] Two."
+    });
+    fs::write(&file, projection.to_string()).unwrap();
+    let output = run(&file, &preset, &["--telemetry"]);
+    let telemetry = String::from_utf8_lossy(&output.stderr);
+    assert!(telemetry.contains(r#""literal_projection_supplied":true"#));
+    assert!(!telemetry.contains("One.[12]"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "passed");
+    assert_eq!(report["gates"][1]["status"], "passed");
+
+    let mut invalid = projection;
+    invalid["literal_text"] = "One.[XX] Two.".into();
+    fs::write(&file, invalid.to_string()).unwrap();
+    let output = run(&file, &preset, &[]);
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(report["gates"][1]["status"], "passed");
+
+    invalid["text"] = Value::Null;
+    fs::write(&file, invalid.to_string()).unwrap();
+    assert!(!run(&file, &preset, &[]).status.success());
+}

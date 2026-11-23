@@ -15,6 +15,8 @@ struct AdapterInput {
     schema: String,
     text: Option<String>,
     #[serde(default)]
+    literal_text: Option<String>,
+    #[serde(default)]
     headings: Option<Vec<String>>,
     #[serde(default)]
     heading_levels: Option<Vec<u8>>,
@@ -356,6 +358,7 @@ impl HostSourceMap {
 
 pub(super) struct AdapterProjection {
     pub input: ContentInput,
+    pub literal_text: Option<String>,
     pub context: ContentContext,
     pub headings: Option<Vec<u8>>,
     pub lists: Option<Vec<StructuredList>>,
@@ -374,7 +377,8 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
     );
     ensure!(
         projection.text.is_some()
-            || (projection.paragraphs.is_none()
+            || (projection.literal_text.is_none()
+                && projection.paragraphs.is_none()
                 && projection.block_ends.is_none()
                 && projection.lists.is_none()
                 && projection.link_destinations.is_none()
@@ -486,6 +490,7 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
     };
     Ok(AdapterProjection {
         input,
+        literal_text: projection.literal_text,
         context: ContentContext {
             paragraphs,
             block_ends: projection.block_ends,

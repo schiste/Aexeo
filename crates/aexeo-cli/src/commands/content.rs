@@ -420,6 +420,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 .user_context("invalid adapter JSON projection")?;
             host_projection = Some(serde_json::json!({
                 "paragraphs": adapted.context.paragraphs.as_ref().map(Vec::len),
+                "literal_projection_supplied": adapted.literal_text.is_some(),
                 "lists": adapted.lists.as_ref().map(Vec::len),
                 "headings": adapted.input.headings.as_ref().map(Vec::len),
                 "link_destinations": adapted.destinations.as_ref().map(Vec::len),
@@ -430,6 +431,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "list_anchors": adapted.source_map.as_ref().map(|map| map.list_anchor_count())
             }));
             host_source_map = adapted.source_map;
+            literal_projection = adapted.literal_text;
             adapter_source = Some(data);
             structured_lists = adapted.lists;
             heading_levels = adapted.headings;
