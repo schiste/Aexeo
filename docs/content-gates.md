@@ -2094,7 +2094,10 @@ means that the fields were observed and absent. The inventory must still cover
 exactly the base identities, candidate metadata must remain bound to its change,
 and other inventory validation is unchanged. Composed item and collection gates
 retain their own coverage. Any unchecked gate yields CLI exit 2, including
-advisory gates. The setting defaults to false and requires an adapted mode for
+advisory gates. If the selected HTML scope cannot be projected, body-dependent
+gates remain unchecked while independently supplied metadata may still be
+assessed. A supplied link snapshot is not accepted without verifying its source
+projection. The setting defaults to false and requires an adapted mode for
 item evaluation. Optional telemetry reports the setting without field values.
 
 The `--export-link-observations` template exporter reports unavailable IDs for

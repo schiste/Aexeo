@@ -1550,3 +1550,39 @@ fn partial_results_do_not_weaken_evidence_inventory_validation() {
     assert_eq!(rows[0]["result"]["status"], "not_checked");
     assert_eq!(rows[1]["result"]["status"], "evaluated");
 }
+
+#[test]
+fn partial_results_preserve_independent_metadata_when_html_scope_is_unavailable() {
+    let source = "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n";
+    let mut input = metadata_batch(source);
+    input["mode"] = json!("adapted_main");
+    input["snapshot"]["items"][0]["media_type"] = json!("text/html");
+    input["snapshot"]["items"][0]["source"] = json!("<nav>Missing main</nav>");
+    input["snapshot"]["items"][0]["sha256"] =
+        json!("6637dd03f5a38e10ff223c751f58dbd5b940931fbb4390e00c19a2111dfa3ddc");
+    let strict = run(&input, &[]);
+    assert_eq!(strict.status.code(), Some(2));
+    assert_eq!(lines(&strict)[0]["result"]["status"], "not_checked");
+
+    input["allow_partial_results"] = json!(true);
+    let partial = run(&input, &[]);
+    assert_eq!(partial.status.code(), Some(2));
+    let rows = lines(&partial);
+    let report = &rows[0]["result"]["reports"];
+    assert_eq!(rows[0]["result"]["status"], "evaluated");
+    assert_eq!(report["a"]["gates"][0]["status"], "passed");
+    assert_eq!(report["b"]["gates"][0]["status"], "not_checked");
+    assert_eq!(report["b"]["gates"][1]["status"], "passed");
+
+    // A claimed observation cannot be trusted if its HTML cannot be projected.
+    input["preset_sources"]["custom"] =
+        json!("version=1\nname='custom'\n[[gates]]\nid='links'\nkind='link_reachability'\n");
+    input["base_link_observations"] = json!({"b":{
+        "version":1,
+        "source_sha256":"6637dd03f5a38e10ff223c751f58dbd5b940931fbb4390e00c19a2111dfa3ddc",
+        "destinations":[],"observations":[]
+    }});
+    let unverifiable = run(&input, &[]);
+    assert_eq!(unverifiable.status.code(), Some(2));
+    assert_eq!(lines(&unverifiable)[0]["result"]["status"], "not_checked");
+}
