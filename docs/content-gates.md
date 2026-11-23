@@ -2068,8 +2068,12 @@ non-overlapping UTF-8 byte ranges in the projected `text`, each with a `path`
 of field names and nonnegative array indices and an optional zero-based
 `utf16_start`. JSON reports expose mapped prose findings in
 `native_source_locations` with the path and zero-based UTF-16 offset, plus
-`native_source_mapping` coverage. A gap or unsupported finding remains
-unmapped. The CLI checks bounds, Unicode boundaries and path shape; it cannot
+`native_source_mapping` coverage. Optional `heading_paths`, `link_paths` and
+`list_paths` arrays in the same map provide paths in exactly the corresponding
+observation order; `null` means that an observation has no known native path.
+Their lengths must match the observed headings, destinations and lists. For
+structural findings, the path identifies the host-supplied anchor and the
+reported UTF-16 offset is zero. A gap or unsupported finding remains unmapped. The CLI checks bounds, Unicode boundaries and path shape; it cannot
 establish that host-supplied paths identify the original native snapshot or
 that a host transformation preserves UTF-16 offsets. The host must bind and
 verify those observations for the exact candidate. Paths can identify private

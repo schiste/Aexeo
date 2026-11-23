@@ -61,6 +61,20 @@ struct List {
 #[serde(deny_unknown_fields)]
 pub(super) struct NativeSourceMap {
     spans: Vec<NativeSourceSpan>,
+    #[serde(default)]
+    heading_paths: Option<Vec<Option<Vec<serde_json::Value>>>>,
+    #[serde(default)]
+    link_paths: Option<Vec<Option<Vec<serde_json::Value>>>>,
+    #[serde(default)]
+    list_paths: Option<Vec<Option<Vec<serde_json::Value>>>>,
+}
+
+pub(super) struct NativeStructureObservations<'a> {
+    pub headings: Option<&'a [String]>,
+    pub levels: Option<&'a [u8]>,
+    pub destinations: Option<&'a [String]>,
+    pub links: Option<&'a [aexeo_core::content_gate::LinkReachabilityObservation]>,
+    pub lists: Option<&'a [StructuredList]>,
 }
 
 #[derive(Deserialize)]
@@ -76,7 +90,28 @@ struct NativeSourceSpan {
 }
 
 impl NativeSourceMap {
-    fn validate_and_index(&mut self, projected: &str) -> Result<()> {
+    fn validate_and_index(
+        &mut self,
+        projected: &str,
+        headings: Option<&[String]>,
+        destinations: Option<&[String]>,
+        lists: Option<&[StructuredList]>,
+    ) -> Result<()> {
+        for (paths, count) in [
+            (&self.heading_paths, headings.map(<[_]>::len)),
+            (&self.link_paths, destinations.map(<[_]>::len)),
+            (&self.list_paths, lists.map(<[_]>::len)),
+        ] {
+            if let Some(paths) = paths {
+                ensure!(
+                    Some(paths.len()) == count && paths.len() <= MAX_OBSERVATIONS,
+                    "native paths must match observed structure"
+                );
+                for path in paths.iter().flatten() {
+                    ensure!(valid_native_path(path), "invalid native structure path");
+                }
+            }
+        }
         ensure!(
             self.spans.len() <= MAX_OBSERVATIONS,
             "native span limit exceeded"
@@ -91,15 +126,7 @@ impl NativeSourceMap {
                 .get(span.start..span.end)
                 .ok_or_else(|| anyhow::anyhow!("invalid native span range"))?;
             ensure!(
-                !span.path.is_empty()
-                    && span.path.len() <= 32
-                    && span.path.iter().all(|part| match part {
-                        serde_json::Value::String(value) => !value.is_empty() && value.len() <= 256,
-                        serde_json::Value::Number(value) => value
-                            .as_u64()
-                            .is_some_and(|index| index <= 9_007_199_254_740_991),
-                        _ => false,
-                    }),
+                valid_native_path(&span.path),
                 "native path must contain bounded field names or nonnegative indices"
             );
             let mut units = 0usize;
@@ -150,9 +177,81 @@ impl NativeSourceMap {
         ))
     }
 
+    pub(super) fn structure_positions<'a>(
+        &'a self,
+        gate: &aexeo_core::content_gate::ContentGate,
+        result: &aexeo_core::content_gate::ContentGateResult,
+        observed: &NativeStructureObservations<'_>,
+    ) -> Option<Vec<Option<&'a [serde_json::Value]>>> {
+        use aexeo_core::content_gate::{
+            ContentGate, heading_finding_indices, heading_hierarchy_indices,
+        };
+        if result.findings.is_empty() {
+            return None;
+        }
+        let (paths, indices): (&_, Vec<usize>) = match gate {
+            ContentGate::HeadingHierarchy { initial_level, .. } => (
+                self.heading_paths.as_ref()?,
+                heading_hierarchy_indices(observed.levels?, *initial_level).collect(),
+            ),
+            ContentGate::HeadingLength { .. } | ContentGate::DuplicateHeadings { .. } => (
+                self.heading_paths.as_ref()?,
+                heading_finding_indices(gate, observed.headings?)?,
+            ),
+            ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. } => {
+                if observed
+                    .links
+                    .is_some_and(|links| Some(links.len()) != observed.destinations.map(<[_]>::len))
+                {
+                    return None;
+                }
+                (
+                    self.link_paths.as_ref()?,
+                    aexeo_core::source_mapping::link_finding_indices(
+                        gate,
+                        observed.destinations,
+                        observed.links,
+                    )?,
+                )
+            }
+            ContentGate::ListItemCount { .. } => (
+                self.list_paths.as_ref()?,
+                aexeo_core::markdown_adapter::list_finding_indices(observed.lists?, gate, result)?,
+            ),
+            _ => return None,
+        };
+        if indices.len() != result.total_findings() {
+            return None;
+        }
+        Some(
+            indices
+                .into_iter()
+                .take(result.findings.len())
+                .map(|index| paths.get(index).and_then(|path| path.as_deref()))
+                .collect(),
+        )
+    }
+
     pub(super) fn span_count(&self) -> usize {
         self.spans.len()
     }
+
+    pub(super) fn structure_path_counts(&self) -> [Option<usize>; 3] {
+        [&self.heading_paths, &self.link_paths, &self.list_paths]
+            .map(|paths| paths.as_ref().map(|paths| paths.iter().flatten().count()))
+    }
+}
+
+fn valid_native_path(path: &[serde_json::Value]) -> bool {
+    !path.is_empty()
+        && path.len() <= 32
+        && path.iter().all(|part| match part {
+            serde_json::Value::String(value) => !value.is_empty() && value.len() <= 256,
+            serde_json::Value::Number(value) => value
+                .as_u64()
+                .is_some_and(|index| index <= 9_007_199_254_740_991),
+            _ => false,
+        })
 }
 
 /// Source bytes and byte-identical host-declared prose and heading locations.
@@ -632,6 +731,9 @@ pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
                 .text
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("native source map requires projected text"))?,
+            projection.headings.as_deref(),
+            projection.link_destinations.as_deref(),
+            lists.as_deref(),
         )?;
     }
     let input = ContentInput {

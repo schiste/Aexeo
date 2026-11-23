@@ -369,21 +369,60 @@ pub fn content_adapter_projection(
             out["paragraphs"] = serde_json::json!(paragraphs);
         }
     }
-    if let Some(lists) = portable_text_structured_lists(document, lists_complete) {
+    let path =
+        |block: usize, span: usize| serde_json::json!(["body", block, "children", span, "text"]);
+    if let Some((lists, anchors)) = portable_text_list_projection(document, lists_complete) {
         out["lists"] = serde_json::json!(
             lists
                 .iter()
                 .map(|list| serde_json::json!({"item_count":list.item_count, "depth":list.depth}))
                 .collect::<Vec<_>>()
         );
+        if native_complete {
+            let paths: Vec<_> = anchors
+                .into_iter()
+                .map(|anchor| anchor.map(|(block, span)| path(block, span)))
+                .collect();
+            out["native_source_map"]["list_paths"] = serde_json::json!(paths);
+        }
     }
     if links_available {
-        let destinations = content_link_destinations(document);
+        let links = content_links(document);
         anyhow::ensure!(
-            destinations.len() <= MAX_ADAPTER_OBSERVATIONS,
+            links.len() <= MAX_ADAPTER_OBSERVATIONS,
             "link observations exceed projection limit"
         );
-        out["link_destinations"] = serde_json::json!(destinations);
+        out["link_destinations"] = serde_json::json!(
+            links
+                .iter()
+                .map(|(destination, _, _)| destination)
+                .collect::<Vec<_>>()
+        );
+        if native_complete {
+            let paths: Vec<_> = links
+                .into_iter()
+                .map(|(_, block, span)| path(block, span))
+                .collect();
+            out["native_source_map"]["link_paths"] = serde_json::json!(paths);
+        }
+    }
+    if native_complete && headings_available {
+        let paths: Vec<_> = document
+            .body
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| is_heading(&block.style))
+            .map(|(block_index, block)| {
+                block
+                    .children
+                    .iter()
+                    .position(|child| match child {
+                        PortableTextChild::Span(span) => !span.text.is_empty(),
+                    })
+                    .map(|span| path(block_index, span))
+            })
+            .collect();
+        out["native_source_map"]["heading_paths"] = serde_json::json!(paths);
     }
     bounded_adapter_projection(out)
 }

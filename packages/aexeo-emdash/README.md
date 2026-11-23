@@ -430,8 +430,12 @@ failures do not affect the export.
 The export includes metadata values and the fields explicitly observed by the
 adapter. A listed field with no value is observed absent; an unlisted field is
 unavailable. Fields with unverified sources are withheld, and no fields are
-assumed observed when the document does not provide coverage. The export includes native paths for spans in the projected EmDash document
-when those observations fit the projection limits. `projectContentAdapter`
+assumed observed when the document does not provide coverage. The export includes native paths for prose spans and anchors for observed
+headings, links and lists when those observations fit the projection limits.
+A structural anchor points to the first relevant text span, not necessarily
+the whole component or link destination. Unknown paths remain unmapped. List
+anchors require the same explicit host attestation of complete list structure
+as list evaluation; their presence does not prove the attestation. `projectContentAdapter`
 paths refer to the projected document; `projectAdaptedContentAdapter` paths
 refer to the complete CMS row. Bind either to the unchanged revision
 before editing. The host must configure mappings that reflect its real CMS

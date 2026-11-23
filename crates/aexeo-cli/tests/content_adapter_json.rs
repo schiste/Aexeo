@@ -766,3 +766,59 @@ fn native_paths_index_long_multibyte_spans_without_offset_drift() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["native_source_locations"][0]["utf16_offset"], 8193);
 }
+
+#[test]
+fn native_paths_map_structures_and_reject_misaligned_anchors() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\nblocking=false\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\nblocking=false\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=false\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let mut projection = json!({"schema":"aexeo.content-adapter/v1", "text":"Body",
+        "headings":["Long heading", "Another heading"], "heading_levels":[1,4],
+        "link_destinations":["https://example.org", "http://example.org"],
+        "lists":[{"item_count":3,"depth":1}],
+        "native_source_map":{"spans":[], "heading_paths":[["data","content",0],null],
+            "link_paths":[null,["data","content",2]], "list_paths":[["data","content",3]]}});
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let output = run(&file, &preset, &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["native_source_mapping"],
+        json!({"eligible":5,"mapped":3,"unmapped":2})
+    );
+    assert_eq!(
+        report["native_source_locations"],
+        json!([
+            {"gate_id":"heading","finding_index":0,"source":"host_supplied_native_path","path":["data","content",0],"utf16_offset":0},
+            {"gate_id":"links","finding_index":0,"source":"host_supplied_native_path","path":["data","content",2],"utf16_offset":0},
+            {"gate_id":"lists","finding_index":0,"source":"host_supplied_native_path","path":["data","content",3],"utf16_offset":0}
+        ])
+    );
+    projection["native_source_map"]["heading_paths"][1] = json!(["data", "content", 1]);
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&run(&file, &preset, &[]).stdout).unwrap();
+    assert!(
+        report["native_source_locations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|location| location["gate_id"] == "hierarchy"
+                && location["path"] == json!(["data", "content", 1]))
+    );
+    for paths in [json!([["a"]]), json!([[true], null]), json!([[], null])] {
+        projection["native_source_map"]["heading_paths"] = paths;
+        fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+        assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+    }
+    projection["native_source_map"]["heading_paths"] = json!([["ok"], null]);
+    projection.as_object_mut().unwrap().remove("headings");
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+}
