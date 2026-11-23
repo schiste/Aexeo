@@ -584,7 +584,9 @@ A host with a different content format can supply a versioned projection to the
 single-content CLI: `aexeo-cli content projection.json --input-format adapter-json
 --preset article --format json`. The JSON object uses `schema` equal to
 `aexeo.content-adapter/v1` and `text` containing projected plain text or null.
-Optional fields are `headings` (strings), `heading_levels` (1–6, one per heading),
+Optional fields are `metadata` (string-to-string values), `observed_metadata_fields`
+(an explicit list of keys whose values or absence were observed), `headings`
+(strings), `heading_levels` (1–6, one per heading),
 `paragraphs` (ordered nonoverlapping UTF-8 byte ranges `{start,end,list_item?}`
 in the projected text), `block_ends` (increasing UTF-8 byte offsets), `lists`
 (`{item_count,depth}` for each observed list), and `link_destinations` (strings
@@ -601,6 +603,15 @@ are not joined. Example, including an optional source map:
                "spans":[{"projected_start":0,"projected_end":12,"source_start":13}],
                "heading_offsets":[0]}}
 ```
+
+When `metadata` is provided with `observed_metadata_fields`, a key in that list
+with no value is observed absent; every key outside it is unavailable, even if
+a preset requires it. Every supplied value must be listed. Omit the list only
+when the host asserts complete metadata coverage. An absent or null `metadata`
+object means metadata is unavailable; `{}` with an empty observed list means no
+fields were observed. Do not combine embedded metadata with `--metadata`.
+The input fingerprint binds the metadata values and exact adapter JSON, including
+coverage; the host remains responsible for truthful observations.
 
 For numeric citation labels already masked in `text`, an adapter may provide
 `literal_text` with the unmasked projection. Sentence and rhythm checks use
@@ -2049,3 +2060,5 @@ result reports may contain private information.
 The host asserts snapshot completeness and revision freshness; Aexeo does not
 authenticate them. These experimental item and collection reports are not a
 publication verdict and do not establish site, source, or publication safety.
+
+For adapter JSON with partial metadata coverage, custom extension gates are reported as `not_checked` because the extension contract does not carry field coverage. The revision loop binds the metadata coverage fingerprint as well as metadata values and rejects changes to either between candidates.

@@ -347,9 +347,22 @@ pub fn project_content_input_js(
 #[wasm_bindgen(js_name = "projectContentAdapter")]
 pub fn project_content_adapter_js(document_json: &str) -> Result<String, JsError> {
     let (document, capabilities, lists_complete) = parse_content_document(document_json)?;
-    let projection =
-        crate::content::content_adapter_projection(&document, capabilities, lists_complete)
-            .map_err(|error| JsError::new(&format!("failed to project content: {error:#}")))?;
+    let raw: serde_json::Value = serde_json::from_str(document_json)
+        .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    let observed = raw
+        .get("observed_metadata_fields")
+        .map(|value| {
+            serde_json::from_value::<std::collections::BTreeSet<String>>(value.clone())
+                .map_err(|_| JsError::new("observed_metadata_fields must be an array of strings"))
+        })
+        .transpose()?;
+    let projection = crate::content::content_adapter_projection_with_metadata(
+        &document,
+        capabilities,
+        lists_complete,
+        observed.as_ref(),
+    )
+    .map_err(|error| JsError::new(&format!("failed to project content: {error:#}")))?;
     serde_json::to_string(&projection)
         .map_err(|error| JsError::new(&format!("failed to serialize projection: {error}")))
 }

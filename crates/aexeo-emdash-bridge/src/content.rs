@@ -220,9 +220,36 @@ fn bounded_adapter_projection(value: serde_json::Value) -> Result<serde_json::Va
     Ok(value)
 }
 
+/// Project CMS metadata without treating unobserved fields as absent.
+pub fn content_adapter_projection_with_metadata(
+    document: &EmdashDocument,
+    capabilities: [bool; 4],
+    list_structure_complete: bool,
+    observed: Option<&std::collections::BTreeSet<String>>,
+) -> Result<serde_json::Value> {
+    let mut projection =
+        content_adapter_projection(document, capabilities, list_structure_complete)?;
+    let mut observed = observed.cloned().unwrap_or_default();
+    for unavailable in &document.unavailable_metadata_fields {
+        observed.remove(unavailable);
+    }
+    if document.description_source_observed == Some(false) {
+        observed.remove("description");
+    }
+    anyhow::ensure!(
+        observed.len() <= MAX_ADAPTER_OBSERVATIONS,
+        "metadata observation limit exceeded"
+    );
+    let mut metadata = content_metadata(document);
+    metadata.retain(|field, _| observed.contains(field));
+    projection["metadata"] = serde_json::to_value(metadata)?;
+    projection["observed_metadata_fields"] = serde_json::to_value(observed)?;
+    bounded_adapter_projection(projection)
+}
+
 /// Project observed body capabilities for the CLI host adapter contract.
-/// Metadata and source locations are deliberately omitted: that contract cannot
-/// represent EmDash's per-field coverage or Portable Text coordinates.
+/// Metadata and source locations are omitted by this body-only helper. The
+/// metadata-aware projection carries explicitly observed CMS fields.
 pub fn content_adapter_projection(
     document: &EmdashDocument,
     capabilities: [bool; 4],
@@ -2194,6 +2221,36 @@ field = "slug"
         assert!(unavailable.get("literal_text").is_none());
         assert!(unavailable.get("paragraphs").is_none());
         assert!(unavailable.get("link_destinations").is_none());
+    }
+
+    #[test]
+    fn adapter_metadata_projection_preserves_observation_coverage_without_body() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Editorial title", "description":"Fallback",
+            "description_source_observed":false, "meta":{"author":"Editor", "secret":"ignored"},
+            "unavailable_metadata_fields":["author"]
+        }))
+        .unwrap();
+        let observed = ["title", "description", "author", "reviewed"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let projection =
+            content_adapter_projection_with_metadata(&document, [false; 4], false, Some(&observed))
+                .unwrap();
+        assert!(projection["text"].is_null());
+        assert_eq!(
+            projection["metadata"],
+            serde_json::json!({"title":"Editorial title"})
+        );
+        assert_eq!(
+            projection["observed_metadata_fields"],
+            serde_json::json!(["reviewed", "title"])
+        );
+        let unknown =
+            content_adapter_projection_with_metadata(&document, [false; 4], false, None).unwrap();
+        assert_eq!(unknown["metadata"], serde_json::json!({}));
+        assert_eq!(unknown["observed_metadata_fields"], serde_json::json!([]));
     }
 
     #[test]

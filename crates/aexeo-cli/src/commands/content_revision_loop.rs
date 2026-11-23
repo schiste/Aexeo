@@ -162,7 +162,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     let budget = *args
         .get_one::<u32>("max-revisions")
         .user_context("missing revision budget")?;
-    let binding = RefCell::new(None::<(Value, Value)>);
+    let binding = RefCell::new(None::<(Value, Value, Value)>);
     let current_report = RefCell::new(None::<Value>);
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
@@ -189,10 +189,14 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                 .pointer("/input_fingerprint/metadata_sha256")
                 .user_context("evaluator omitted metadata fingerprint")?
                 .clone();
-            let now = (policy, metadata);
+            let metadata_coverage = report
+                .pointer("/input_fingerprint/metadata_coverage_sha256")
+                .user_context("evaluator omitted metadata coverage fingerprint")?
+                .clone();
+            let now = (policy, metadata, metadata_coverage);
             let mut binding = binding.borrow_mut();
             if binding.as_ref().is_some_and(|expected| *expected != now) {
-                user_bail!("policy or metadata changed during revision");
+                user_bail!("policy, metadata or metadata coverage changed during revision");
             }
             *binding = Some(now);
             *current_report.borrow_mut() = Some(report);
