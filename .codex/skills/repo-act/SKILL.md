@@ -23,6 +23,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   commands run by the broker and may be unset in the interactive shell. Check that
   a variable is nonempty before using it as an output directory, and quote paths
   with spaces.
+- If `sccache` fails with `path must be shorter than SUN_LEN` when the
+  session scratch path is used for `TMPDIR`, rerun that build with
+  `RUSTC_WRAPPER=''` while retaining the session scratch paths. This disables
+  the wrapper for the command; verify the build before relying on it.
 - In a reused worktree, check required local executables (such as
   `node_modules/.bin/tsc`) even when broker preparation is not configured.
   Cleanup can leave a partial `node_modules` directory, so its presence alone
