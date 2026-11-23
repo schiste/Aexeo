@@ -544,6 +544,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         .transpose()?;
     let external_load_ms = external_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     // Network access is an explicit host choice, never implied by a preset.
+    let mut link_observation_sha256 = None;
     let link_observations = if let Some(path) = args.get_one::<String>("link-observations") {
         let snapshot_started = measuring.then(std::time::Instant::now);
         let data = auxiliary.read(path, "link observations", MAX_CONTENT_INPUT_BYTES)?;
@@ -568,6 +569,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             user_bail!(
                 "link observation snapshot does not match this content and its destinations"
             );
+        }
+        if args.get_one::<String>("format").map(String::as_str) == Some("json") {
+            link_observation_sha256 = Some(super::feedback::text_hash(data.as_bytes()));
         }
         if let Some(started) = snapshot_started {
             let unchecked = snapshot
@@ -1011,6 +1015,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256,
                 "metadata_coverage_sha256": metadata_coverage_sha256
             });
+            if let Some(digest) = &link_observation_sha256 {
+                output["input_fingerprint"]["link_observations_sha256"] = serde_json::json!(digest);
+            }
         }
         output["source_mapping"] = serde_json::json!({
             "eligible": eligible_findings, "mapped": mapped_findings, "unmapped": unmapped_findings

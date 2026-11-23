@@ -447,11 +447,26 @@ fn revisions_use_only_observations_bound_to_each_candidate() {
     let mut session = start(draft.to_str().unwrap(), &source, "markdown", &extra);
     let request = session.read();
     assert_eq!(request["report"]["gates"][0]["status"], "failed");
+    let snapshot_hash = |path: &std::path::Path| -> String {
+        ring::digest::digest(&ring::digest::SHA256, &fs::read(path).unwrap())
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
+    assert_eq!(
+        request["report"]["input_fingerprint"]["link_observations_sha256"],
+        snapshot_hash(&first_snapshot)
+    );
     session
         .send(json!({"action":"submit", "candidate":candidate, "link_observations":next_snapshot}));
     let result = session.read();
     assert_eq!(result["stop"], "satisfied");
     assert_eq!(result["report"]["gates"][0]["status"], "passed");
+    assert_eq!(
+        result["report"]["input_fingerprint"]["link_observations_sha256"],
+        snapshot_hash(&next_snapshot)
+    );
     assert_eq!(session.finish(), 0);
 
     let mut missing = start(draft.to_str().unwrap(), &source, "markdown", &extra);
@@ -460,6 +475,11 @@ fn revisions_use_only_observations_bound_to_each_candidate() {
     let result = missing.read();
     assert_eq!(result["stop"], "incomplete");
     assert_eq!(result["report"]["gates"][0]["status"], "not_checked");
+    assert!(
+        result["report"]["input_fingerprint"]
+            .get("link_observations_sha256")
+            .is_none()
+    );
     assert_eq!(missing.finish(), 2);
 
     let mut stale = start(draft.to_str().unwrap(), &source, "markdown", &extra);
