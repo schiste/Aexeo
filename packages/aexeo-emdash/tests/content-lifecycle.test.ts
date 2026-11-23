@@ -318,6 +318,74 @@ describe("Refresh racing a save", () => {
   const sweep = (ctx: SandboxCtx, evaluator: EvaluatorFn) =>
     evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
 
+  it("does not overwrite a save that lands while refresh adapts the same revision", async () => {
+    const { ctx, store } = host([item("a", OLD, "listed")]);
+    const info = vi.fn();
+    ctx.log = { info, warn: vi.fn(), error: vi.fn() };
+    await save(ctx, item("a", OLD, "before"), returning("BEFORE"));
+    let release!: () => void;
+    let started!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const adapting = new Promise<void>((resolve) => { started = resolve; });
+    let calls = 0;
+    ctx.content.getPublicUrl = async (_collection, id) => {
+      if (calls++ === 0) { started(); await blocked; }
+      return `https://example.com/${id}`;
+    };
+    const refreshing = sweep(ctx, returning("SWEPT"));
+    await adapting;
+    await save(ctx, item("a", OLD, "saved"), returning("SAVED"));
+    release();
+    await refreshing;
+    expect(titleAt(store, "/a")).toBe("saved");
+    expect(rulesAt(store, "/a")).toEqual(["SAVED"]);
+    expect(info).toHaveBeenCalledWith("aexeo.refresh_concurrent_changes", { routes: 1 });
+  });
+
+  it("does not restore a document deleted while refresh adapts it", async () => {
+    const { ctx, store } = host([item("a", OLD, "listed")]);
+    await save(ctx, item("a", OLD, "before"), returning("BEFORE"));
+    let release!: () => void;
+    let started!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const adapting = new Promise<void>((resolve) => { started = resolve; });
+    ctx.content.getPublicUrl = async (_collection, id) => {
+      started();
+      await blocked;
+      return `https://example.com/${id}`;
+    };
+    const refreshing = sweep(ctx, returning("SWEPT"));
+    await adapting;
+    await handleAfterDelete({ id: "a", collection: "pages", permanent: true }, ctx);
+    release();
+    const result = await refreshing;
+    expect(store.has(documentKey("/a"))).toBe(false);
+    expect(store.has(findingsKey("/a"))).toBe(false);
+    expect(result.errors).toContain("Sitewide checks unavailable: content changed during refresh.");
+  });
+
+  it("preserves a route reassigned to another record during refresh", async () => {
+    const { ctx, store } = host([item("a", OLD, "listed")]);
+    ctx.content.getPublicUrl = async () => "https://example.com/shared";
+    await save(ctx, item("a", OLD, "before"), returning("BEFORE"));
+    let release!: () => void;
+    let started!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const adapting = new Promise<void>((resolve) => { started = resolve; });
+    ctx.content.getPublicUrl = async (_collection, id) => {
+      if (id === "a") { started(); await blocked; }
+      return "https://example.com/shared";
+    };
+    const refreshing = sweep(ctx, returning("SWEPT"));
+    await adapting;
+    await handleAfterDelete({ id: "a", collection: "pages", permanent: true }, ctx);
+    await save(ctx, item("b", NEW, "replacement"), returning("REPLACEMENT"));
+    release();
+    await refreshing;
+    expect(titleAt(store, "/shared")).toBe("replacement");
+    expect(rulesAt(store, "/shared")).toEqual(["REPLACEMENT"]);
+  });
+
   it("keeps a document created after its collection was listed", async () => {
     const { ctx, store } = host([item("a", OLD)]);
     await sweep(ctx, async (documents) => {

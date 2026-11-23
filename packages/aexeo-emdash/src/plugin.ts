@@ -1012,6 +1012,19 @@ export async function evaluateAndPersistAll(
   if (withheldRoutes.size > 0 && summary.errors.length === 0) {
     summary.errors.push("A previous route collision requires a complete refresh of all affected collections.");
   }
+  const dropDocuments = (routes: ReadonlySet<string>) => {
+    let kept = 0;
+    for (let index = 0; index < documents.length; index++) {
+      if (routes.has(documents[index]!.route)) continue;
+      documents[kept] = documents[index]!;
+      documentCollections[kept] = documentCollections[index]!;
+      sourceItems[kept] = sourceItems[index];
+      kept++;
+    }
+    documents.length = kept;
+    documentCollections.length = kept;
+    sourceItems.length = kept;
+  };
   if (withheldRoutes.size > 0) {
     // A route-keyed report cannot safely associate findings with either record.
     const documentsForCollision = new Map<string, string[]>();
@@ -1023,17 +1036,7 @@ export async function evaluateAndPersistAll(
         documentsForCollision.set(route, owners);
       }
     }
-    let kept = 0;
-    for (let index = 0; index < documents.length; index++) {
-      if (withheldRoutes.has(documents[index]!.route)) continue;
-      documents[kept] = documents[index]!;
-      documentCollections[kept] = documentCollections[index]!;
-      sourceItems[kept] = sourceItems[index];
-      kept++;
-    }
-    documents.length = kept;
-    documentCollections.length = kept;
-    sourceItems.length = kept;
+    dropDocuments(withheldRoutes);
     const initial = new Map(storedAtStart.map((entry) => [entry.document.route, entry]));
     for (const route of withheldRoutes) {
       adaptedByRoute.delete(route);
@@ -1044,7 +1047,6 @@ export async function evaluateAndPersistAll(
       await markRouteCollision(ctx, route, prior, owners);
     }
   }
-  const inventoryComplete = summary.errors.length === 0;
   if (adaptationFailures.length > 0) {
     try { ctx.log?.info?.("aexeo.adaptation_coverage", { failed: adaptationFailures.length }); } catch { /* best effort */ }
     const storedByCollection = new Map<string, Map<string, StoredDocument[]>>();
@@ -1066,12 +1068,35 @@ export async function evaluateAndPersistAll(
   // 2. Persist documents (with metadata) in KV — the score widget
   //    and admin findings page both read these. Metadata carries the
   //    editor identity and EmDash-resolved public URL.
+  const initialByRoute = new Map(storedAtStart.map((stored) => [stored.document.route, stored]));
+  const changedRoutes = new Set<string>();
   for (const stored of adaptedByRoute.values()) {
-    const current = await readStoredDocument(kv, stored.document.route);
+    const route = stored.document.route;
+    const initial = initialByRoute.get(route) ?? null;
+    const current = await readStoredDocument(kv, route);
+    // A save or delete may land while listing or adapting, including at the
+    // same timestamp. Keep that newer state and do not evaluate the stale
+    // snapshot. The host KV has no atomic compare-and-set, so a race between
+    // this read and the following write remains possible.
+    if (initial === null ? current !== null : !sameStoredDocument(initial, current)) {
+      changedRoutes.add(route);
+      continue;
+    }
     if (!isOlderRevision(stored.meta.updatedAt, current?.meta.updatedAt)) {
-      await kv.set(documentKey(stored.document.route), stored);
+      await kv.set(documentKey(route), stored);
     }
   }
+  if (changedRoutes.size) {
+    try { ctx.log?.info?.("aexeo.refresh_concurrent_changes", { routes: changedRoutes.size }); } catch { /* best effort */ }
+    summary.errors.push("Sitewide checks unavailable: content changed during refresh.");
+    for (const route of changedRoutes) {
+      withheldRoutes.add(route);
+      adaptedByRoute.delete(route);
+      documentRoutes.delete(route);
+    }
+    dropDocuments(changedRoutes);
+  }
+  const inventoryComplete = summary.errors.length === 0;
 
   // 3. Evaluate via the supplied evaluator and group findings by
   //    route. The evaluator strategy (in-process WASM vs sidecar
