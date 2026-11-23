@@ -147,6 +147,12 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
             if (kind == 'literal_markdown_links' and item_media.get(entity) != 'text/html'
                     and check.get('status') != 'not_checked'):
                 raise VerificationError('candidate evaluator cannot inspect literal Markdown links in this media type')
+            if (item_media.get(entity) == 'text/plain'
+                    and kind in {'list_item_count', 'link_count', 'link_destinations',
+                                 'required_headings', 'heading_length', 'heading_hierarchy',
+                                 'duplicate_headings', 'prose_sentence_length_variance'}
+                    and check.get('status') != 'not_checked'):
+                raise VerificationError('candidate evaluator cannot inspect structure in plain text')
             if kind in {'editorial_pacing', 'evidence_anchors', 'structured_fact', 'evidence_review', 'evidence_review_age'}:
                 required = ['source'] + (['review'] if kind in {'evidence_review', 'evidence_review_age'} else [])
                 item_sources = sources.get(entity, {}) if sources is not None else {}

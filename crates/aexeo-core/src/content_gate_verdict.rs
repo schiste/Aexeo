@@ -1251,6 +1251,22 @@ fn verify_candidate_policy_coverage_with_evidence(
                     "candidate evaluator cannot inspect literal Markdown links in this media type"
                 );
             }
+            if media_type == Some("text/plain")
+                && matches!(
+                    gate,
+                    crate::content_gate::ContentGate::ListItemCount { .. }
+                        | crate::content_gate::ContentGate::LinkCount { .. }
+                        | crate::content_gate::ContentGate::LinkDestinations { .. }
+                        | crate::content_gate::ContentGate::RequiredHeadings { .. }
+                        | crate::content_gate::ContentGate::HeadingLength { .. }
+                        | crate::content_gate::ContentGate::HeadingHierarchy { .. }
+                        | crate::content_gate::ContentGate::DuplicateHeadings { .. }
+                        | crate::content_gate::ContentGate::ProseSentenceLengthVariance { .. }
+                )
+                && check.status != CheckStatus::NotChecked
+            {
+                bail!("candidate evaluator cannot inspect structure in plain text");
+            }
             let available = sources.and_then(|items| items.get(entity));
             let has = |key: &str| available.is_some_and(|items| items.contains_key(key));
             let missing_evidence = match gate {
@@ -3875,6 +3891,43 @@ mod tests {
     }
 
     #[test]
+    fn candidate_policy_rejects_plain_text_structural_claims() {
+        let change = change();
+        for gate in [
+            "kind='list_item_count'\nflagged_counts=[3]\n",
+            "kind='link_count'\nmin=1\n",
+            "kind='link_destinations'\nallowed_schemes=['https']\n",
+            "kind='required_headings'\nheadings=['Intro']\n",
+            "kind='heading_length'\nmax_chars=10\n",
+            "kind='heading_hierarchy'\n",
+            "kind='duplicate_headings'\n",
+            "kind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=6\n",
+        ] {
+            for blocking in [true, false] {
+                let policy = ContentPreset::from_toml(&format!(
+                    "version=1\nname='test'\n[[gates]]\nid='words'\n{gate}blocking={blocking}\n"
+                ))
+                .unwrap();
+                let mut verdict = evaluate(&change, 1).unwrap();
+                verdict.checks[0].blocking = blocking;
+                for status in [
+                    CheckStatus::Passed,
+                    CheckStatus::Failed,
+                    CheckStatus::NotChecked,
+                ] {
+                    verdict.checks[0].status = status;
+                    assert_eq!(
+                        verify_candidate_policy_coverage(&verdict, &change, &policy, false, true)
+                            .is_ok(),
+                        status == CheckStatus::NotChecked,
+                        "{gate} {blocking} {status:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn candidate_verifier_rejects_forged_advisory_evidence_result() {
         use crate::content_candidate::{CandidateItem, CandidateSnapshot};
         use crate::content_gate_sources::{ContentPhase, IndependentContent};
@@ -3888,6 +3941,8 @@ mod tests {
         let change = change();
         for gate in [
             "kind='literal_markdown_links'\n",
+            "kind='list_item_count'\nflagged_counts=[3]\n",
+            "kind='heading_hierarchy'\n",
             "kind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='q'\n",
             "kind='editorial_pacing'\nsource='s'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n",
         ] {
