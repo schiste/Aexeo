@@ -1460,7 +1460,7 @@ mod tests {
 
     #[test]
     fn arabic_reference_digits_preserve_html_source_positions() {
-        for marker in ["[١٧]", "[۱۲، ۳]"] {
+        for marker in ["[١٧]", "[۱۲، ۳]", "[1, 2]", "[1–3]", "[1, 2]"] {
             let source =
                 format!("<p>First.<a href='#reference-proof'>{marker}</a> Next sentence.</p>");
             let (adapted, _, _, literal) =
