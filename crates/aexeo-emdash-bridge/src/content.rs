@@ -2189,6 +2189,17 @@ field = "slug"
     }
 
     #[test]
+    fn adapter_projection_rejects_oversized_input_before_building_views() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{"children":[{
+                "_type":"span", "text":"x".repeat(aexeo_core::content_revision_loop::MAX_DRAFT_BYTES + 1)
+            }]}]
+        })).unwrap();
+        let error = content_adapter_projection(&document, [true; 4], true).unwrap_err();
+        assert!(error.to_string().contains("body exceeds projection limit"));
+    }
+
+    #[test]
     fn adapter_projection_withholds_empty_paragraphs_and_unattested_lists() {
         let document: EmdashDocument = serde_json::from_value(serde_json::json!({
             "route":"/test", "title":"Test", "body":[{"children":[]}]
