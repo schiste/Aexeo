@@ -405,3 +405,22 @@ This is a local Node measurement, not a browser or workerd cold start, and it
 excludes network and host CMS access. Operating-system caches may already be
 warm. CI records the measurement without a startup budget until repeated CI
 runs establish a representative threshold.
+
+### Exporting body observations for agent workflows
+
+`projectContentAdapter(document)` from `@aeptus/aexeo-emdash/content`
+exports the observed Portable Text body as an `aexeo.content-adapter/v1`
+projection suitable for Aexeo's `content --input-format adapter-json` or
+`content-revise --input-format adapter-json`. It retains the masked and literal
+views of numeric citations and explicitly withholds unavailable capabilities.
+Empty paragraph observations are withheld because the CLI contract cannot
+represent empty paragraphs. The projection contains content and URLs: handle it
+as private data.
+
+The export omits metadata and native block/span locations. Supply metadata only
+when the host independently establishes complete values and absence; do not
+infer missing fields from this export. Regenerate it from each exact proposed
+snapshot, and retain the host's revision identity separately. The export does
+not establish that a component mapping matches the renderer, source freshness,
+or permission to publish. Some gates require capabilities this projection
+cannot supply, including literal Markdown link inspection.

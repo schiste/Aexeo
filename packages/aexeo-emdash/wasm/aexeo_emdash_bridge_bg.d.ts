@@ -20,6 +20,7 @@ export const evaluateContent: (
   link_observations_json?: string | null,
 ) => string;
 export const projectLinkDestinations: (document_json: string) => string;
+export const projectContentAdapter: (document_json: string) => string;
 export const projectContentInput: (document_json: string, evidence_json?: string | null) => string;
 export const evaluateContentCollection: (
   documents_json: string,

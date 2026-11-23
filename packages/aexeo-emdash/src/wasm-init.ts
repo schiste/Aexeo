@@ -159,6 +159,12 @@ export async function projectLinkDestinations(documentJson: string): Promise<str
   return glue.projectLinkDestinations(documentJson);
 }
 
+/** Project observed body capabilities for the CLI adapter contract. */
+export async function projectContentAdapter(documentJson: string): Promise<string> {
+  await ensureInitialized();
+  return glue.projectContentAdapter(documentJson);
+}
+
 /** Return the exact input supplied to extension hosts. Contains content. */
 export async function projectContentInput(documentJson: string, evidenceJson?: string | null): Promise<string> {
   await ensureInitialized();

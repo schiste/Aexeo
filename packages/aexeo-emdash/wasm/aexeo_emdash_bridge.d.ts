@@ -22,6 +22,11 @@ export function evaluateDocuments(documents_json: string, config_json?: string |
 export function generateFactsPrompt(documents_json: string): string;
 
 /**
+ * Export observed body capabilities as an adapter-json projection.
+ */
+export function projectContentAdapter(document_json: string): string;
+
+/**
  * Return the exact projected input that external extensions must bind to.
  */
 export function projectContentInput(document_json: string, evidence_json?: string | null): string;

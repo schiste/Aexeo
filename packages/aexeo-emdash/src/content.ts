@@ -1,6 +1,6 @@
 import { addProseVarianceMeasurements, emitTelemetry, listReviewMeasurements } from "./telemetry.js";
 import type { ListReviewTelemetry } from "./telemetry.js";
-import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
+import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectContentAdapter as projectContentAdapterWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
 export interface ContentGateResult {
@@ -79,6 +79,24 @@ export interface ExternalGateResult {
 /** Project the same input the evaluator will give a trusted extension. */
 export async function projectContentInput(document: EmdashDocument, evidenceSources?: Record<string, string>): Promise<ExtensionInput> {
   return JSON.parse(await projectContentInputWasm(JSON.stringify(document), evidenceSources === undefined ? undefined : JSON.stringify(evidenceSources))) as ExtensionInput;
+}
+
+/** Body observations for the CLI's adapter-json format; contains content and URLs. */
+export interface ContentAdapterProjection {
+  schema: "aexeo.content-adapter/v1";
+  text: string | null;
+  literal_text?: string;
+  headings?: string[];
+  heading_levels?: number[];
+  paragraphs?: Array<{ start: number; end: number; list_item?: boolean }>;
+  block_ends?: number[];
+  lists?: Array<{ item_count: number; depth: number }>;
+  link_destinations?: string[];
+}
+
+/** Export observed body capabilities; metadata and native source coordinates are not included. */
+export async function projectContentAdapter(document: EmdashDocument): Promise<ContentAdapterProjection> {
+  return JSON.parse(await projectContentAdapterWasm(JSON.stringify(document))) as ContentAdapterProjection;
 }
 
 /** Snapshot and link occurrences in adapter order. This may contain private content and URLs. */

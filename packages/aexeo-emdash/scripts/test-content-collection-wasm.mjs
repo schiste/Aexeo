@@ -1,7 +1,20 @@
 // Run after the plugin build: this exercises the real WASM, not the mock bridge.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { evaluateContent, evaluateContentCollection, projectContentInput, projectLinkDestinations } from "../dist/content.js";
+import { evaluateContent, evaluateContentCollection, projectContentAdapter, projectContentInput, projectLinkDestinations } from "../dist/content.js";
+
+const adapterDocument = { route: "/article", title: "Article", body: [{
+  children: [{ _type: "span", text: "One." }, { _type: "span", text: "[12]", marks: ["ref"] }, { _type: "span", text: " Two." }],
+  markDefs: [{ _key: "ref", _type: "link", href: "#cite_note-source-12" }],
+}] };
+const adapterProjection = await projectContentAdapter(adapterDocument);
+assert.equal(adapterProjection.text, "One.     Two.");
+assert.equal(adapterProjection.literal_text, "One.[12] Two.");
+assert.deepEqual(adapterProjection.link_destinations, ["#cite_note-source-12"]);
+assert.equal(adapterProjection.paragraphs[0].end, 13);
+const incompleteProjection = await projectContentAdapter({ ...adapterDocument, body_capabilities: [] });
+assert.equal(incompleteProjection.text, null);
+assert.equal(incompleteProjection.paragraphs, undefined);
 
 const telemetryDocument = { route: "/telemetry", title: "Example", body: [] };
 const expectedTelemetryReport = await evaluateContent(telemetryDocument, "article");
