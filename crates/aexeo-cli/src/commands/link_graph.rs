@@ -70,7 +70,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
         report.audit_sha256 = None;
     }
     if matches.get_flag("telemetry") {
-        emit_link_graph_telemetry(&report, started);
+        emit_link_graph_telemetry(&report, started, matches.get_flag("compact"));
     }
     let stdout = io::stdout();
     let writer = io::BufWriter::new(stdout.lock());
@@ -98,12 +98,11 @@ fn write_graph_json<W: Write, T: serde::Serialize>(
     Ok(())
 }
 
-/// Write the same pretty JSON bytes as before, without building a second
-/// report-sized buffer. Like the previous direct file write, a failed write can
-/// leave a partial destination; caller path checks are unchanged.
-pub(super) fn write_link_graph_file(path: &str, report: &LinkReport) -> Result<()> {
+/// Stream the complete report without allocating a second report-sized buffer.
+/// A failed write can leave a partial destination; caller path checks are unchanged.
+pub(super) fn write_link_graph_file(path: &str, report: &LinkReport, compact: bool) -> Result<()> {
     let file = fs::File::create(path)?;
-    write_graph_json(io::BufWriter::new(file), report, false, false)
+    write_graph_json(io::BufWriter::new(file), report, compact, false)
 }
 
 /// Read an audit link context file, for `link-graph --audit --context` and
@@ -134,7 +133,7 @@ pub(super) fn link_graph_summary(graph: &LinkReport) -> serde_json::Value {
     })
 }
 
-pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
+pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, compact: bool) {
     let observed = report
         .links
         .destinations
@@ -187,6 +186,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "event": "link_graph_analysis",
         "version": 1,
         "audit_bound": report.audit_sha256.is_some(),
+        "output_compact": compact,
         "elapsed_us": started.elapsed().as_micros(),
         "page_count": report.pages.len(),
         "link_count": observed,

@@ -682,15 +682,17 @@ outputs, including the stored audit. Incomplete or unmapped observations never
 confirm an orphan. Use `report render <audit> --link-graph graph.json` to
 reproduce qualifications later.
 
-Graph files from `check` and `crawl` are written progressively as the same
-pretty JSON, without a separate report-sized serialized buffer. Like the
+Graph files from `check` and `crawl` are streamed as pretty JSON by default,
+without a separate report-sized serialized buffer. Add `--link-graph-compact`
+alongside `--link-graph-output` to write the same complete data without
+indentation; evidence and coverage are unchanged. Like the
 previous direct file write, an I/O error can leave a partial file. The existing
 path validation and file permissions behavior are unchanged.
 
 The stored audit now contains the parsed site's HTML when graph output is
 requested, and the graph includes source context and file paths: treat both as
-potentially sensitive. Opt-in telemetry on stderr contains only aggregate
-counts and timings. Without the graph flags, static check behavior is unchanged.
+potentially sensitive. Opt-in telemetry on stderr contains aggregate counts,
+timings and the selected output format, without paths or content. Without the graph flags, static check behavior is unchanged.
 
 The standalone command streams JSON to stdout, avoiding an additional
 report-sized serialized string. Use `--compact` for the same complete JSON

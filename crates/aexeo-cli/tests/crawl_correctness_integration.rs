@@ -327,6 +327,7 @@ fn a_broken_link_is_a_finding_in_a_complete_audit() {
                 config.to_str().unwrap(),
                 "--link-graph-output",
                 graph.to_str().unwrap(),
+                "--link-graph-compact",
             ],
         );
 
@@ -346,7 +347,12 @@ fn a_broken_link_is_a_finding_in_a_complete_audit() {
             "a definite answer is not retried"
         );
 
-        let report: Value = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
+        let graph_bytes = std::fs::read(&graph).unwrap();
+        let typed_report: aexeo_core::link_report::LinkReport =
+            serde_json::from_slice(&graph_bytes).unwrap();
+        assert_eq!(graph_bytes, serde_json::to_vec(&typed_report).unwrap());
+        assert!(graph_bytes.len() < serde_json::to_vec_pretty(&typed_report).unwrap().len());
+        let report: Value = serde_json::from_slice(&graph_bytes).unwrap();
         assert!(
             report["issues"]
                 .to_string()
