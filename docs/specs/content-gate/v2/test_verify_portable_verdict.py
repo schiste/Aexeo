@@ -272,6 +272,23 @@ class PortableComparison(unittest.TestCase):
             with self.subTest(kind=invalid), self.assertRaises(VerificationError):
                 require_policy_coverage(policy, change, False, verdict)
 
+    def test_collection_gate_cannot_run_without_collection(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        policy['gates'][0]['kind'] = 'unique_collection_metadata'
+        for blocking in (False, True):
+            policy['gates'][0]['blocking'] = blocking
+            verdict['checks'][0]['blocking'] = blocking
+            for status in ('passed', 'failed', 'not_checked'):
+                verdict['checks'][0]['status'] = status
+                with self.subTest(blocking=blocking, status=status):
+                    if status == 'not_checked':
+                        require_policy_coverage(policy, change, False, verdict)
+                    else:
+                        with self.assertRaises(VerificationError):
+                            require_policy_coverage(policy, change, False, verdict)
+
     def test_unavailable_host_capabilities_cannot_be_reported_as_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])

@@ -1231,6 +1231,15 @@ fn verify_candidate_policy_coverage_with_evidence(
                 .ok_or_else(|| {
                     anyhow::anyhow!("resolved policy check is missing or has inconsistent blocking")
                 })?;
+            if !has_collection
+                && matches!(
+                    gate,
+                    crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
+                )
+                && check.status != CheckStatus::NotChecked
+            {
+                bail!("candidate evaluator cannot execute collection gate without a collection");
+            }
             // Site and custom providers are never supplied by this evaluator.
             if matches!(
                 gate,
@@ -3825,6 +3834,7 @@ mod tests {
         let change = change();
         for kind in [
             "literal_markdown_links",
+            "unique_collection_metadata",
             "editorial_pacing",
             "custom",
             "site_group",
@@ -3840,6 +3850,7 @@ mod tests {
                     "editorial_pacing" => {
                         "source='s'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n"
                     }
+                    "unique_collection_metadata" => "field='slug'\n",
                     "custom" => "extension='example'\n",
                     "site_group" => "group='links'\n",
                     "evidence_anchors" => "source='s'\nclaim='abc'\nquote='quote'\n",
@@ -3941,6 +3952,7 @@ mod tests {
         let change = change();
         for gate in [
             "kind='literal_markdown_links'\n",
+            "kind='unique_collection_metadata'\nfield='slug'\n",
             "kind='list_item_count'\nflagged_counts=[3]\n",
             "kind='heading_hierarchy'\n",
             "kind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='q'\n",
