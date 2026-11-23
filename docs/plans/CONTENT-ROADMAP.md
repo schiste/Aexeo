@@ -52,8 +52,22 @@ adapter and an exporter for these projections. A synthetic installed-package
 and WASM-to-CLI trial covered a failed check, a newly projected candidate and a
 passing recheck. Unmapped components left dependent observations unavailable.
 This is a local trial, not a deployed CMS action or a publication authorization.
-The export omits metadata and native source coordinates; host mappings and
-revision identity remain the caller's responsibility.
+[#887](https://github.com/schiste/Aexeo/pull/887) carries explicitly observed
+metadata and its field coverage; unavailable metadata does not become an
+absence finding. [#889](https://github.com/schiste/Aexeo/pull/889) adds
+host-supplied native paths for prose, bound to the exact projected candidate.
+On a read-only copy of the mixed-component evidence-room record, all 36 prose
+paths resolved to the corresponding CMS spans after the test explicitly
+excluded the two `askYourAi` components. This is a host mapping assumption, not
+proof of rendered output. A separate local UTF-16 regression covered moved
+findings and changed candidate digests.
+
+Structural heading, link and list anchors are implemented in
+[#891](https://github.com/schiste/Aexeo/pull/891). Its local end-to-end trial
+mapped all three finding kinds to a synthetic CMS row; on the same real record,
+2 heading and 10 link paths resolved to text fields, while list structure was
+not attested. Host mappings, list completeness and revision identity remain the
+caller's responsibility. None of these observations authorizes publication.
 
 ## CMS review feedback — 2026-11-19
 
