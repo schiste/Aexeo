@@ -1224,7 +1224,11 @@ fn verify_candidate_policy_coverage_with_evidence(
                 gate,
                 crate::content_gate::ContentGate::UniqueCollectionMetadata { .. }
             );
-        let verify = |id: String, entity: &str, media_type: Option<&str>| -> Result<()> {
+        let verify = |id: String,
+                      entity: &str,
+                      media_type: Option<&str>,
+                      has_metadata: bool|
+         -> Result<()> {
             let check = checks
                 .get(id.as_str())
                 .filter(|check| check.blocking == gate.blocking())
@@ -1276,6 +1280,17 @@ fn verify_candidate_policy_coverage_with_evidence(
             {
                 bail!("candidate evaluator cannot inspect structure in plain text");
             }
+            if !has_metadata
+                && matches!(
+                    gate,
+                    crate::content_gate::ContentGate::RequiredMetadata { .. }
+                        | crate::content_gate::ContentGate::MetadataLength { .. }
+                        | crate::content_gate::ContentGate::MetadataAge { .. }
+                )
+                && check.status != CheckStatus::NotChecked
+            {
+                bail!("candidate evaluator cannot inspect unavailable metadata");
+            }
             let available = sources.and_then(|items| items.get(entity));
             let has = |key: &str| available.is_some_and(|items| items.contains_key(key));
             let missing_evidence = match gate {
@@ -1302,13 +1317,14 @@ fn verify_candidate_policy_coverage_with_evidence(
             Ok(())
         };
         if collection_gate {
-            verify(scoped_id("collection", "", gate.id()), "", None)?;
+            verify(scoped_id("collection", "", gate.id()), "", None, false)?;
         } else {
             for entry in &entries {
                 verify(
                     scoped_id("gate", &entry.entity_id, gate.id()),
                     &entry.entity_id,
                     Some(entry.media_type.as_str()),
+                    entry.metadata.is_some(),
                 )?;
             }
         }
@@ -3955,6 +3971,9 @@ mod tests {
             "kind='unique_collection_metadata'\nfield='slug'\n",
             "kind='list_item_count'\nflagged_counts=[3]\n",
             "kind='heading_hierarchy'\n",
+            "kind='required_metadata'\nfields=['title']\n",
+            "kind='metadata_length'\nfield='title'\nmin=1\n",
+            "kind='metadata_age'\nfield='date'\nas_of='2026-01-01'\nmax_days=30\n",
             "kind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='q'\n",
             "kind='editorial_pacing'\nsource='s'\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n",
         ] {
@@ -4046,6 +4065,42 @@ mod tests {
                 assert!(
                     verify(&forged).is_err(),
                     "forged evidence result must be rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn candidate_policy_coverage_requires_observed_metadata() {
+        for gate in [
+            "kind='required_metadata'\nfields=['title']",
+            "kind='metadata_length'\nfield='title'\nmin=1",
+            "kind='metadata_age'\nfield='date'\nas_of='2026-01-01'\nmax_days=30",
+        ] {
+            for blocking in [true, false] {
+                let policy = ContentPreset::from_toml(&format!(
+                    "version=1\nname='test'\n[[gates]]\nid='words'\n{gate}\nblocking={blocking}\n"
+                ))
+                .unwrap();
+                let mut change = change();
+                change.entries[0].metadata = None;
+                let mut verdict = evaluate(&change, 1).unwrap();
+                verdict.checks[0].blocking = blocking;
+                for status in [
+                    CheckStatus::Passed,
+                    CheckStatus::Failed,
+                    CheckStatus::NotChecked,
+                ] {
+                    verdict.checks[0].status = status;
+                    let result =
+                        verify_candidate_policy_coverage(&verdict, &change, &policy, false, false);
+                    assert_eq!(result.is_ok(), status == CheckStatus::NotChecked);
+                }
+                change.entries[0].metadata = Some(Default::default());
+                verdict.checks[0].status = CheckStatus::Failed;
+                assert!(
+                    verify_candidate_policy_coverage(&verdict, &change, &policy, false, false)
+                        .is_ok()
                 );
             }
         }
