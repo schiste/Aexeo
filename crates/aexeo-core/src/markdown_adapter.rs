@@ -1842,7 +1842,7 @@ mod tests {
 
     #[test]
     fn arabic_reference_digits_preserve_prose_and_source_positions() {
-        for marker in ["[١٧]", "[۱۲، ۳]"] {
+        for marker in ["[١٧]", "[۱۲، ۳]", "[1, 2]", "[1–3]", "[1, 2]"] {
             let source = format!("First.[{marker}](#reference-proof) Next sentence.");
             let adapted = markdown_input_with_source_map_and_destinations("x", &source).unwrap();
             let text = adapted.input.text.as_deref().unwrap();

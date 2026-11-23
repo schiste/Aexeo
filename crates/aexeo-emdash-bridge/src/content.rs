@@ -2445,8 +2445,8 @@ field = "slug"
                 "markDefs":[{"_key":"ref", "_type":"link", "href":"#reference-proof"}],
                 "children":[
                     {"_type":"span", "text":"First."},
-                    {"_type":"span", "text":"[١", "marks":["ref"]},
-                    {"_type":"span", "text":"۲، ٣]", "marks":["ref", "strong"]},
+                    {"_type":"span", "text":"[١–", "marks":["ref"]},
+                    {"_type":"span", "text":"۲، ٣]", "marks":["ref", "strong"]},
                     {"_type":"span", "text":" Next sentence."}
                 ]
             }]
@@ -2454,8 +2454,8 @@ field = "slug"
         .unwrap();
         let (input, _, _, literal) = content_input_with_context(&document);
         assert!(!input.text.as_deref().unwrap().contains("١"));
-        assert_eq!(literal.as_deref(), Some("First.[١۲، ٣] Next sentence."));
-        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[١۲، ٣]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n").unwrap();
+        assert_eq!(literal.as_deref(), Some("First.[١–۲، ٣] Next sentence."));
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[١–۲، ٣]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n").unwrap();
         let report = evaluate_content(&document, &preset).unwrap();
         assert_eq!(report.gates[0].status, GateStatus::Passed);
         assert_eq!(report.gates[1].measurements["sentence_count"], 2);

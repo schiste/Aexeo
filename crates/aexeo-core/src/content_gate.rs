@@ -74,16 +74,26 @@ pub struct ReferenceLiteralProjection {
     copied: usize,
 }
 
+// Keep each masked character's UTF-8 byte width and character position.
+fn reference_mask_char(ch: char) -> Option<char> {
+    match ch.len_utf8() {
+        1 => Some(' '),
+        2 => Some('\u{00a0}'),
+        3 => Some('\u{3000}'),
+        _ => None,
+    }
+}
+
 impl ReferenceLiteralProjection {
     pub fn push_masked(&mut self, projected: &mut String, label: &str) {
         let original = self.original.get_or_insert_with(String::new);
         original.push_str(&projected[self.copied..]);
         original.push_str(label);
         for ch in label.chars() {
-            match ch.len_utf8() {
-                1 => projected.push(' '),
-                2 => projected.push('\u{00a0}'),
-                n => projected.extend(std::iter::repeat_n(' ', n)),
+            if let Some(mask) = reference_mask_char(ch) {
+                projected.push(mask);
+            } else {
+                projected.extend(std::iter::repeat_n(' ', ch.len_utf8()));
             }
         }
         self.copied = projected.len();
@@ -108,8 +118,7 @@ pub(crate) fn literal_projection_matches(projected: &str, literal: &str) -> bool
             (None, None) => return true,
             (Some(a), Some(b))
                 if a == b
-                    || (reference_label_character(b)
-                        && a == if b.len_utf8() == 2 { '\u{00a0}' } else { ' ' }) => {}
+                    || (reference_label_character(b) && reference_mask_char(b) == Some(a)) => {}
             _ => return false,
         }
     }
@@ -234,7 +243,11 @@ fn supported_decimal_digit(ch: char) -> bool {
 }
 
 fn reference_label_character(ch: char) -> bool {
-    supported_decimal_digit(ch) || matches!(ch, '[' | ']' | ',' | '،' | '-' | ' ')
+    supported_decimal_digit(ch)
+        || matches!(
+            ch,
+            '[' | ']' | ',' | '،' | '-' | '–' | ' ' | '\u{00a0}' | '\u{202f}'
+        )
 }
 
 /// Validate one contiguous fragment of a reference label. `Some` indicates
@@ -6372,6 +6385,28 @@ max = 1
             )
             .unwrap();
         assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn typographic_reference_masks_preserve_offsets_and_literal_validation() {
+        let label = "[1–3,\u{202f}5]";
+        let mut projected = String::from("Before.");
+        let mut view = ReferenceLiteralProjection::default();
+        view.push_masked(&mut projected, label);
+        projected.push_str(" Next.");
+        let literal = view.finish(&projected).unwrap();
+        assert_eq!(projected.len(), literal.len());
+        assert_eq!(projected.chars().count(), literal.chars().count());
+        assert!(literal_projection_matches(&projected, &literal));
+        assert!(!literal_projection_matches(
+            &projected,
+            &literal.replace("Next", "Nest")
+        ));
+        assert!(!numeric_reference_marker(
+            "#reference-proof",
+            "[source 1–3]"
+        ));
+        assert!(!numeric_reference_marker("/ordinary", label));
     }
 
     #[test]

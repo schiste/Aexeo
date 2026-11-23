@@ -581,13 +581,13 @@ const multilingualCitation = { route: "/multilingual-citations", title: "Referen
   markDefs: [{ _key: "ref", _type: "link", href: "#reference-source" }],
   children: [
     { _type: "span", text: "First." },
-    { _type: "span", text: "[١", marks: ["ref"] },
-    { _type: "span", text: "۲، ٣]", marks: ["ref", "strong"] },
+    { _type: "span", text: "[١–", marks: ["ref"] },
+    { _type: "span", text: "۲،\u202f٣]", marks: ["ref", "strong"] },
     { _type: "span", text: " Next sentence." },
   ],
 }] };
 const multilingualOriginal = JSON.stringify(multilingualCitation);
-const multilingualPreset = "version=1\nname='multilingual'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[١۲، ٣]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n";
+const multilingualPreset = "version=1\nname='multilingual'\n[[gates]]\nid='literal'\nkind='required_terms'\nterms=['[١–۲،\u202f٣]']\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n";
 const multilingualReport = await evaluateContent(multilingualCitation, "multilingual", { multilingual: multilingualPreset });
 assert.equal(multilingualReport.gates[0].status, "passed");
 assert.equal(multilingualReport.gates[1].measurements.sentence_count, 2);

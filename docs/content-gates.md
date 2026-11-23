@@ -651,7 +651,9 @@ For numeric citation labels already masked in `text`, an adapter may provide
 `text`; literal term and external checks use `literal_text`. The evaluator
 requires identical byte and character positions and permits differences only
 where supported numeric reference characters are masked by corresponding
-spaces. An invalid alternate projection leaves dependent checks `not_checked`.
+spaces. Supported labels include numeric ranges with an en dash and nonbreaking
+spaces, provided the link target uses a recognized reference convention. An
+invalid alternate projection leaves dependent checks `not_checked`.
 The host must establish that masked labels really are citations; byte
 compatibility does not prove that claim. The original JSON, including both
 views, remains bound to the input fingerprint.
