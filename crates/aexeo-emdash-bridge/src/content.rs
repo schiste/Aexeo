@@ -2124,6 +2124,26 @@ field = "slug"
     }
 
     #[test]
+    fn portable_text_urls_after_punctuation_keep_sentence_and_span_positions() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{"children":[
+                {"_type":"span", "text":"رابط،https://example"},
+                {"_type":"span", "text":".org/v1.2?x=1. "},
+                {"_type":"span", "text":"Next sentence."}
+            ]}]
+        }))
+        .unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='length'\nkind='sentence_character_length'\nmax_chars=5\n",
+        ).unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].measurements["sentence_count"], 2);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 2);
+        assert_eq!((locations[1].span_index, locations[1].utf16_offset), (2, 0));
+    }
+
+    #[test]
     fn segmented_reference_labels_are_masked_only_when_entire_link_is_numeric() {
         let document: EmdashDocument = serde_json::from_value(serde_json::json!({
             "route":"/test", "title":"Test", "body":[{
