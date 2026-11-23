@@ -37,6 +37,24 @@ No CMS content was changed. These checks did not inspect rendered HTML, the host
 admin UI, translations, the deployed package, or every article; they do not prove
 rendered metadata, full editorial quality, or a matching site snapshot.
 
+## Agent revision loops from CMS content — 2026-11-23
+
+The CLI accepts a complete host-supplied adapter JSON projection for
+`content-revise` ([#881](https://github.com/schiste/Aexeo/pull/881)). Its
+report and final digest bind the exact projected bytes; unavailable selected
+checks stop as incomplete. Numeric citations can carry a validated literal
+view for literal checks alongside their masked rhythm view
+([#882](https://github.com/schiste/Aexeo/pull/882)). These checks do not prove
+that the host projection matches the CMS or the rendered page.
+
+[#884](https://github.com/schiste/Aexeo/pull/884) exposes the native CMS
+adapter and an exporter for these projections. A synthetic installed-package
+and WASM-to-CLI trial covered a failed check, a newly projected candidate and a
+passing recheck. Unmapped components left dependent observations unavailable.
+This is a local trial, not a deployed CMS action or a publication authorization.
+The export omits metadata and native source coordinates; host mappings and
+revision identity remain the caller's responsibility.
+
 ## CMS review feedback — 2026-11-19
 
 On 2026-11-23, the 0.9.5 npm archive built from commit `1212d515` was
