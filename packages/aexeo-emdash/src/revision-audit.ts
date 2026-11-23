@@ -44,6 +44,7 @@ export interface RevisionAuditOptions {
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+  titleFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
   metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   evidenceProviderConfigured?: boolean;
   evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[], linkObservations?: BoundLinkObservations) => Promise<ContentReport>;
@@ -134,6 +135,7 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
   const adapted = adaptContentItem(item, { route: `/revision/${encodeURIComponent(id)}`, blockMappings: options.blockMappings,
     ...(contentFields === undefined ? {} : { contentFields }),
     ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }),
+    ...(options.titleFieldsByCollection?.[collection] === undefined ? {} : { titleFields: options.titleFieldsByCollection[collection] }),
     ...(options.metadataFieldsByCollection?.[collection] === undefined ? {} : { metadataFields: options.metadataFieldsByCollection[collection] }) });
   const listStructureAttested = field === undefined
     ? collectionListStructureAttested(options.preset?.revisionListStructureCompleteByCollection, collection)
@@ -207,6 +209,11 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
         field_selection: contentFields === undefined ? "automatic" as const : "configured" as const,
         configured_fields: contentFields ?? null,
         unmapped_components: adapted.meta.unmappedComponents ?? { entries: [], truncated: false },
+      },
+      title: {
+        field_selection: options.titleFieldsByCollection?.[collection] === undefined ? "automatic" as const : "configured" as const,
+        configured_fields: options.titleFieldsByCollection?.[collection] ?? null,
+        source_observed: adapted.document.observed_metadata_fields?.includes("title") === true,
       },
       description: {
         field_selection: options.descriptionFieldsByCollection?.[collection] === undefined ? "automatic" as const : "configured" as const,

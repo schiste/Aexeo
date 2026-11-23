@@ -883,3 +883,21 @@ schemas too. An omitted or mismatched collection or field remains unassessed.
 An attestation does not override incomplete body capabilities caused by
 unknown components. These gates provide editorial prompts, not a factuality
 check or authorization to publish.
+
+
+### Map collection titles
+
+In configured mode, map the ordered fields used by your renderer when a collection
+stores its title outside the standard SEO title or `title` field:
+
+```ts
+aexeoPlugin({
+  titleFieldsByCollection: { glossary: ["seo_title", "term"] },
+})
+```
+
+Use the actual collection name and renderer fallback order. Explicit nested paths
+are also supported, for example `{ source: "data", path: ["page_data", "title"] }`.
+If an earlier fallback field is unavailable, the title is not considered observed.
+A revision audit only reads fields in that historical snapshot; it cannot infer
+the historical SEO panel or rendered page. The audit reports title coverage.

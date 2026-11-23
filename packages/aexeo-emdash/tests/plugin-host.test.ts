@@ -217,6 +217,20 @@ describe("EmDash content adaptation", () => {
     expect(invalid.unavailable_metadata_fields).toEqual(["date"]);
   });
 
+  it("projects host-declared title fallbacks without treating unknown data as missing", () => {
+    const item: EmdashContentItem = { id: "a", type: "terms", slug: "label", status: "draft", locale: "en", data: { seo_title: "", term: "Glossary term" } };
+    const options = { titleFields: ["seo_title", "term"] };
+    expect(adaptContentItem(item, options).document).toMatchObject({ title: "Glossary term", observed_metadata_fields: ["title", "lang"] });
+    expect(adaptContentItem({ ...item, data: { seo_title: "SEO title" } }, options).document.title).toBe("SEO title");
+    const unknown = adaptContentItem({ ...item, data: { term: "Glossary term" } }, options).document;
+    expect(unknown.title).toBe("label");
+    expect(unknown.observed_metadata_fields).not.toContain("title");
+    const absent = adaptContentItem({ ...item, data: { seo_title: null, term: "" } }, options).document;
+    expect(absent.title).toBe("");
+    expect(absent.observed_metadata_fields).toContain("title");
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ titleFieldsByCollection: { terms: options.titleFields } }).options)).titleFieldsByCollection.terms).toEqual(options.titleFields);
+  });
+
   it("projects explicit ordered description fields and distinguishes unknown mappings", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { seo_description: "SEO copy", excerpt: "Excerpt" } };
     const options = { descriptionFields: ["seo_description", "excerpt"] };

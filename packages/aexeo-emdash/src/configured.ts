@@ -180,6 +180,7 @@ export interface ConfiguredPluginOptions {
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>;
+  titleFieldsByCollection?: Record<string, readonly DescriptionField[]>;
   metadataFieldsByCollection?: Record<string, MetadataFields>;
   /** Optional portable preset evaluated in addition to the existing site checks. */
   contentPreset?: ContentPresetOptions;
@@ -288,6 +289,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
           options.descriptionFieldsByCollection?.[event.content.type],
           false,
           options.metadataFieldsByCollection?.[event.content.type],
+          options.titleFieldsByCollection?.[event.content.type],
         ),
       "content:afterDelete": (event: ContentAfterDeleteEvent, ctx: SandboxCtx) =>
         handleAfterDelete(event, ctx),
@@ -310,7 +312,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128).optional() }),
         handler: async (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string; field?: string } }) => {
           const startedAt = Date.now();
-          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, projectLinks: projectLinkDestinations, revisionLinkObservations: runtime.revisionLinkObservations, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onLinkProviderTelemetry: runtime.onLinkProviderTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
+          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, titleFieldsByCollection: options.titleFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, projectLinks: projectLinkDestinations, revisionLinkObservations: runtime.revisionLinkObservations, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onLinkProviderTelemetry: runtime.onLinkProviderTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
           try { ctx.log?.info("aexeo.revision_audit", { status: result.status, ...(result.status === "not_checked" ? { reason: result.reason } : { revision_status: result.revision_status }), scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },
@@ -321,7 +323,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         input: candidateSchema,
         handler: async (ctx: SandboxCtx & { input: z.infer<typeof candidateSchema> }) => {
           const startedAt = Date.now();
-          const result = await auditCandidate(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
+          const result = await auditCandidate(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, titleFieldsByCollection: options.titleFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
           try { ctx.log?.info("aexeo.candidate_audit", { status: result.status, ...(result.status === "not_checked" ? { reason: result.reason } : {}), duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },
@@ -363,7 +365,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
       admin: {
         permission: "plugins:read",
         handler: (ctx: RouteContext) =>
-          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings, options.contentFieldsByCollection, options.descriptionFieldsByCollection, options.metadataFieldsByCollection),
+          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings, options.contentFieldsByCollection, options.descriptionFieldsByCollection, options.metadataFieldsByCollection, options.titleFieldsByCollection),
       },
       // JSON data endpoint for the React adminEntry. Two routes:
       //   POST /_emdash/api/plugins/aexeo-emdash/data    — read current findings
@@ -383,6 +385,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
             blockMappings: options.blockMappings,
             contentFieldsByCollection: options.contentFieldsByCollection,
             descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+            titleFieldsByCollection: options.titleFieldsByCollection,
             metadataFieldsByCollection: options.metadataFieldsByCollection,
           })).payload,
       },
@@ -397,6 +400,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
             blockMappings: options.blockMappings,
             contentFieldsByCollection: options.contentFieldsByCollection,
             descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+            titleFieldsByCollection: options.titleFieldsByCollection,
             metadataFieldsByCollection: options.metadataFieldsByCollection,
           }),
       },
@@ -499,6 +503,7 @@ async function handleAdminRoute(
   contentFieldsByCollection?: Record<string, readonly string[]>,
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>,
   metadataFieldsByCollection?: Record<string, MetadataFields>,
+  titleFieldsByCollection?: Record<string, readonly DescriptionField[]>,
 ): Promise<BlockResponse> {
   const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {
@@ -535,6 +540,7 @@ async function handleAdminRoute(
         blockMappings,
         contentFieldsByCollection,
         descriptionFieldsByCollection,
+        titleFieldsByCollection,
         metadataFieldsByCollection,
       });
     }
