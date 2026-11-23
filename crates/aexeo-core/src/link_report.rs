@@ -4,8 +4,8 @@ use url::Url;
 
 pub use aexeo_contracts::{RedirectHop, RedirectedArrival};
 
-use crate::link_counts::{LinkCounts, count_links};
-use crate::link_evidence::{HtmlLinkMetadata, LinkContext, extract_document};
+use crate::link_counts::{IncrementalLinkCounts, LinkCounts, count_links};
+use crate::link_evidence::{HtmlLinkMetadata, LinkContext, LinkEvidence, extract_document};
 use crate::link_findings::{LegacyLinkFinding, qualify_legacy_link_findings};
 use crate::link_graph::{LinkResolution, resolve_link};
 use crate::link_inventory::{
@@ -1238,6 +1238,18 @@ fn redirected_from(page: &RenderedPage) -> Option<String> {
 /// This report lists observations and coverage issues. It never declares an
 /// orphan: completeness and semantic classification must be assessed first.
 pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> {
+    build_link_report_with(
+        input,
+        |page, origin, date| extract_document(&page.html, &page.url, origin, date),
+        count_links,
+    )
+}
+
+fn build_link_report_with(
+    input: &LinkReportInput,
+    mut extract: impl FnMut(&RenderedPage, &str, Option<&str>) -> (Vec<LinkEvidence>, HtmlLinkMetadata),
+    mut count: impl FnMut(Vec<LinkEvidence>) -> LinkCounts,
+) -> anyhow::Result<LinkReport> {
     anyhow::ensure!(
         input.version == 1,
         "unsupported link report input version: {}",
@@ -1322,12 +1334,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         if !valid {
             issues.push("invalid_or_foreign_crawl_url".to_string());
         }
-        let (links, metadata) = extract_document(
-            &page.html,
-            &page.url,
-            origin,
-            input.snapshot_date.as_deref(),
-        );
+        let (links, metadata) = extract(page, origin, input.snapshot_date.as_deref());
         evidence.extend(links);
         if inventory_dispositions.get(page.url.as_str()) == Some(&InventoryDisposition::Published)
             && let Some(issue) = locale_evidence_issue(
@@ -1431,7 +1438,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     {
         issues.push("unclassified_link_context".to_string());
     }
-    let links = count_links(evidence);
+    let links = count(evidence);
     if !links.indeterminate.is_empty() {
         // An unresolved reference might target any inventoried page, so a
         // zero incoming count cannot establish an orphan conclusion.
@@ -1684,9 +1691,381 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     })
 }
 
+/// A report baseline owned and prepared in this process. It caches parsed HTML
+/// and the source index for repeated candidate reviews; it is not serializable.
+/// The host remains responsible for the provenance and completeness of inputs.
+pub struct LinkReportBaseline {
+    origin: String,
+    snapshot_date: Option<String>,
+    pages: std::collections::BTreeMap<String, CachedLinkPage>,
+    counts: LinkCounts,
+    index: IncrementalLinkCounts,
+}
+
+struct CachedLinkPage {
+    html: String,
+    links: Vec<LinkEvidence>,
+    metadata: HtmlLinkMetadata,
+}
+
+/// Aggregate execution counters, alongside a full, normally qualified report.
+pub struct IncrementalLinkReport {
+    pub report: LinkReport,
+    pub pages_reused: usize,
+    pub pages_extracted: usize,
+    pub sources_recounted: usize,
+    pub destinations_recounted: usize,
+}
+
+impl LinkReportBaseline {
+    /// Parse and index the base. Duplicate and empty source URLs are refused
+    /// because a source-keyed index cannot distinguish their observations.
+    pub fn prepare(input: &LinkReportInput) -> anyhow::Result<Self> {
+        anyhow::ensure!(input.version == 1, "unsupported link report input version");
+        let origin = report_origin(input).to_owned();
+        let mut pages = std::collections::BTreeMap::new();
+        let mut ordered = Vec::new();
+        for page in &input.pages {
+            anyhow::ensure!(
+                !page.url.is_empty() && !pages.contains_key(&page.url),
+                "empty or duplicate page URL"
+            );
+            let (links, metadata) = extract_document(
+                &page.html,
+                &page.url,
+                &origin,
+                input.snapshot_date.as_deref(),
+            );
+            ordered.extend(links.iter().cloned());
+            pages.insert(
+                page.url.clone(),
+                CachedLinkPage {
+                    html: page.html.clone(),
+                    links,
+                    metadata,
+                },
+            );
+        }
+        let index = IncrementalLinkCounts::new(
+            pages
+                .iter()
+                .map(|(url, page)| (url.clone(), page.links.clone()))
+                .collect(),
+        )
+        .map_err(anyhow::Error::msg)?;
+        Ok(Self {
+            origin,
+            snapshot_date: input.snapshot_date.clone(),
+            pages,
+            counts: count_links(ordered),
+            index,
+        })
+    }
+
+    /// Rebuild all coverage and inventory qualifications for the candidate,
+    /// while reusing unchanged page extraction and recounting affected links.
+    /// Changing origin or snapshot date invalidates all cached extractions.
+    pub fn evaluate(&self, input: &LinkReportInput) -> anyhow::Result<IncrementalLinkReport> {
+        anyhow::ensure!(input.version == 1, "unsupported link report input version");
+        let origin = report_origin(input);
+        let same_context = self.origin == origin && self.snapshot_date == input.snapshot_date;
+        let mut pages = std::collections::BTreeMap::<String, CachedLinkPage>::new();
+        let mut order = std::collections::BTreeMap::new();
+        let mut reused = 0;
+        for (position, page) in input.pages.iter().enumerate() {
+            anyhow::ensure!(
+                !page.url.is_empty() && !order.contains_key(&page.url),
+                "empty or duplicate page URL"
+            );
+            order.insert(page.url.clone(), position);
+            let cached = self
+                .pages
+                .get(&page.url)
+                .filter(|cached| same_context && cached.html == page.html);
+            let (links, metadata) = match cached {
+                Some(cached) => {
+                    reused += 1;
+                    (cached.links.clone(), cached.metadata.clone())
+                }
+                None => extract_document(
+                    &page.html,
+                    &page.url,
+                    origin,
+                    input.snapshot_date.as_deref(),
+                ),
+            };
+            pages.insert(
+                page.url.clone(),
+                CachedLinkPage {
+                    html: String::new(),
+                    links,
+                    metadata,
+                },
+            );
+        }
+        let mut changes = std::collections::BTreeMap::new();
+        for source in self
+            .pages
+            .keys()
+            .filter(|source| !pages.contains_key(*source))
+        {
+            changes.insert(source.clone(), None);
+        }
+        for (source, page) in &pages {
+            if self
+                .pages
+                .get(source)
+                .is_none_or(|base| base.links != page.links)
+            {
+                changes.insert(source.clone(), Some(page.links.clone()));
+            }
+        }
+        let delta = self.index.evaluate(&changes).map_err(anyhow::Error::msg)?;
+        let destinations_recounted = delta.destinations.len();
+        let mut destinations: std::collections::BTreeMap<_, _> = self
+            .counts
+            .destinations
+            .iter()
+            .cloned()
+            .map(|item| (item.destination.clone(), item))
+            .collect();
+        for (url, updated) in delta.destinations {
+            match updated {
+                Some(item) => {
+                    destinations.insert(url, item);
+                }
+                None => {
+                    destinations.remove(&url);
+                }
+            }
+        }
+        // Full reports preserve input-page order within each destination.
+        for destination in destinations.values_mut() {
+            destination
+                .evidence
+                .sort_by_key(|link| order.get(&link.source).copied().unwrap_or(usize::MAX));
+        }
+        let mut links = LinkCounts {
+            destinations: destinations.into_values().collect(),
+            same_document: Vec::new(),
+            external: Vec::new(),
+            unsupported: Vec::new(),
+            indeterminate: Vec::new(),
+        };
+        for page in &input.pages {
+            for link in &pages[&page.url].links {
+                match &link.resolution {
+                    LinkResolution::SameDocument { .. } => links.same_document.push(link.clone()),
+                    LinkResolution::External { .. } => links.external.push(link.clone()),
+                    LinkResolution::Unsupported { .. } => links.unsupported.push(link.clone()),
+                    LinkResolution::Indeterminate { .. } => links.indeterminate.push(link.clone()),
+                    LinkResolution::Internal { .. } => {}
+                }
+            }
+        }
+        let mut links = Some(links);
+        let report = build_link_report_with(
+            input,
+            |page, _, _| {
+                let cached = &pages[&page.url];
+                (cached.links.clone(), cached.metadata.clone())
+            },
+            |_| links.take().expect("report counts links once"),
+        )?;
+        Ok(IncrementalLinkReport {
+            report,
+            pages_reused: reused,
+            pages_extracted: input.pages.len() - reused,
+            sources_recounted: delta.sources_scanned,
+            destinations_recounted,
+        })
+    }
+}
+
+fn report_origin(input: &LinkReportInput) -> &str {
+    input
+        .identity
+        .as_ref()
+        .map(|identity| identity.origin.as_str())
+        .unwrap_or("")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn incremental_fixture() -> LinkReportInput {
+        let page = |url: &str, html: &str| RenderedPage {
+            url: url.into(),
+            html: html.into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: None,
+            redirect_chain: Vec::new(),
+            redirected_arrivals: Vec::new(),
+        };
+        LinkReportInput {
+            version: 1,
+            identity: Some(SurfaceIdentity {
+                origin: "https://example.org".into(),
+                release: "r1".into(),
+                surface: "public".into(),
+                snapshot: "s1".into(),
+            }),
+            snapshot_date: Some("2026-11-23".into()),
+            crawl_complete: false,
+            inventory: None,
+            pages: vec![
+                page(
+                    "https://example.org/z",
+                    "<nav><a href='/target'>Menu</a></nav><main><a href='/target'>Body</a><a href='#here'>jump</a></main>",
+                ),
+                page(
+                    "https://example.org/a",
+                    "<main><a href='/target'>A</a><a href='https://elsewhere.org'>external</a></main>",
+                ),
+                page("https://example.org/target", "<main>Target</main>"),
+            ],
+        }
+    }
+
+    #[test]
+    fn incremental_report_matches_full_report_and_requalifies_coverage() {
+        let base = incremental_fixture();
+        let baseline = LinkReportBaseline::prepare(&base).unwrap();
+        let same = baseline.evaluate(&base).unwrap();
+        assert_eq!(same.pages_reused, 3);
+        assert_eq!(same.pages_extracted, 0);
+        assert_eq!(same.destinations_recounted, 0);
+        assert_eq!(
+            serde_json::to_value(same.report).unwrap(),
+            serde_json::to_value(build_link_report(&base).unwrap()).unwrap()
+        );
+
+        let mut candidate = base.clone();
+        candidate.pages[0].html = "<main><a href='/new'>New</a><a href='https://user:password@example.org/target'>uncertain</a></main>".into();
+        candidate.pages[1].response_headers = None;
+        candidate.pages.swap(0, 1);
+        candidate.crawl_complete = true;
+        let result = baseline.evaluate(&candidate).unwrap();
+        assert_eq!(result.pages_reused, 2);
+        assert_eq!(result.pages_extracted, 1);
+        assert_eq!(result.destinations_recounted, 2);
+        assert!(
+            result
+                .report
+                .issues
+                .contains(&"indeterminate_links".to_string())
+        );
+        assert!(
+            result
+                .report
+                .issues
+                .contains(&"response_headers_missing".to_string())
+        );
+        assert_eq!(
+            serde_json::to_value(result.report).unwrap(),
+            serde_json::to_value(build_link_report(&candidate).unwrap()).unwrap()
+        );
+
+        candidate.pages.remove(0);
+        candidate.pages.push(RenderedPage {
+            url: "https://example.org/new".into(),
+            html: "<main><a href='/target'>new page</a></main>".into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: None,
+            redirect_chain: Vec::new(),
+            redirected_arrivals: Vec::new(),
+        });
+        let result = baseline.evaluate(&candidate).unwrap();
+        assert_eq!(
+            serde_json::to_value(result.report).unwrap(),
+            serde_json::to_value(build_link_report(&candidate).unwrap()).unwrap()
+        );
+
+        candidate.snapshot_date = Some("2026-11-24".into());
+        let result = baseline.evaluate(&candidate).unwrap();
+        assert_eq!(result.pages_reused, 0);
+        assert_eq!(
+            serde_json::to_value(result.report).unwrap(),
+            serde_json::to_value(build_link_report(&candidate).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn incremental_report_preserves_inventory_redirect_and_origin_semantics() {
+        use crate::link_inventory::{InventoryDisposition, InventoryPage};
+        let mut base = incremental_fixture();
+        base.crawl_complete = true;
+        base.inventory = Some(InventorySnapshot {
+            identity: base.identity.clone(),
+            complete: true,
+            pages: base
+                .pages
+                .iter()
+                .map(|page| InventoryPage {
+                    url: page.url.clone(),
+                    disposition: InventoryDisposition::Published,
+                    target: None,
+                    locale: None,
+                })
+                .collect(),
+        });
+        let baseline = LinkReportBaseline::prepare(&base).unwrap();
+        let mut candidate = base.clone();
+        candidate.pages[2].requested_url = Some("https://example.org/old".into());
+        candidate.pages[2].redirect_chain = vec![RedirectHop {
+            url: "https://example.org/old".into(),
+            status_code: 301,
+        }];
+        candidate
+            .inventory
+            .as_mut()
+            .unwrap()
+            .pages
+            .push(InventoryPage {
+                url: "https://example.org/old".into(),
+                disposition: InventoryDisposition::Redirect,
+                target: Some("https://example.org/target".into()),
+                locale: None,
+            });
+        let result = baseline.evaluate(&candidate).unwrap();
+        assert_eq!(result.pages_reused, 3);
+        assert_eq!(
+            serde_json::to_value(result.report).unwrap(),
+            serde_json::to_value(build_link_report(&candidate).unwrap()).unwrap()
+        );
+        candidate.identity.as_mut().unwrap().origin = "https://other.example".into();
+        let result = baseline.evaluate(&candidate).unwrap();
+        assert_eq!(result.pages_extracted, 3);
+        assert_eq!(
+            serde_json::to_value(result.report).unwrap(),
+            serde_json::to_value(build_link_report(&candidate).unwrap()).unwrap()
+        );
+        candidate.pages.clear();
+        let result = baseline.evaluate(&candidate).unwrap();
+        assert_eq!(
+            serde_json::to_value(result.report).unwrap(),
+            serde_json::to_value(build_link_report(&candidate).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn incremental_report_rejects_ambiguous_duplicate_source_urls() {
+        let base = incremental_fixture();
+        let baseline = LinkReportBaseline::prepare(&base).unwrap();
+        let mut duplicate = base.clone();
+        duplicate.pages.push(duplicate.pages[0].clone());
+        assert!(LinkReportBaseline::prepare(&duplicate).is_err());
+        assert!(baseline.evaluate(&duplicate).is_err());
+        assert!(
+            build_link_report(&duplicate)
+                .unwrap()
+                .issues
+                .contains(&"duplicate_crawl_url".to_string())
+        );
+    }
 
     #[test]
     fn foreign_metadata_does_not_hide_incoming_article_links() {
