@@ -395,7 +395,9 @@ identity. This comparison is not a complete BCP 47 validator.
   direct location assignment under simple textual checks; the archive's
   `_redirects` file contains no glossary category rule. This does not exclude
   server redirects, other script behavior or alternate metadata syntax, and
-  does not establish current HTTP behavior or confirm orphan findings.
+  does not establish current HTTP behavior or confirm orphan findings. An
+  unauthenticated HEAD request to one category on 2026-11-23 returned a 302 to
+  Cloudflare Access; this response does not reveal the underlying route status.
   A static graph run on the 1,501 archived HTML files, with caller-inferred
   public URLs, mapped every file and observed 128,223 links; aggregate telemetry
   reported 75,340 conditional links and 163.86 seconds on a local debug build.
