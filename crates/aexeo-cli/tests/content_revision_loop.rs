@@ -326,3 +326,46 @@ fn adapter_revision_rejects_changed_metadata_coverage() {
     session.send(json!({"action":"submit", "candidate":r#"{"schema":"aexeo.content-adapter/v1","text":"one two three","metadata":{},"observed_metadata_fields":["description"]}"#}));
     assert_eq!(session.finish(), 2);
 }
+
+#[test]
+fn adapter_revisions_recompute_native_paths_for_each_exact_candidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("projection.json");
+    let policy = dir.path().join("policy.toml");
+    fs::write(&policy, "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad']\nblocking=true\n").unwrap();
+    let candidate = |text: &str, block: usize| {
+        json!({"schema":"aexeo.content-adapter/v1", "text":text,
+            "native_source_map":{"spans":[{"start":0,"end":text.len(),"path":["data","content",block,"children",0,"text"]}]}}).to_string()
+    };
+    fs::write(&draft, candidate("🙂 bad", 0)).unwrap();
+    let source = format!("test={}", policy.display());
+    let mut session = start(draft.to_str().unwrap(), &source, "adapter-json", &[]);
+    let request = session.read();
+    assert_eq!(
+        request["report"]["native_source_locations"][0]["utf16_offset"],
+        3
+    );
+    assert_eq!(
+        request["report"]["native_source_locations"][0]["path"][2],
+        0
+    );
+    session.send(json!({"action":"submit", "candidate":candidate("New 🙂 bad", 1)}));
+    let request = session.read();
+    assert_eq!(request["event"], "proposal_requested");
+    assert_eq!(
+        request["report"]["native_source_locations"][0]["utf16_offset"],
+        7
+    );
+    assert_eq!(
+        request["report"]["native_source_locations"][0]["path"][2],
+        1
+    );
+    session.send(json!({"action":"submit", "candidate":candidate("New 🙂 fine", 1)}));
+    let result = session.read();
+    assert_eq!(result["stop"], "satisfied");
+    assert_eq!(
+        result["candidate_sha256"],
+        result["report"]["input_fingerprint"]["text_sha256"]
+    );
+    assert_eq!(session.finish(), 0);
+}

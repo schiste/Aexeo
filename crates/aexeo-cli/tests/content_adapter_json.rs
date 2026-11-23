@@ -690,3 +690,79 @@ fn adapter_numeric_citations_keep_rhythm_and_literal_checks_distinct() {
     fs::write(&file, invalid.to_string()).unwrap();
     assert!(!run(&file, &preset, &[]).status.success());
 }
+
+#[test]
+fn native_paths_map_prose_to_bounded_utf16_positions() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad','ugly']\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let source = "🙂 bad ugly";
+    let projected = json!({"schema":"aexeo.content-adapter/v1", "text":source,
+        "native_source_map":{"spans":[{"start":0,"end":"🙂 bad".len(),"path":["body",3,"children",1,"text"],"utf16_start":2}]}});
+    fs::write(&file, serde_json::to_vec(&projected).unwrap()).unwrap();
+    let output = run(&file, &preset, &["--telemetry"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["native_source_mapping"],
+        json!({"eligible":2,"mapped":1,"unmapped":1})
+    );
+    assert_eq!(
+        report["native_source_locations"],
+        json!([{"gate_id":"terms","finding_index":0,"source":"host_supplied_native_path","path":["body",3,"children",1,"text"],"utf16_offset":5}])
+    );
+    let telemetry = String::from_utf8_lossy(&output.stderr);
+    assert!(telemetry.contains("native_source_spans"));
+    assert!(!telemetry.contains("body") && !telemetry.contains("🙂"));
+
+    for map in [
+        json!({"spans":[{"start":1,"end":4,"path":["body"]}]}),
+        json!({"spans":[{"start":0,"end":4,"path":[true]}]}),
+        json!({"spans":[{"start":0,"end":4,"path":["a"]},{"start":0,"end":4,"path":["b"]}]}),
+        json!({"spans":[{"start":0,"end":4,"path":[]}]}),
+        json!({"spans":[{"start":0,"end":4,"path":[9007199254740992u64]}]}),
+        json!({"spans":[{"start":0,"end":4,"path":["body"],"utf16_start":9007199254740991u64}]}),
+    ] {
+        let input =
+            json!({"schema":"aexeo.content-adapter/v1", "text":source, "native_source_map":map});
+        fs::write(&file, serde_json::to_vec(&input).unwrap()).unwrap();
+        assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+    }
+    fs::write(
+        &file,
+        r#"{"schema":"aexeo.content-adapter/v1","text":null,"native_source_map":{"spans":[]}}"#,
+    )
+    .unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+}
+
+#[test]
+fn native_paths_index_long_multibyte_spans_without_offset_drift() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad']\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let source = format!("{} bad", "🙂".repeat(4096));
+    fs::write(
+        &file,
+        serde_json::to_vec(&json!({"schema":"aexeo.content-adapter/v1", "text":source,
+        "native_source_map":{"spans":[{"start":0,"end":source.len(),"path":["data",0]}]}}))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = run(&file, &preset, &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["native_source_locations"][0]["utf16_offset"], 8193);
+}
