@@ -2070,6 +2070,26 @@ For editorial pacing, the named source is the exact JSON composition snapshot;
 its assembled text must match the adapted content or the result is not checked.
 Telemetry reports only inventory counts and never evidence contents.
 
+For link reachability, the existing strict inventory requires a snapshot for
+every entity. In adapted modes, a host may instead explicitly opt into a partial
+inventory: supply `base_link_observations` together with a `base_link_unavailable`
+array of entity IDs, and supply `link_observations` and `link_unavailable` for
+each candidate. The observed map and unavailable array must partition the exact
+base or candidate identities; omitted, duplicate, extra, or overlapping IDs are
+rejected. An empty unavailable array means every identity was observed. These
+fields must be omitted rather than set to `null` when the mode is not selected.
+A change to either availability or observed values triggers reevaluation.
+
+An unavailable reachability gate remains `not_checked`, even when other gates
+and entities can report their results. The CLI returns exit 2 for any such
+partial result, including advisory gates; never treat `evaluated` alone as a
+pass. Existing callers without the unavailable arrays keep strict behavior.
+The `--export-link-observations` template exporter reports unavailable IDs for
+unprojectable plain text or HTML, and includes empty arrays when needed to keep
+all proposals in the same partial mode. The host supplies actual observations;
+Aexeo does not establish their provenance or freshness. Optional telemetry adds
+only aggregate unavailable counts, not IDs or URLs.
+
 Stdout is newline-delimited JSON, one result per proposal, in input order. Each
 record has `schema`, `proposal_index`, and `result`. An `evaluated` result has
 item reports and `evaluated`/`reused` counts; individual gates can still report

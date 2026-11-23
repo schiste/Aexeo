@@ -85,6 +85,7 @@ pub struct IncrementalBaseline {
     base_metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
     link_observations:
         Option<BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>>,
+    partial_links: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -239,6 +240,7 @@ fn evaluate_item(
     metadata: Option<&BTreeMap<String, String>>,
     link_snapshot: Option<&crate::content_gate_verdict::LinkObservationSnapshot>,
     evidence: Option<&BTreeMap<String, String>>,
+    partial_links: bool,
 ) -> Result<ContentReport, NotChecked> {
     let classify_prose = preset
         .gates
@@ -403,11 +405,31 @@ fn evaluate_item(
     if report
         .gates
         .iter()
-        .any(|gate| gate.status == GateStatus::NotChecked)
+        .any(|gate| gate.status == GateStatus::NotChecked
+            && !(partial_links && preset.gates.iter().any(|configured| {
+                matches!(configured, ContentGate::LinkReachability { id, .. } if id == &gate.gate_id)
+            })))
     {
         return Err(unavailable("a required item gate was not checked"));
     }
     Ok(report)
+}
+
+fn validate_partial_links(
+    snapshot: &CandidateSnapshot,
+    observed: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+    unavailable_ids: &BTreeSet<String>,
+) -> Result<(), NotChecked> {
+    if observed.len().checked_add(unavailable_ids.len()) != Some(snapshot.items.len())
+        || snapshot.items.iter().any(|item| {
+            observed.contains_key(&item.entity_id) == unavailable_ids.contains(&item.entity_id)
+        })
+    {
+        return Err(unavailable(
+            "partial link inventory does not match item identities",
+        ));
+    }
+    Ok(())
 }
 
 impl IncrementalBaseline {
@@ -549,6 +571,52 @@ impl IncrementalBaseline {
         >,
         evidence: Option<IncrementalEvidence>,
     ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode_partial(
+            snapshot,
+            preset,
+            mode,
+            metadata,
+            link_observations,
+            evidence,
+            false,
+        )
+    }
+
+    /// Prepare a baseline where absent map entries are explicitly unavailable.
+    /// `unavailable_ids` and `observations` must partition the entire inventory.
+    /// A missing link check remains not checked, including for blocking gates.
+    pub fn prepare_adapted_with_partial_links(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
+        observations: BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        unavailable_ids: BTreeSet<String>,
+        evidence: Option<IncrementalEvidence>,
+    ) -> Result<Self, NotChecked> {
+        validate_partial_links(&snapshot, &observations, &unavailable_ids)?;
+        Self::prepare_with_mode_partial(
+            snapshot,
+            preset,
+            ProjectionMode::Adapted(html_scope),
+            metadata,
+            Some(observations),
+            evidence,
+            true,
+        )
+    }
+
+    fn prepare_with_mode_partial(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+        mode: ProjectionMode,
+        metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
+        link_observations: Option<
+            BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: Option<IncrementalEvidence>,
+        partial_links: bool,
+    ) -> Result<Self, NotChecked> {
         let snapshot = ValidatedCandidateSnapshot::new(snapshot).map_err(unavailable)?;
         validate_scope(&snapshot, mode)?;
         if metadata.as_ref().is_some_and(|projections| {
@@ -572,6 +640,7 @@ impl IncrementalBaseline {
             ));
         }
         if let Some(observations) = &link_observations
+            && !partial_links
             && (observations.len() != snapshot.items.len()
                 || snapshot
                     .items
@@ -618,6 +687,7 @@ impl IncrementalBaseline {
                         .as_ref()
                         .and_then(|map| map.get(&item.entity_id)),
                     evidence.as_ref().and_then(|map| map.get(&item.entity_id)),
+                    partial_links,
                 )?,
             );
         }
@@ -630,6 +700,7 @@ impl IncrementalBaseline {
             metadata_dependent,
             base_metadata: metadata,
             link_observations,
+            partial_links,
         })
     }
 
@@ -795,6 +866,81 @@ impl IncrementalBaseline {
         self.evaluate_overlay(change, &overlay, None, None)
     }
 
+    /// Evaluate a candidate with explicit available and unavailable link observations.
+    /// The host must separately establish observation provenance and freshness.
+    pub fn evaluate_with_partial_links(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        unavailable_ids: &BTreeSet<String>,
+        evidence: Option<&IncrementalEvidence>,
+    ) -> IncrementalEvaluation {
+        let result = (|| {
+            if !self.partial_links {
+                return Err(unavailable(
+                    "baseline does not accept partial link inventories",
+                ));
+            }
+            self.validate_change_media(change)?;
+            let overlay = checked_overlay(&self.snapshot, change, after)?;
+            self.evaluate_partial_overlay(change, &overlay, observations, unavailable_ids, evidence)
+        })();
+        result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
+            reason: error.reason,
+        })
+    }
+
+    /// Verify referenced content before evaluating an explicitly partial inventory.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_sources_and_partial_links<
+        P: crate::content_gate_sources::ConfinedContentFiles,
+    >(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        unavailable_ids: &BTreeSet<String>,
+        evidence: Option<&IncrementalEvidence>,
+    ) -> IncrementalEvaluation {
+        let result = (|| {
+            self.validate_change_media(change)?;
+            let overlay = checked_overlay_with_sources(
+                &self.snapshot,
+                change,
+                after,
+                provider,
+                max_state_bytes,
+                max_total_bytes,
+            )?;
+            self.evaluate_partial_overlay(change, &overlay, observations, unavailable_ids, evidence)
+        })();
+        result.unwrap_or_else(|error| IncrementalEvaluation::NotChecked {
+            reason: error.reason,
+        })
+    }
+
+    fn evaluate_partial_overlay(
+        &self,
+        change: &Change,
+        overlay: &CandidateOverlay,
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        unavailable_ids: &BTreeSet<String>,
+        evidence: Option<&IncrementalEvidence>,
+    ) -> Result<IncrementalEvaluation, NotChecked> {
+        if !self.partial_links {
+            return Err(unavailable(
+                "baseline does not accept partial link inventories",
+            ));
+        }
+        validate_scope(&overlay.candidate, self.mode)?;
+        validate_partial_links(&overlay.candidate, observations, unavailable_ids)?;
+        self.evaluate_overlay_inner(change, overlay, Some(observations), evidence)
+    }
+
     fn validate_change_media(&self, change: &Change) -> Result<(), NotChecked> {
         if change
             .entries
@@ -818,12 +964,30 @@ impl IncrementalBaseline {
         evidence: Option<&IncrementalEvidence>,
     ) -> Result<IncrementalEvaluation, NotChecked> {
         validate_scope(&overlay.candidate, self.mode)?;
+        if self.partial_links {
+            return Err(unavailable(
+                "partial link inventory requires the explicit partial evaluation API",
+            ));
+        }
+        self.evaluate_overlay_inner(change, overlay, observations, evidence)
+    }
+
+    fn evaluate_overlay_inner(
+        &self,
+        change: &Change,
+        overlay: &CandidateOverlay,
+        observations: Option<
+            &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        >,
+        evidence: Option<&IncrementalEvidence>,
+    ) -> Result<IncrementalEvaluation, NotChecked> {
         if self.link_observations.is_some() != observations.is_some() {
             return Err(unavailable(
                 "candidate link observation inventory is required",
             ));
         }
         if let Some(map) = observations
+            && !self.partial_links
             && (map.len() != overlay.candidate.items.len()
                 || overlay
                     .candidate
@@ -890,12 +1054,16 @@ impl IncrementalBaseline {
                 }
                 && match (&self.link_observations, observations) {
                     (Some(base), Some(candidate)) => {
-                        let a = &base[&item.entity_id];
-                        let b = &candidate[&item.entity_id];
-                        a.version == b.version
-                            && a.source_sha256 == b.source_sha256
-                            && a.destinations == b.destinations
-                            && a.observations == b.observations
+                        match (base.get(&item.entity_id), candidate.get(&item.entity_id)) {
+                            (Some(a), Some(b)) => {
+                                a.version == b.version
+                                    && a.source_sha256 == b.source_sha256
+                                    && a.destinations == b.destinations
+                                    && a.observations == b.observations
+                            }
+                            (None, None) => true,
+                            _ => false,
+                        }
                     }
                     (None, None) => true,
                     _ => false,
@@ -935,6 +1103,7 @@ impl IncrementalBaseline {
                     fields,
                     observations.and_then(|map| map.get(&item.entity_id)),
                     evidence.and_then(|map| map.get(&item.entity_id)),
+                    self.partial_links,
                 )?
             };
             reports.insert(item.entity_id.clone(), report);
@@ -1272,7 +1441,7 @@ impl ComposedBaseline {
         preset: ContentPreset,
         html_scope: crate::html_content_adapter::HtmlContentScope,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, None, None)
+        Self::prepare_with_observations(snapshot, metadata, preset, html_scope, None, None, None)
     }
 
     /// Prepare both item and collection scopes with source-bound link observations.
@@ -1289,6 +1458,7 @@ impl ComposedBaseline {
             preset,
             html_scope,
             Some(observations),
+            None,
             None,
         )
     }
@@ -1312,6 +1482,29 @@ impl ComposedBaseline {
             html_scope,
             observations,
             Some(evidence),
+            None,
+        )
+    }
+
+    /// Prepare mixed item and collection gates with explicit unavailable link observations.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_adapted_with_partial_links(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+        html_scope: crate::html_content_adapter::HtmlContentScope,
+        observations: BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        unavailable_ids: BTreeSet<String>,
+        evidence: Option<IncrementalEvidence>,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_observations(
+            snapshot,
+            metadata,
+            preset,
+            html_scope,
+            Some(observations),
+            evidence,
+            Some(unavailable_ids),
         )
     }
 
@@ -1324,6 +1517,7 @@ impl ComposedBaseline {
             BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
         >,
         evidence: Option<IncrementalEvidence>,
+        unavailable_ids: Option<BTreeSet<String>>,
     ) -> Result<Self, NotChecked> {
         preset
             .validate()
@@ -1341,7 +1535,23 @@ impl ComposedBaseline {
                 "mixed preset must contain item and collection gates",
             ));
         }
-        let items = if let Some(evidence) = evidence {
+        let items = if let Some(unavailable_ids) = unavailable_ids {
+            let item_metadata = items
+                .gates
+                .iter()
+                .any(is_item_metadata_gate)
+                .then(|| metadata.clone());
+            IncrementalBaseline::prepare_adapted_with_partial_links(
+                snapshot.clone(),
+                items,
+                html_scope,
+                item_metadata,
+                observations
+                    .ok_or_else(|| unavailable("partial link observations are required"))?,
+                unavailable_ids,
+                evidence,
+            )?
+        } else if let Some(evidence) = evidence {
             let item_metadata = items
                 .gates
                 .iter()
@@ -1400,7 +1610,7 @@ impl ComposedBaseline {
     /// collection cannot be hidden by a successful result in the other scope.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> ComposedEvaluation {
         let overlay = checked_overlay(&self.items.snapshot, change, after);
-        self.evaluate_with_overlay(change, overlay, None, None)
+        self.evaluate_with_overlay(change, overlay, None, None, None)
     }
 
     /// Evaluate both scopes after verifying all host-supplied referenced states.
@@ -1421,7 +1631,7 @@ impl ComposedBaseline {
             max_state_bytes,
             max_total_bytes,
         );
-        self.evaluate_with_overlay(change, overlay, None, None)
+        self.evaluate_with_overlay(change, overlay, None, None, None)
     }
 
     /// Evaluate both scopes using an explicit complete candidate link inventory.
@@ -1432,7 +1642,7 @@ impl ComposedBaseline {
         observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
     ) -> ComposedEvaluation {
         let overlay = checked_overlay(&self.items.snapshot, change, after);
-        self.evaluate_with_overlay(change, overlay, Some(observations), None)
+        self.evaluate_with_overlay(change, overlay, Some(observations), None, None)
     }
 
     /// Evaluate both scopes after checking referenced content and link inventories.
@@ -1455,7 +1665,7 @@ impl ComposedBaseline {
             max_state_bytes,
             max_total_bytes,
         );
-        self.evaluate_with_overlay(change, overlay, Some(observations), None)
+        self.evaluate_with_overlay(change, overlay, Some(observations), None, None)
     }
 
     /// Evaluate both scopes with an explicit candidate evidence inventory.
@@ -1469,7 +1679,7 @@ impl ComposedBaseline {
         evidence: &IncrementalEvidence,
     ) -> ComposedEvaluation {
         let overlay = checked_overlay(&self.items.snapshot, change, after);
-        self.evaluate_with_overlay(change, overlay, observations, Some(evidence))
+        self.evaluate_with_overlay(change, overlay, observations, Some(evidence), None)
     }
 
     /// Evaluate both scopes after verifying referenced states, with candidate evidence.
@@ -1496,7 +1706,7 @@ impl ComposedBaseline {
             max_state_bytes,
             max_total_bytes,
         );
-        self.evaluate_with_overlay(change, overlay, observations, Some(evidence))
+        self.evaluate_with_overlay(change, overlay, observations, Some(evidence), None)
     }
 
     /// Project candidate metadata after verifying all host-supplied referenced states.
@@ -1517,6 +1727,57 @@ impl ComposedBaseline {
         )
     }
 
+    /// Evaluate both scopes with an explicitly complete availability partition.
+    pub fn evaluate_with_partial_links(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        unavailable_ids: &BTreeSet<String>,
+        evidence: Option<&IncrementalEvidence>,
+    ) -> ComposedEvaluation {
+        let overlay = checked_overlay(&self.items.snapshot, change, after);
+        self.evaluate_with_overlay(
+            change,
+            overlay,
+            Some(observations),
+            evidence,
+            Some(unavailable_ids),
+        )
+    }
+
+    /// Verify referenced states and evaluate both scopes with a partial link inventory.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_sources_and_partial_links<
+        P: crate::content_gate_sources::ConfinedContentFiles,
+    >(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+        provider: &mut P,
+        max_state_bytes: usize,
+        max_total_bytes: usize,
+        observations: &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
+        unavailable_ids: &BTreeSet<String>,
+        evidence: Option<&IncrementalEvidence>,
+    ) -> ComposedEvaluation {
+        let overlay = checked_overlay_with_sources(
+            &self.items.snapshot,
+            change,
+            after,
+            provider,
+            max_state_bytes,
+            max_total_bytes,
+        );
+        self.evaluate_with_overlay(
+            change,
+            overlay,
+            Some(observations),
+            evidence,
+            Some(unavailable_ids),
+        )
+    }
+
     fn evaluate_with_overlay(
         &self,
         change: &Change,
@@ -1525,14 +1786,27 @@ impl ComposedBaseline {
             &BTreeMap<String, crate::content_gate_verdict::LinkObservationSnapshot>,
         >,
         evidence: Option<&IncrementalEvidence>,
+        unavailable_ids: Option<&BTreeSet<String>>,
     ) -> ComposedEvaluation {
         let item_result = self
             .items
             .validate_change_media(change)
             .and_then(|()| overlay.as_ref().map_err(Clone::clone))
             .and_then(|overlay| {
-                self.items
-                    .evaluate_overlay(change, overlay, observations, evidence)
+                if let Some(unavailable_ids) = unavailable_ids {
+                    let observations = observations
+                        .ok_or_else(|| unavailable("partial link observations are required"))?;
+                    self.items.evaluate_partial_overlay(
+                        change,
+                        overlay,
+                        observations,
+                        unavailable_ids,
+                        evidence,
+                    )
+                } else {
+                    self.items
+                        .evaluate_overlay(change, overlay, observations, evidence)
+                }
             });
         let collection_result = overlay
             .as_ref()
@@ -1567,6 +1841,164 @@ mod tests {
         Base, BaseKind, ContentState, Entry, Operation, Origin, OriginKind,
     };
     use sha2::{Digest, Sha256};
+
+    #[test]
+    fn partial_link_inventory_preserves_other_checks_and_refreshes_availability() {
+        use crate::content_gate::LinkReachabilityObservation::Reachable;
+        use crate::content_gate_verdict::LinkObservationSnapshot;
+        let (mut snapshot, _, mut change) = fixture();
+        let mut a = item("a", "[A](https://a.example)", None);
+        a.media_type = "text/markdown".into();
+        let mut b = item("b", "[B](https://b.example)", None);
+        b.media_type = "text/markdown".into();
+        snapshot.items = vec![a.clone(), b.clone()];
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='link'\nkind='link_reachability'\nblocking=true\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n").unwrap();
+        let observation = |item: &CandidateItem, url: &str| LinkObservationSnapshot {
+            version: 1,
+            source_sha256: item.sha256.clone(),
+            destinations: vec![url.into()],
+            observations: vec![Reachable],
+        };
+        let observed = BTreeMap::from([("a".into(), observation(&a, "https://a.example"))]);
+        let missing = BTreeSet::from(["b".into()]);
+        let scope = crate::html_content_adapter::HtmlContentScope::Document;
+        assert!(
+            IncrementalBaseline::prepare_adapted_with_partial_links(
+                snapshot.clone(),
+                preset.clone(),
+                scope,
+                None,
+                observed.clone(),
+                BTreeSet::new(),
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            IncrementalBaseline::prepare_adapted_with_partial_links(
+                snapshot.clone(),
+                preset.clone(),
+                scope,
+                None,
+                observed.clone(),
+                BTreeSet::from(["a".into()]),
+                None
+            )
+            .is_err()
+        );
+        let baseline = IncrementalBaseline::prepare_adapted_with_partial_links(
+            snapshot,
+            preset,
+            scope,
+            None,
+            observed.clone(),
+            missing.clone(),
+            None,
+        )
+        .unwrap();
+        let mut next = item("a", "[new](https://new.example)", None);
+        next.media_type = "text/markdown".into();
+        let mut update = entry("a", Operation::Update, Some(&a), Some(&next));
+        update.media_type = "text/markdown".into();
+        change.entries = vec![update];
+        let candidate = BTreeMap::from([("a".into(), observation(&next, "https://new.example"))]);
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate_with_partial_links(
+            &change,
+            &[next.clone()],
+            &candidate,
+            &missing,
+            None,
+        )
+        else {
+            panic!("partial candidate must be evaluated")
+        };
+        assert_eq!((evaluated, reused), (1, 1));
+        assert_eq!(reports["b"].gates[0].status, GateStatus::NotChecked);
+        assert_eq!(reports["b"].gates[1].status, GateStatus::Passed);
+        assert_eq!(reports["b"].summary.blocking_not_checked, 1);
+        let mut complete = candidate.clone();
+        complete.insert("b".into(), observation(&b, "https://b.example"));
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate_with_partial_links(
+            &change,
+            &[next.clone()],
+            &complete,
+            &BTreeSet::new(),
+            None,
+        )
+        else {
+            panic!("newly available candidate must be evaluated")
+        };
+        assert_eq!((evaluated, reused), (2, 0));
+        assert_eq!(reports["b"].gates[0].status, GateStatus::Passed);
+        assert!(matches!(
+            baseline.evaluate_with_partial_links(
+                &change,
+                &[next.clone()],
+                &candidate,
+                &BTreeSet::new(),
+                None
+            ),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        struct Provider(Vec<u8>);
+        impl crate::content_gate_sources::ConfinedContentFiles for Provider {
+            type Reader = std::io::Cursor<Vec<u8>>;
+            fn open(
+                &mut self,
+                _: &std::path::Path,
+                _: &std::path::Path,
+            ) -> std::io::Result<Self::Reader> {
+                Ok(std::io::Cursor::new(self.0.clone()))
+            }
+        }
+        let mut referenced = change.clone();
+        referenced.content_root = Some("/trusted".into());
+        let state = referenced.entries[0].after.as_mut().unwrap();
+        state.inline = None;
+        state.file = Some("next.md".into());
+        let mut provider = Provider(next.source.as_bytes().to_vec());
+        assert!(matches!(
+            baseline.evaluate_with_sources_and_partial_links(
+                &referenced,
+                std::slice::from_ref(&next),
+                &mut provider,
+                1024,
+                1024,
+                &candidate,
+                &missing,
+                None
+            ),
+            IncrementalEvaluation::Evaluated { .. }
+        ));
+        provider.0 = b"wrong bytes".to_vec();
+        assert!(matches!(
+            baseline.evaluate_with_sources_and_partial_links(
+                &referenced,
+                std::slice::from_ref(&next),
+                &mut provider,
+                1024,
+                1024,
+                &candidate,
+                &missing,
+                None
+            ),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        assert!(matches!(
+            baseline.evaluate_with_link_observations(&change, &[next], &candidate),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
 
     #[test]
     fn link_observations_are_bound_and_refresh_unchanged_items() {
@@ -1835,6 +2267,7 @@ mod tests {
                 None,
                 None,
                 candidate.get(&item.entity_id),
+                false,
             )
             .unwrap();
             assert_eq!(
@@ -1975,6 +2408,7 @@ mod tests {
                 None,
                 None,
                 None,
+                false,
             )
             .unwrap();
             assert_eq!(report.gates[0].status, GateStatus::Passed, "{media}");
