@@ -759,6 +759,45 @@ pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnap
     }
 }
 
+/// Load the same snapshot used by the standalone static link graph without
+/// parsing unrelated page rules or constructing the site's route index.
+/// This is an observation of local files, not an attested deployment or crawl.
+pub fn load_static_link_graph_snapshot(root: &Path, site_url: &str) -> Result<AuditSiteSnapshot> {
+    fn read_snapshot(root: &Path, site_url: &str) -> Result<AuditSiteSnapshot> {
+        let mut html_files = Vec::new();
+        iter_html_files(root, &mut html_files)?;
+        html_files.sort();
+        let pages = html_files
+            .iter()
+            .map(|path| {
+                let (relative_path, raw_html) = parser::read_page_source(path, root)?;
+                Ok(AuditPageSnapshot {
+                    path: path.to_string_lossy().to_string(),
+                    route: capture_route_for_relative_path(&relative_path),
+                    relative_path,
+                    raw_html,
+                    response_headers: BTreeMap::new(),
+                    crawl_response: None,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let (deployment_model, deployment_markers) = detect_deployment_model(root);
+        Ok(AuditSiteSnapshot {
+            version: 1,
+            site_url: Some(crate::link_graph::redact_url(site_url)),
+            root: root.to_string_lossy().to_string(),
+            deployment_model: deployment_model_label(&deployment_model).to_string(),
+            deployment_markers,
+            crawl_meta: None,
+            llms_text: read_optional_text(&root.join("llms.txt")),
+            robots_text: read_optional_text(&root.join("robots.txt")),
+            sitemap_text: read_optional_text(&root.join("sitemap.xml")),
+            pages,
+        })
+    }
+    read_snapshot(root, site_url).user_context(format!("cannot load site at {}", root.display()))
+}
+
 pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Site> {
     let pages = snapshot
         .pages
@@ -873,6 +912,44 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn static_link_snapshot_matches_full_site_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(
+            &root.join("index.html"),
+            "<html lang='en'><a href='/fr/'>French</a></html>",
+        );
+        write(
+            &root.join("fr/index.html"),
+            "<html lang='fr'><main>Bonjour</main></html>",
+        );
+        fs::write(root.join("legacy.html"), b"<p>invalid utf8: \xff</p>").unwrap();
+        write(
+            &root.join("robots.txt"),
+            "User-agent: *\nDisallow: /private\n",
+        );
+        write(&root.join("sitemap.xml"), "<urlset></urlset>");
+        write(&root.join("llms.txt"), "Example");
+        let site_url = "https://user:secret@example.org/path";
+        let full = super::audit_site_snapshot(&load_site(root).unwrap(), Some(site_url));
+        let lightweight = super::load_static_link_graph_snapshot(root, site_url).unwrap();
+        assert_eq!(lightweight, full);
+        assert_eq!(lightweight.deployment_model, "static_export");
+        // The markers determine whether a static URL map is accepted.
+        write(&root.join("_worker.js"), "export default {};");
+        let full = super::audit_site_snapshot(&load_site(root).unwrap(), Some(site_url));
+        let lightweight = super::load_static_link_graph_snapshot(root, site_url).unwrap();
+        assert_eq!(lightweight, full);
+        assert_eq!(lightweight.deployment_model, "ssr_worker");
+        assert!(
+            lightweight
+                .pages
+                .iter()
+                .any(|page| page.raw_html.contains('\u{fffd}'))
+        );
     }
 
     #[test]

@@ -487,6 +487,14 @@ identity. This comparison is not a complete BCP 47 validator.
   content and remain in session scratch, while the optional telemetry is
   aggregate-only.
 
+- A subsequent standalone static graph optimization avoids parsing and indexing
+  every page as a complete SEO audit before analyzing links. On the same archived
+  candidate and caller-generated map, a release build produced a byte-identical
+  compact report. One local run measured 14.14 s and 837 MiB peak RSS before,
+  versus 7.05 s and 779 MiB after; these individual observations are not a
+  controlled performance benchmark. The same inventory, freshness and
+  deployment limitations above still apply.
+
 - Saved graph reports bind to the serialized audit they qualify. `report render`
   withholds qualifications for unbound or mismatched reports; the binding detects
   accidental mixups but is not authentication or proof of graph integrity.

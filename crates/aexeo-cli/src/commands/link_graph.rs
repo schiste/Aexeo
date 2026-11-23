@@ -26,7 +26,6 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
     );
     let mut report = if audit_mode || static_mode {
         let artifact = if static_mode {
-            let site = aexeo_core::load_site(std::path::Path::new(path))?;
             let mut artifact = aexeo_core::build_audit_artifact(
                 "link-graph",
                 &[],
@@ -34,10 +33,10 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
                 None,
                 None,
             );
-            artifact.site = Some(aexeo_core::audit_site_snapshot(
-                &site,
-                Some(required_arg(matches, "site-origin")?),
-            ));
+            artifact.site = Some(aexeo_core::site::load_static_link_graph_snapshot(
+                std::path::Path::new(path),
+                required_arg(matches, "site-origin")?,
+            )?);
             artifact
         } else {
             let data =
