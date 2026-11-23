@@ -65,6 +65,50 @@ fn host_projection_composes_gates_and_preserves_unavailable_observations() {
 }
 
 #[test]
+fn projected_metadata_distinguishes_observed_absence_and_unavailable_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='title'\nkind='required_metadata'\nfields=['title']\nblocking=false\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\nblocking=false\n[[gates]]\nid='author'\nkind='required_metadata'\nfields=['author']\nblocking=false\n[[gates]]\nid='author-length'\nkind='metadata_length'\nfield='author'\nmax=10\nblocking=false\n[[gates]]\nid='review-age'\nkind='metadata_age'\nfield='reviewed'\nas_of='2024-03-01'\nmax_days=30\nblocking=false\n").unwrap();
+    let file = dir.path().join("adapter.json");
+    fs::write(&file, r#"{"schema":"aexeo.content-adapter/v1","text":"Hi.","metadata":{"title":"Article"},"observed_metadata_fields":["title","description"]}"#).unwrap();
+    let output = run(&file, &preset, &["--telemetry"]);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let states: Vec<_> = report["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|gate| gate["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        states,
+        [
+            "passed",
+            "failed",
+            "not_checked",
+            "not_checked",
+            "not_checked"
+        ]
+    );
+    let telemetry = String::from_utf8_lossy(&output.stderr);
+    assert!(telemetry.contains(r#""observed_metadata_fields":2"#));
+    assert!(!telemetry.contains("Article"));
+    assert!(report["input_fingerprint"]["metadata_sha256"].is_string());
+
+    let metadata = dir.path().join("metadata.json");
+    fs::write(&metadata, "{}").unwrap();
+    let conflict = run(&file, &preset, &["--metadata", metadata.to_str().unwrap()]);
+    assert_eq!(conflict.status.code(), Some(2));
+    for source in [
+        r#"{"schema":"aexeo.content-adapter/v1","text":"Hi","observed_metadata_fields":["title"]}"#,
+        r#"{"schema":"aexeo.content-adapter/v1","text":"Hi","metadata":{"title":"Article"},"observed_metadata_fields":[]}"#,
+        r#"{"schema":"aexeo.content-adapter/v1","text":"Hi","metadata":{},"observed_metadata_fields":["title","title"]}"#,
+    ] {
+        fs::write(&file, source).unwrap();
+        assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+    }
+}
+
+#[test]
 fn malformed_projection_is_rejected_without_fixing_input() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");

@@ -420,6 +420,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 .user_context("invalid adapter JSON projection")?;
             host_projection = Some(serde_json::json!({
                 "paragraphs": adapted.context.paragraphs.as_ref().map(Vec::len),
+                "metadata_values": adapted.input.metadata.as_ref().map(|values| values.len()),
+                "observed_metadata_fields": adapted.context.observed_metadata_fields.as_ref().map(|fields| fields.len()),
                 "literal_projection_supplied": adapted.literal_text.is_some(),
                 "lists": adapted.lists.as_ref().map(Vec::len),
                 "headings": adapted.input.headings.as_ref().map(Vec::len),
@@ -483,7 +485,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             serde_json::json!({"event":"content_adapter_projection", "version":1, "duration_ms":adapter_ms, "observations":projection})
         );
     }
-    input.metadata = metadata;
+    if input.metadata.is_some() && metadata.is_some() {
+        user_bail!("adapter metadata cannot be combined with --metadata");
+    }
+    if metadata.is_some() {
+        input.metadata = metadata;
+    }
     input.evidence_sources = evidence_sources;
     if args.get_flag("export-adapter-input") {
         println!("{}", serde_json::to_string_pretty(&input)?);
@@ -929,13 +936,18 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 .as_ref()
                 .map(|metadata| super::feedback::metadata_hash(&serde_json::to_value(metadata)?))
                 .transpose()?;
+            let metadata_coverage_sha256 = context.as_ref().and_then(|context| {
+                (context.observed_metadata_fields.is_some() || !context.unavailable_metadata_fields.is_empty())
+                    .then(|| serde_json::json!({"observed": context.observed_metadata_fields, "unavailable": context.unavailable_metadata_fields}))
+            }).map(|coverage| serde_json::to_vec(&coverage).map(|bytes| super::feedback::text_hash(&bytes))).transpose()?;
             output["input_format"] = serde_json::json!(
                 args.get_one::<String>("input-format")
                     .map(String::as_str)
                     .unwrap_or("text")
             );
             output["input_fingerprint"] = serde_json::json!({
-                "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256
+                "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256,
+                "metadata_coverage_sha256": metadata_coverage_sha256
             });
         }
         output["source_mapping"] = serde_json::json!({

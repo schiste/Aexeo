@@ -406,7 +406,7 @@ excludes network and host CMS access. Operating-system caches may already be
 warm. CI records the measurement without a startup budget until repeated CI
 runs establish a representative threshold.
 
-### Exporting body observations for agent workflows
+### Exporting CMS observations for agent workflows
 
 `projectContentAdapter(document)` from `@aeptus/aexeo-emdash/content`
 exports the observed Portable Text body as an `aexeo.content-adapter/v1`
@@ -425,10 +425,13 @@ as private data. An optional telemetry callback receives duration and aggregate
 capability availability only, without content, URLs or document identity; callback
 failures do not affect the export.
 
-The export omits metadata and native block/span locations. Supply metadata only
-when the host independently establishes complete values and absence; do not
-infer missing fields from this export. Regenerate it from each exact proposed
-snapshot, and retain the host's revision identity separately. The export does
+The export includes metadata values and the fields explicitly observed by the
+adapter. A listed field with no value is observed absent; an unlisted field is
+unavailable. Fields with unverified sources are withheld, and no fields are
+assumed observed when the document does not provide coverage. Native block/span
+locations are omitted. The host must configure mappings that reflect its real
+CMS fields. Regenerate the export from each exact proposed snapshot, and retain
+the host's revision identity separately. The export does
 not establish that a component mapping matches the renderer, source freshness,
 or permission to publish. Some gates require capabilities this projection
 cannot supply, including literal Markdown link inspection.

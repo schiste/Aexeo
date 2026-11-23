@@ -90,6 +90,8 @@ export interface ContentAdapterProjection {
   schema: "aexeo.content-adapter/v1";
   text: string | null;
   literal_text?: string;
+  metadata?: Record<string, string>;
+  observed_metadata_fields?: string[];
   headings?: string[];
   heading_levels?: number[];
   paragraphs?: Array<{ start: number; end: number; list_item?: boolean }>;
@@ -107,9 +109,11 @@ export interface ContentAdapterProjectionTelemetry {
   lists_observed: boolean;
   links_observed: boolean;
   literal_projection_supplied: boolean;
+  metadata_values?: number;
+  observed_metadata_fields?: number;
 }
 
-/** Export observed body capabilities; metadata and native source coordinates are not included. */
+/** Export observed body and CMS metadata capabilities; native source coordinates are not included. */
 export async function projectContentAdapter(
   document: EmdashDocument,
   onTelemetry?: (event: ContentAdapterProjectionTelemetry) => void,
@@ -124,6 +128,8 @@ export async function projectContentAdapter(
     lists_observed: projection.lists !== undefined,
     links_observed: projection.link_destinations !== undefined,
     literal_projection_supplied: projection.literal_text !== undefined,
+    ...(projection.metadata === undefined ? {} : { metadata_values: Object.keys(projection.metadata).length }),
+    ...(projection.observed_metadata_fields === undefined ? {} : { observed_metadata_fields: projection.observed_metadata_fields.length }),
   });
   return projection;
 }
