@@ -48,6 +48,16 @@ components left body capabilities unavailable, so the article gate was
 persisted as `not_checked`; the selected body and rendered-page absence rules
 were not reported. This does not establish the components' rendered content,
 the deployed host configuration, or the correctness of other articles.
+The same installed package and in-memory host also preserved the 12, 14, 18
+and 27 Portable Text blocks in the four other CMS records from the original
+report. Their configured description values matched `seo_description || excerpt`;
+their minimal article gate passed. This is not a rendered-page or comprehensive
+editorial assessment. No CMS content was changed.
+
+The site's current `AskYourAi.astro` renders provider homepage links. A host
+may deliberately exclude this user-interface component from an editorial link
+projection, but an empty mapping does not mean that its rendered HTML has no
+links. Link-scope choices must be validated against the intended checks.
 
 The archive passed 416 package tests and the real-WASM suite. A second build
 from the same commit in a separate worktree produced the same archive SHA-256
