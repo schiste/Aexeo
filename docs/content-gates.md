@@ -178,14 +178,26 @@ Every evaluation invokes the installed CLI as a child process. It compares the
 child's exit with its gate report, binds the report to the candidate bytes and
 checks that the resolved policy and metadata fingerprints do not change between
 evaluations. This detects these changes, not a malicious evaluator or future
-publication races. Auxiliary sources, external services, collection/site
-contexts and direct CMS retrieval are not supported by this session; gates needing
-them remain unavailable. Hosts may supply their own content projections as described below. A proposal may be at most 16 MiB; the JSON line and
+publication races. The optional source-bound link observations described below are
+the only auxiliary observations accepted here. Other auxiliary sources, external
+services, collection/site contexts and direct CMS retrieval are not supported;
+gates needing them remain unavailable. Hosts may supply their own content projections as described below. A proposal may be at most 16 MiB; the JSON line and
 child report also have byte limits. The caller must manage idle timeouts and
 model costs. `--telemetry` emits aggregate counts and durations to stderr; total
 time includes waiting for the agent and evaluation time includes child startup.
 No claim is made about semantic preservation, factual accuracy or publication
 readiness.
+
+For a link-reachability gate, pass `--link-observations PATH` for the initial
+candidate. Each submitted candidate can independently include
+`"link_observations":"PATH"` in its proposal. Supply a newly observed snapshot
+for that exact candidate, including its ordered destinations; the existing
+`content --export-link-observations` command can produce an unchecked template.
+A snapshot from different candidate bytes or destinations is rejected. Omitting
+one from a proposal does not reuse the previous snapshot: selected checks that
+need it remain `not_checked`. The host chooses whether and how to observe links;
+the loop performs no network check and does not establish observation freshness
+or authenticity. Snapshot files and reports may contain private URLs.
 
 The CLI also accepts `content-revise --input projection.json --input-format
 adapter-json --preset PRESET`. Each proposal must be a complete, freshly

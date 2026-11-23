@@ -24,7 +24,10 @@ const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Proposal {
-    Submit { candidate: String },
+    Submit {
+        candidate: String,
+        link_observations: Option<String>,
+    },
     Decline {},
 }
 
@@ -44,7 +47,11 @@ fn read_draft(path: &str) -> Result<String> {
 /// Reuse the real content CLI, including adapter/source mapping and presets.
 /// The child reads its complete input before emitting JSON. A writer thread keeps
 /// pipe traffic concurrent and stdout is bounded; no arbitrary program is run.
-fn evaluate(candidate: &str, args: &ArgMatches) -> Result<(Value, ContentReport)> {
+fn evaluate(
+    candidate: &str,
+    args: &ArgMatches,
+    link_observations: Option<&str>,
+) -> Result<(Value, ContentReport)> {
     let mut command = Command::new(std::env::current_exe().context("locating current executable")?);
     command
         .args(["content", "-", "--format", "json", "--preset"])
@@ -67,6 +74,9 @@ fn evaluate(candidate: &str, args: &ArgMatches) -> Result<(Value, ContentReport)
     }
     if let Some(metadata) = args.get_one::<String>("metadata") {
         command.arg("--metadata").arg(metadata);
+    }
+    if let Some(path) = link_observations {
+        command.arg("--link-observations").arg(path);
     }
     let mut child = command
         .stdin(Stdio::piped())
@@ -164,6 +174,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
         .user_context("missing revision budget")?;
     let binding = RefCell::new(None::<(Value, Value, Value)>);
     let current_report = RefCell::new(None::<Value>);
+    let observations = RefCell::new(args.get_one::<String>("link-observations").cloned());
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let stdout = io::stdout();
@@ -176,7 +187,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
         scope,
         |candidate| {
             let evaluation_started = started.map(|_| std::time::Instant::now());
-            let (report, typed) = evaluate(candidate, args)?;
+            let (report, typed) = evaluate(candidate, args, observations.borrow().as_deref())?;
             if let Some(time) = evaluation_started {
                 evaluation_ms += time.elapsed().as_secs_f64() * 1000.0;
             }
@@ -224,7 +235,13 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
             let proposal: Proposal =
                 serde_json::from_slice(&data).user_context("invalid revision proposal")?;
             Ok(match proposal {
-                Proposal::Submit { candidate } => Some(candidate),
+                Proposal::Submit {
+                    candidate,
+                    link_observations,
+                } => {
+                    *observations.borrow_mut() = link_observations;
+                    Some(candidate)
+                }
                 Proposal::Decline {} => None,
             })
         },

@@ -405,3 +405,68 @@ fn adapter_revision_loop_recomputes_native_structural_paths() {
     );
     assert_eq!(session.finish(), 0);
 }
+
+#[test]
+fn revisions_use_only_observations_bound_to_each_candidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft.md");
+    let next = dir.path().join("next.md");
+    let policy = dir.path().join("policy.toml");
+    let first_snapshot = dir.path().join("first.json");
+    let next_snapshot = dir.path().join("next.json");
+    let initial = "[broken](https://example.org/broken)";
+    let candidate = "[working](https://example.org/working)";
+    fs::write(&draft, initial).unwrap();
+    fs::write(&next, candidate).unwrap();
+    fs::write(
+        &policy,
+        "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n",
+    )
+    .unwrap();
+    for (article, path, observation) in [
+        (&draft, &first_snapshot, "not_found"),
+        (&next, &next_snapshot, "reachable"),
+    ] {
+        let exported = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--input-format",
+                "markdown",
+                "--export-link-observations",
+            ])
+            .output()
+            .unwrap();
+        assert!(exported.status.success());
+        let mut value: Value = serde_json::from_slice(&exported.stdout).unwrap();
+        value["observations"] = json!([observation]);
+        fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+    }
+    let source = format!("test={}", policy.display());
+    let extra = ["--link-observations", first_snapshot.to_str().unwrap()];
+    let mut session = start(draft.to_str().unwrap(), &source, "markdown", &extra);
+    let request = session.read();
+    assert_eq!(request["report"]["gates"][0]["status"], "failed");
+    session
+        .send(json!({"action":"submit", "candidate":candidate, "link_observations":next_snapshot}));
+    let result = session.read();
+    assert_eq!(result["stop"], "satisfied");
+    assert_eq!(result["report"]["gates"][0]["status"], "passed");
+    assert_eq!(session.finish(), 0);
+
+    let mut missing = start(draft.to_str().unwrap(), &source, "markdown", &extra);
+    assert_eq!(missing.read()["event"], "proposal_requested");
+    missing.send(json!({"action":"submit", "candidate":candidate}));
+    let result = missing.read();
+    assert_eq!(result["stop"], "incomplete");
+    assert_eq!(result["report"]["gates"][0]["status"], "not_checked");
+    assert_eq!(missing.finish(), 2);
+
+    let mut stale = start(draft.to_str().unwrap(), &source, "markdown", &extra);
+    assert_eq!(stale.read()["event"], "proposal_requested");
+    stale.send(
+        json!({"action":"submit", "candidate":candidate, "link_observations":first_snapshot}),
+    );
+    assert_eq!(stale.finish(), 2);
+    assert_eq!(fs::read_to_string(draft).unwrap(), initial);
+}
