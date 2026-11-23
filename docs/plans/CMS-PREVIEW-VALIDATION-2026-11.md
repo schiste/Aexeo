@@ -153,7 +153,7 @@ beta-form copy. It produced no audit JSON, so it cannot establish current
 Preview findings.
 
 Separately, [test run 45267658328](https://github.com/Aeptus/website-and-content/actions/runs/45267658328)
-used the candidate-audit workflow from draft website
+used the candidate-audit workflow introduced by merged website
 [PR #651](https://github.com/Aeptus/website-and-content/pull/651) against the
 retained static candidate from run 45167245243, source commit
 `5f77df787b3db692a6e97f809eaaca2da8c8c652`. The workflow verified the source
