@@ -342,6 +342,12 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   gates, and a valid source; exercise forged verdicts through each complete
   verifier. Source presence does not establish authenticity or freshness.
 - For candidate verdicts with link evidence, test both production and independent verification with inline, file and URI states. Check that wrong host bytes, independent bytes and candidate content are rejected; support in the producer alone does not establish verifier interoperability.
+- For before/after Cargo benchmarks, do not assume separate source paths imply
+  separate binaries when sharing `CARGO_TARGET_DIR`: an archived checkout can
+  have old timestamps and Cargo can reuse a stale executable. Use isolated
+  targets or force a source rebuild, retain each binary, and verify its source
+  provenance before comparing. Identical hashes alone neither prove nor disprove
+  reuse; record build evidence and measure without competing compilations.
 - For cross-process interoperability tests, build each executable from the
   exact source revision under test, or verify its build provenance before
   reusing it. A positive case can pass on an older binary that lacks other
