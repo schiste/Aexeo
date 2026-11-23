@@ -1126,6 +1126,15 @@ impl CollectionBaseline {
         change: &Change,
         overlay: &CandidateOverlay,
     ) -> Result<ProjectedCandidateCollection, NotChecked> {
+        self.project_overlay_fields(change, overlay, None)
+    }
+
+    fn project_overlay_fields(
+        &self,
+        change: &Change,
+        overlay: &CandidateOverlay,
+        fields: Option<&BTreeSet<&str>>,
+    ) -> Result<ProjectedCandidateCollection, NotChecked> {
         // Borrow the owned baseline and change projections until the final
         // collection is assembled; cloning the entire baseline here would
         // copy every metadata value twice for each candidate.
@@ -1165,7 +1174,17 @@ impl CollectionBaseline {
                     .get(item.entity_id.as_str())
                     .copied()
                     .flatten()
-                    .cloned(),
+                    .map(|metadata| match fields {
+                        None => metadata.clone(),
+                        Some(fields) => fields
+                            .iter()
+                            .filter_map(|field| {
+                                metadata
+                                    .get(*field)
+                                    .map(|value| ((*field).to_owned(), value.clone()))
+                            })
+                            .collect(),
+                    }),
                 ..Default::default()
             })
             .collect();
@@ -1188,7 +1207,19 @@ impl CollectionBaseline {
         change: &Change,
         overlay: &CandidateOverlay,
     ) -> Result<ContentReport, NotChecked> {
-        let projected = self.project_overlay(change, overlay)?;
+        let fields: BTreeSet<&str> = self
+            .preset
+            .gates
+            .iter()
+            .flat_map(|gate| match gate {
+                ContentGate::UniqueCollectionMetadata {
+                    field, group_by, ..
+                } => [Some(field.as_str()), group_by.as_deref()],
+                _ => unreachable!("collection preset was validated at preparation"),
+            })
+            .flatten()
+            .collect();
+        let projected = self.project_overlay_fields(change, overlay, Some(&fields))?;
         let input = ContentInput {
             id: self.snapshot.scope.clone(),
             ..Default::default()
@@ -2709,6 +2740,7 @@ mod tests {
             Some(BTreeMap::from([
                 ("slug".into(), slug.into()),
                 ("lang".into(), "en".into()),
+                ("unrelated".into(), "preserve for external consumers".into()),
             ]))
         };
         let metadata: BTreeMap<_, _> = snapshot
@@ -2746,6 +2778,18 @@ mod tests {
         let baseline =
             CollectionBaseline::prepare(snapshot.clone(), metadata.clone(), preset.clone())
                 .unwrap();
+        let public_projection = baseline.project_candidate(&change, &after).unwrap();
+        assert!(
+            public_projection
+                .as_change_collection()
+                .items
+                .iter()
+                .all(|item| {
+                    item.metadata
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.contains_key("unrelated"))
+                })
+        );
         let CollectionEvaluation::Report { report, .. } = baseline.evaluate(&change, &after) else {
             panic!("expected report")
         };
@@ -2793,6 +2837,89 @@ mod tests {
             baseline.evaluate(&change, &after),
             CollectionEvaluation::NotChecked { .. }
         ));
+    }
+
+    #[test]
+    fn collection_field_selection_preserves_full_reports_and_public_metadata() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='slug'\nkind='unique_collection_metadata'\nfield='slug'\ngroup_by='lang'\n[[gates]]\nid='title'\nkind='unique_collection_metadata'\nfield='title'\n").unwrap();
+        let metadata = snapshot
+            .items
+            .iter()
+            .map(|item| {
+                (
+                    item.entity_id.clone(),
+                    Some(BTreeMap::from([
+                        ("slug".into(), item.entity_id.clone()),
+                        ("lang".into(), "en".into()),
+                        ("title".into(), "shared".into()),
+                        ("extra".into(), "unrelated host metadata".into()),
+                    ])),
+                )
+            })
+            .collect();
+        let updated = item("a", "updated source", Some(vec![]));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        );
+        let baseline =
+            CollectionBaseline::prepare(snapshot.clone(), metadata, preset.clone()).unwrap();
+        for fields in [
+            None,
+            Some(BTreeMap::new()),
+            Some(BTreeMap::from([
+                ("slug".into(), "b".into()),
+                ("lang".into(), "en".into()),
+                ("title".into(), "shared".into()),
+                ("extra".into(), "retained".into()),
+            ])),
+            Some(BTreeMap::from([
+                ("slug".into(), "x".repeat(16 * 1024 + 1)),
+                ("lang".into(), "en".into()),
+                ("title".into(), "shared".into()),
+                ("extra".into(), "unrelated".into()),
+            ])),
+        ] {
+            update.metadata = fields;
+            change.entries = vec![update.clone()];
+            let projected = baseline
+                .project_candidate(&change, std::slice::from_ref(&updated))
+                .unwrap();
+            let collection = projected.as_change_collection();
+            let input = ContentInput {
+                id: snapshot.scope.clone(),
+                ..Default::default()
+            };
+            let context = ContentEvaluationContext {
+                collection: Some(collection.items),
+                ..Default::default()
+            };
+            let full = preset
+                .evaluate_with_collection_completeness(&input, &context, None, true, None)
+                .unwrap();
+            let CollectionEvaluation::Report { report, .. } =
+                baseline.evaluate(&change, std::slice::from_ref(&updated))
+            else {
+                panic!("expected collection report")
+            };
+            assert_eq!(
+                serde_json::to_value(report).unwrap(),
+                serde_json::to_value(full).unwrap()
+            );
+            for item in collection.items.iter().filter(|item| item.id != "a") {
+                assert_eq!(
+                    item.metadata
+                        .as_ref()
+                        .unwrap()
+                        .get("extra")
+                        .map(String::as_str),
+                    Some("unrelated host metadata")
+                );
+            }
+        }
     }
 
     #[test]

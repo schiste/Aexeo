@@ -6,7 +6,9 @@ use aexeo_contracts::content_gate_protocol::{
 use aexeo_core::{
     content_candidate::{CandidateItem, CandidateSnapshot, overlay_candidate},
     content_gate::{ContentInput, ContentPreset, ContentReport},
-    content_incremental::{CollectionBaseline, IncrementalBaseline, IncrementalEvaluation},
+    content_incremental::{
+        CollectionBaseline, CollectionEvaluation, IncrementalBaseline, IncrementalEvaluation,
+    },
 };
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, hint::black_box, time::Instant};
@@ -210,6 +212,26 @@ fn main() -> anyhow::Result<()> {
     println!(
         "{}",
         serde_json::json!({"name":"collection_projection/500_items_10_updates", "items":500,"updates":10,"metadata_fields_per_item":9,"custom_metadata_value_bytes":256,"iterations":iterations,"projection_p50_ms":percentile(&projection_samples,50),"projection_p95_ms":percentile(&projection_samples,95),"result_sha256":checksum})
+    );
+    let evaluation = collection.evaluate(&collection_change, &after);
+    let CollectionEvaluation::Report { ref report, .. } = evaluation else {
+        anyhow::bail!("collection evaluation was not checked")
+    };
+    anyhow::ensure!(
+        report.gates.len() == 1
+            && report.gates[0].status == aexeo_core::content_gate::GateStatus::Passed
+    );
+    let checksum = format!("{:x}", Sha256::digest(serde_json::to_vec(&evaluation)?));
+    let mut evaluation_samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let start = Instant::now();
+        black_box(collection.evaluate(black_box(&collection_change), black_box(&after)));
+        evaluation_samples.push(start.elapsed().as_micros());
+    }
+    evaluation_samples.sort_unstable();
+    println!(
+        "{}",
+        serde_json::json!({"name":"collection_evaluation/500_items_10_updates", "items":500,"updates":10,"metadata_fields_per_item":9,"custom_metadata_value_bytes":256,"iterations":iterations,"evaluation_p50_ms":percentile(&evaluation_samples,50),"evaluation_p95_ms":percentile(&evaluation_samples,95),"result_sha256":checksum})
     );
     Ok(())
 }
