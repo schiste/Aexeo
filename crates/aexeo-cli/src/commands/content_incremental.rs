@@ -160,7 +160,9 @@ fn prepare_baseline(
                 metadata,
                 preset,
                 scope,
-                observations.expect("checked partial observations"),
+                observations.ok_or_else(|| NotChecked {
+                    reason: "partial link inventory requires observations".into(),
+                })?,
                 unavailable,
                 evidence,
             )
@@ -201,7 +203,9 @@ fn prepare_baseline(
             preset,
             scope,
             metadata,
-            observations.expect("checked partial observations"),
+            observations.ok_or_else(|| NotChecked {
+                reason: "partial link inventory requires observations".into(),
+            })?,
             unavailable,
             evidence,
         )
@@ -760,11 +764,9 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 )
             }
             Ok(Baseline::Composed(baseline)) => {
-                let result = if let Some(unavailable) = &proposal.link_unavailable {
-                    let observations = proposal
-                        .link_observations
-                        .as_ref()
-                        .expect("guarded partial observations");
+                let result = if let (Some(unavailable), Some(observations)) =
+                    (&proposal.link_unavailable, &proposal.link_observations)
+                {
                     if let Some(provider) = providers[index].as_mut() {
                         baseline.evaluate_with_sources_and_partial_links(
                             &proposal.change,

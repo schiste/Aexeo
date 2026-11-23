@@ -1222,6 +1222,24 @@ fn partial_link_inventories_keep_available_results_and_fail_closed() {
     );
     invalid["proposals"][0]["link_unavailable"] = json!(["b", "b"]);
     assert!(!run(&invalid, &[]).status.success());
+    let mut missing_map = input.clone();
+    missing_map["proposals"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("link_observations");
+    assert_eq!(
+        lines(&run(&missing_map, &[]))[0]["result"]["status"],
+        "not_checked"
+    );
+    let mut missing_base = input.clone();
+    missing_base
+        .as_object_mut()
+        .unwrap()
+        .remove("base_link_observations");
+    assert_eq!(
+        lines(&run(&missing_base, &[]))[0]["result"]["status"],
+        "not_checked"
+    );
     input["preset_sources"]["links"] = json!(
         "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
     );
@@ -1243,6 +1261,41 @@ fn partial_link_inventories_keep_available_results_and_fail_closed() {
         );
         assert_eq!(row["result"]["collection"]["status"], "report");
     }
+    input["preset_sources"]["links"] = json!(
+        "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='abc'\nquote='quote'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+    );
+    input["base_evidence"] = json!({"b":{"study":"quote"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["evidence"] = json!({"a":{"study":"quote"},"b":{"study":"quote"}});
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["items"]["reports"]["b"]["gates"][0]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["collection"]["status"],
+        "report"
+    );
+    input["proposals"][0]["evidence"]
+        .as_object_mut()
+        .unwrap()
+        .remove("b");
+    let output = run(&input, &[]);
+    assert_eq!(
+        lines(&output)[0]["result"]["items"]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["collection"]["status"],
+        "report"
+    );
 }
 
 #[test]
