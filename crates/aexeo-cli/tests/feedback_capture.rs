@@ -84,6 +84,7 @@ fn captures_private_note_and_refuses_overwrite() {
     let bytes = fs::read(&note).unwrap();
     let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(parsed["human_status"], "passed");
+    assert_eq!(parsed["report_binding_scope"], "none");
     assert!(
         !String::from_utf8(bytes.clone())
             .unwrap()
@@ -125,6 +126,22 @@ fn export_matches_existing_python_validator_on_representative_inputs() {
     let corpus = json!({"version":1,"gate_id":"g","examples":[{"id":"e","split":"development","text":"abc\r\n","expected":"passed"}]});
     let note = json!({"version":1,"kind":"reported_human_feedback","gate_id":"g","example_id":"e","text_sha256":"552bab6864c7a7b69a502ed1854b9245c0e1a30f008aaa0b281da62585fdb025","model_status":"failed","human_status":"passed","reviewer":"human","method":"manual","reason":"private reason"});
     let mut cases: Vec<(Value, Value)> = vec![(corpus.clone(), note.clone())];
+    for (binding, scope) in [
+        (json!("verified"), json!("text_and_metadata")),
+        (json!("unverified"), json!("none")),
+        (json!("verified"), json!("none")),
+        (json!("unverified"), json!("text_and_metadata")),
+        (json!("verified"), json!(null)),
+        (json!("unknown"), json!("none")),
+    ] {
+        let mut scoped_note = note.clone();
+        scoped_note["report_binding"] = binding;
+        scoped_note["report_binding_scope"] = scope;
+        cases.push((corpus.clone(), scoped_note));
+    }
+    let mut scope_without_binding = note.clone();
+    scope_without_binding["report_binding_scope"] = json!("text_and_metadata");
+    cases.push((corpus.clone(), scope_without_binding));
     let mut paragraph_corpus = corpus.clone();
     paragraph_corpus["input_format"] = json!("paragraph-text");
     cases.push((paragraph_corpus.clone(), note.clone()));
@@ -353,6 +370,7 @@ fn capture_checks_report_against_original_markdown_and_metadata() {
     );
     let note_json: serde_json::Value = serde_json::from_slice(&fs::read(note).unwrap()).unwrap();
     assert_eq!(note_json["report_binding"], "verified");
+    assert_eq!(note_json["report_binding_scope"], "text_and_metadata");
     assert_eq!(note_json["input_format"], "markdown");
     assert_eq!(
         note_json["resolved_policy_fingerprint"],

@@ -194,6 +194,11 @@ fn build_note(
         }
     };
     note["report_binding"] = json!(binding);
+    note["report_binding_scope"] = json!(if binding == "verified" {
+        "text_and_metadata"
+    } else {
+        "none"
+    });
     if let Some(format) = report.get("input_format") {
         if !["text", "paragraph-text", "markdown", "html", "adapter-json"]
             .contains(&format.as_str().unwrap_or(""))
@@ -471,6 +476,17 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
             bail!("invalid report binding");
         }
         event["report_binding"] = binding.clone();
+    }
+    if let Some(scope) = note.get("report_binding_scope") {
+        let valid = match note.get("report_binding").and_then(Value::as_str) {
+            Some("verified") => scope.as_str() == Some("text_and_metadata"),
+            Some("unverified") => scope.as_str() == Some("none"),
+            _ => false,
+        };
+        if !valid {
+            bail!("invalid report binding scope");
+        }
+        event["report_binding_scope"] = scope.clone();
     }
     if let Some(metadata_digest) = metadata_digest {
         event["metadata_sha256"] = json!(metadata_digest);

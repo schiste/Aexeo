@@ -519,6 +519,13 @@ class EvaluateTests(unittest.TestCase):
         log["events"][0]["report_binding"] = "verified"
         result = eval_module.aggregate_review_events(corpus, "holdout", log)
         self.assertEqual(result["report_binding_counts"], {"verified": 1, "unverified": 2})
+        log["events"][0]["report_binding_scope"] = "text_and_metadata"
+        eval_module.aggregate_review_events(corpus, "holdout", log)
+        for invalid in ("none", None, "complete"):
+            log["events"][0]["report_binding_scope"] = invalid
+            with self.assertRaisesRegex(ValueError, "binding scope"):
+                eval_module.aggregate_review_events(corpus, "holdout", log)
+        del log["events"][0]["report_binding_scope"]
         self.assertEqual(result["counts"], {"agreed": 1, "overrides_to_pass": 1, "overrides_to_fail": 0, "resolved_unchecked": 1})
         self.assertEqual(result["override_rate"], 0.5)
         self.assertNotIn("editor", json.dumps(result))

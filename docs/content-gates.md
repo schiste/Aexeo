@@ -813,6 +813,14 @@ modify corpus labels, resolve disagreement, authenticate reviewers, or prove the
 independence. Keep the original private notes for context: exported events
 exclude reasons and other private notes.
 
+New notes and exported events make the scope of report binding explicit:
+`report_binding_scope` is `text_and_metadata` when the report input fingerprint
+matches, and `none` when it cannot be verified. Bound corpus reviews retain the
+same field. This fingerprint comparison does not authenticate a reviewer or
+report, validate external observations, establish their freshness, or verify
+all inputs to the evaluation. Older records without this field remain supported;
+when it is present, inconsistent binding and scope values are rejected.
+
 For versions 2 and 3, review metrics add `reviewed_examples` and `disagreed_examples`
 for the selected split. An example counts as disagreed only when both pass and
 fail were reported. Version 3 also reports `uncertain_reviews` and
