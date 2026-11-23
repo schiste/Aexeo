@@ -1052,3 +1052,16 @@ missing fields retain observed prose but make body capabilities unavailable.
 - [ ] Establish equivalent referenced-content interoperability in other hosts;
   URI fetching, snapshot provenance and publication authorization remain separate
   concerns.
+
+### CMS metadata coverage in local content reviews
+
+- [ ] Merge [#887](https://github.com/schiste/Aexeo/pull/887), carrying
+  explicitly observed CMS metadata through EmDash adapter projections, CLI
+  gates and the bounded revision loop. The proposal preserves unknown versus
+  observed absence, withholds extensions that cannot receive the new coverage,
+  and logs only aggregate coverage counts. The public Rust `ContentContext`
+  gains a field, so downstream exhaustive struct literals require an update.
+- [ ] Verify the resulting published package and host configuration separately;
+  this projection does not establish rendered metadata, source freshness or
+  publication authorization. Native Portable Text source coordinates remain
+  outside this adapter projection.
