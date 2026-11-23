@@ -207,6 +207,17 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertFalse(json.loads(native_bad.stdout)['publication_authorized'])
 
     def test_unavailable_pacing_cannot_be_forged_across_comparators(self):
+        self._check_unavailable_advisory_gate(
+            "id='pacing'\nkind='editorial_pacing'\nsource='composition'\n"
+            "profile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n",
+            'pacing')
+
+    def test_unavailable_collection_cannot_be_forged_across_comparators(self):
+        self._check_unavailable_advisory_gate(
+            "id='unique'\nkind='unique_collection_metadata'\nfield='slug'\n",
+            'unique')
+
+    def _check_unavailable_advisory_gate(self, gate_config, gate_id):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         binary = os.environ.get('AEXEO_CLI_BIN')
         executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
@@ -217,8 +228,7 @@ class PortableCliInterop(unittest.TestCase):
             (root / 'change').write_text(fixture['artifacts']['change'], encoding='utf-8')
             (root / 'preset').write_text(
                 "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"
-                "[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\n"
-                "profile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\nblocking=false\n",
+                "[[gates]]\n" + gate_config + "blocking=false\n",
                 encoding='utf-8')
             common = executable + ['content-change', '--preset', 'test', '--preset-source',
                 'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build']
@@ -235,7 +245,7 @@ class PortableCliInterop(unittest.TestCase):
                 env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'previous')), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             portable = json.loads((root / 'previous').read_text(encoding='utf-8'))
-            check = next(c for c in portable['verdict']['checks'] if c['id'] == 'gate:7:article:pacing')
+            check = next(c for c in portable['verdict']['checks'] if c['id'] == f'gate:7:article:{gate_id}')
             self.assertEqual(check['status'], 'not_checked')
             (root / 'fresh').write_text(json.dumps(portable), encoding='utf-8')
             verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
