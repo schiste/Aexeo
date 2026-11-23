@@ -20,7 +20,7 @@ use super::{
     strip_tags,
 };
 
-pub(super) fn parse_page_from_file(path: &Path, root: &Path) -> Result<Page> {
+pub(super) fn read_page_source(path: &Path, root: &Path) -> Result<(String, String)> {
     let relative = path
         .strip_prefix(root)
         .unwrap_or(path)
@@ -28,6 +28,11 @@ pub(super) fn parse_page_from_file(path: &Path, root: &Path) -> Result<Page> {
         .replace('\\', "/");
     // A single page in a legacy encoding must not abort the whole site load.
     let raw = String::from_utf8_lossy(&fs::read(path)?).into_owned();
+    Ok((relative, raw))
+}
+
+pub(super) fn parse_page_from_file(path: &Path, root: &Path) -> Result<Page> {
+    let (relative, raw) = read_page_source(path, root)?;
     Ok(build_page_from_source(
         path.to_path_buf(),
         relative,
