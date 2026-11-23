@@ -253,3 +253,35 @@ zero count proves an orphan. Same-document jumps are excluded from incoming
 counts. It does not update the rendered-site audit, emit findings, or authorize
 publication; the host must apply the returned destination changes to a report
 and independently establish its inventory and snapshot guarantees.
+
+### Incremental full link report
+
+`link_report::LinkReportBaseline` prepares an in-memory baseline from rendered
+pages, then `evaluate` builds a full `LinkReport` for each candidate. It reuses
+HTML extraction for unchanged pages, updates affected destination counts with
+`IncrementalLinkCounts`, and recomputes coverage, inventory reconciliation,
+canonical and redirect qualifications with the normal report logic. Page
+ordering and all evidence retain the same semantics as a full report. Changes
+to origin or snapshot date invalidate cached extractions. Empty or duplicate
+page URLs are rejected by this source-keyed interface; the ordinary report API
+still diagnoses them as before. Aggregate counters show reused and extracted
+pages and recounted sources and destinations.
+
+The baseline is process-local and can be reused for independent candidate
+reports; the host supplies all candidate pages and context for each call. It
+neither authenticates these inputs nor proves that they are current or complete.
+It does not update audit-bound legacy findings or authorize publication.
+
+Agents can use the same in-process baseline for several independent candidates:
+
+```sh
+aexeo-cli link-graph-incremental --base base-link-input.json candidate-a.json candidate-b.json
+```
+
+Each input uses the existing versioned `link-graph` JSON format. The command
+writes one compact JSON line per successful candidate with its full report and
+aggregate work counters. It compares every candidate to the same base, not to
+the preceding candidate. Inputs are limited to 128 MiB each and duplicate JSON
+keys are rejected. If a later input fails, earlier output lines may already
+have been written; consumers must check the exit status before treating the
+batch as complete. No crawl, publication or source freshness check is performed.

@@ -64,6 +64,14 @@ For a truncated site crawl, site gates are `not_checked` and may still include
 findings from visited pages. Review those findings and the crawl status; a
 partial crawl cannot establish complete site coverage.
 
+When reviewing several candidate site snapshots against the same observed base,
+`aexeo-cli link-graph-incremental --base base.json candidate-a.json candidate-b.json`
+emits one full link report and work counters per candidate. Inputs use the
+`link-graph` format. Check the command exit status: a later failure may follow
+successful output lines. These reports depend on the supplied rendered pages,
+inventory and snapshot identity; they do not prove freshness or authorize
+publication. See `docs/content-incremental.md` for the input and scope.
+
 When a human explicitly gives feedback on a gate, record it locally when that
 is within the task's authorization. The standalone CLI supports:
 

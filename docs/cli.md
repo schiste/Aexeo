@@ -205,6 +205,27 @@ Options:
           Print help
 ```
 
+## `link-graph-incremental`
+
+Review candidate rendered sites against an in-memory link report baseline
+
+```text
+Review candidate rendered sites against an in-memory link report baseline
+
+Usage: link-graph-incremental --base <base> <candidates>...
+
+Arguments:
+  <candidates>...
+          Candidate link graph input JSON files; each is compared independently against the baseline
+
+Options:
+      --base <base>
+          Baseline link graph input JSON
+
+  -h, --help
+          Print help
+```
+
 ## `feedback-export`
 
 Export validated human feedback as a historical review event

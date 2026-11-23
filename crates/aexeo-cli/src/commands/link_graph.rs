@@ -1,10 +1,10 @@
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::time::Instant;
 
 use aexeo_core::error::UserContext;
 use aexeo_core::link_report::{
-    AuditLinkContext, LinkReport, LinkReportInput, build_link_report,
+    AuditLinkContext, LinkReport, LinkReportBaseline, LinkReportInput, build_link_report,
     build_link_report_from_audit_with_static_urls,
 };
 use anyhow::Result;
@@ -75,6 +75,62 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
     let stdout = io::stdout();
     let writer = io::BufWriter::new(stdout.lock());
     write_graph_json(writer, &report, matches.get_flag("compact"), true)?;
+    Ok(0)
+}
+
+/// Compare independent candidate inputs against one in-process baseline.
+/// Each successful result is written as a JSON line before the next candidate.
+pub fn command_link_graph_incremental(matches: &ArgMatches) -> Result<i32> {
+    const MAX_INPUT: u64 = 128 * 1024 * 1024;
+    fn read_input(path: &str) -> Result<LinkReportInput> {
+        let file =
+            fs::File::open(path).user_context(format!("cannot read link graph input: {path}"))?;
+        let mut data = Vec::new();
+        file.take(MAX_INPUT + 1).read_to_end(&mut data)?;
+        anyhow::ensure!(
+            data.len() <= MAX_INPUT as usize,
+            "link graph input exceeds byte limit"
+        );
+        let value = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(&data)
+            .user_context("invalid or ambiguous link graph input JSON")?;
+        serde_json::from_value(value).user_context("invalid link graph input JSON")
+    }
+    let base = read_input(required_arg(matches, "base")?)?;
+    let baseline =
+        LinkReportBaseline::prepare(&base).user_context("invalid link report baseline")?;
+    let stdout = io::stdout();
+    let mut writer = io::BufWriter::new(stdout.lock());
+    for path in matches
+        .get_many::<String>("candidates")
+        .ok_or_else(|| anyhow::anyhow!("at least one candidate is required"))?
+    {
+        let input = read_input(path)?;
+        let result = baseline
+            .evaluate(&input)
+            .user_context("invalid link report candidate")?;
+        #[derive(serde::Serialize)]
+        struct Output<'a> {
+            version: u32,
+            candidate: &'a str,
+            pages_reused: usize,
+            pages_extracted: usize,
+            sources_recounted: usize,
+            destinations_recounted: usize,
+            report: &'a LinkReport,
+        }
+        let output = Output {
+            version: 1,
+            candidate: path,
+            pages_reused: result.pages_reused,
+            pages_extracted: result.pages_extracted,
+            sources_recounted: result.sources_recounted,
+            destinations_recounted: result.destinations_recounted,
+            report: &result.report,
+        };
+        serde_json::to_writer(&mut writer, &output)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+    }
     Ok(0)
 }
 

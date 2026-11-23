@@ -66,6 +66,12 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
         )
         .subcommand(
+            Command::new("link-graph-incremental")
+                .about("Review candidate rendered sites against an in-memory link report baseline")
+                .arg(Arg::new("base").long("base").required(true).num_args(1).help("Baseline link graph input JSON"))
+                .arg(Arg::new("candidates").required(true).num_args(1..).help("Candidate link graph input JSON files; each is compared independently against the baseline")),
+        )
+        .subcommand(
             Command::new("feedback-export")
                 .about("Export validated human feedback as a historical review event")
                 .arg(Arg::new("corpus").long("corpus").required(true))
