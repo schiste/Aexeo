@@ -59,7 +59,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   verify the registry version and artifact integrity after publication.
   For a monorepo package, pass its directory explicitly to `npm pack` or run
   from that directory; do not rely on `--prefix` to select the pack target.
-  Inspect the packed file list and test the resulting archive.
+  Inspect the packed file list and test the resulting archive. Confirm the
+  included installation guide explains how to enable and access shipped features;
+  repository-only documentation may not be included in the package.
   To check build provenance, rebuild the same Git tree in a second worktree
   with a clean output directory and compare archive hashes. A match on one
   machine with shared tooling or caches is not independent attestation.
