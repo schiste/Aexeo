@@ -413,6 +413,12 @@ exports the observed Portable Text body as an `aexeo.content-adapter/v1`
 projection suitable for Aexeo's `content --input-format adapter-json` or
 `content-revise --input-format adapter-json`. It retains the masked and literal
 views of numeric citations and explicitly withholds unavailable capabilities.
+To start from a CMS row, use the same entry point's `adaptContentItem(row,
+options)` and pass its `.document` to `projectContentAdapter`. Explicitly
+configure content fields and component mappings to match the host renderer;
+unmapped components can make body capabilities unavailable. A mapping that
+excludes a component is a host assertion that it adds no relevant content.
+
 Empty paragraph observations are withheld because the CLI contract cannot
 represent empty paragraphs. The projection contains content and URLs: handle it
 as private data. An optional telemetry callback receives duration and aggregate

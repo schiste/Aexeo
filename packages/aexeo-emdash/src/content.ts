@@ -3,6 +3,10 @@ import type { ListReviewTelemetry } from "./telemetry.js";
 import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectContentAdapter as projectContentAdapterWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
+/** Adapt an EmDash row using explicit host field and component mappings. */
+export { adaptContentItem } from "./adapter.js";
+export type { AdaptContentOptions, AdaptedContent, EmdashContentItem, CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
+
 export interface ContentGateResult {
   gate_id: string;
   status: "passed" | "failed" | "not_checked";
