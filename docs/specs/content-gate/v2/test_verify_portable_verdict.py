@@ -306,6 +306,26 @@ class PortableComparison(unittest.TestCase):
                         with self.assertRaises(VerificationError):
                             require_policy_coverage(policy, change, False, verdict)
 
+    def test_plain_text_never_claims_structural_observations(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        for kind in ('list_item_count', 'link_count', 'link_destinations',
+                     'required_headings', 'heading_length', 'heading_hierarchy',
+                     'duplicate_headings', 'prose_sentence_length_variance'):
+            policy['gates'][0]['kind'] = kind
+            for blocking in (True, False):
+                policy['gates'][0]['blocking'] = blocking
+                verdict['checks'][0]['blocking'] = blocking
+                for status in ('passed', 'failed', 'not_checked'):
+                    verdict['checks'][0]['status'] = status
+                    with self.subTest(kind=kind, blocking=blocking, status=status):
+                        if status == 'not_checked':
+                            require_policy_coverage(policy, change, False, verdict, True)
+                        else:
+                            with self.assertRaises(VerificationError):
+                                require_policy_coverage(policy, change, False, verdict, True)
+
     def test_candidate_source_inventory_and_gate_capabilities(self):
         change = json.loads(self.artifacts['change'])
         options = json.loads(self.artifacts['host_options'])
