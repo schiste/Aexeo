@@ -187,6 +187,16 @@ time includes waiting for the agent and evaluation time includes child startup.
 No claim is made about semantic preservation, factual accuracy or publication
 readiness.
 
+The CLI also accepts `content-revise --input projection.json --input-format
+adapter-json --preset PRESET`. Each proposal must be a complete, freshly
+projected adapter JSON string, including updated byte offsets and only the
+capabilities the host can establish for that candidate. The existing adapter
+validator checks each projection, and the loop binds the report and final digest
+to its exact JSON bytes. It does not establish that a projection matches the
+CMS, prove component coverage or save the proposed revision. A missing required
+capability stops the selected review as `incomplete`; the host must preserve
+the policy and metadata and independently verify the source and projection.
+
 ## Bounded host-driven revision loop
 
 Rust hosts can use `aexeo_core::content_revision_loop::revise` to coordinate
