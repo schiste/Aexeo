@@ -35,6 +35,9 @@ Options:
       --metadata <metadata>
           JSON object of metadata string values
 
+      --link-observations <link-observations>
+          Source-bound link observation snapshot for the initial draft
+
       --max-revisions <max-revisions>
           [default: 3]
 
