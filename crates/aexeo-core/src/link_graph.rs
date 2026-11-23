@@ -33,73 +33,92 @@ pub fn resolve_link(
     site_origin: &str,
     effective_base: Option<&str>,
 ) -> LinkResolution {
-    fn valid_http(value: &str) -> Option<Url> {
-        let url = Url::parse(value).ok()?;
-        (matches!(url.scheme(), "http" | "https")
-            && url.host_str().is_some()
-            && url.username().is_empty()
-            && url.password().is_none())
-        .then_some(url)
-    }
-    let Some(page) = valid_http(page_url) else {
-        return LinkResolution::Indeterminate {
-            reason: "page URL is missing or invalid".into(),
-        };
-    };
-    let Some(site) = valid_http(site_origin) else {
-        return LinkResolution::Indeterminate {
-            reason: "site origin is missing or invalid".into(),
-        };
-    };
-    if page.origin() != site.origin() {
-        return LinkResolution::Indeterminate {
-            reason: "page URL does not match the site origin".into(),
-        };
-    }
-    let base = match effective_base {
-        Some(value) => match page.join(value) {
-            Ok(url)
-                if matches!(url.scheme(), "http" | "https")
-                    && url.username().is_empty()
-                    && url.password().is_none() =>
-            {
-                url
+    LinkResolver::new(page_url, site_origin, effective_base).resolve(href)
+}
+
+/// Per-document resolution state. Invalid context is retained so every link
+/// receives the same diagnostic as an independent `resolve_link` call.
+pub(crate) struct LinkResolver {
+    context: Result<ResolutionContext, &'static str>,
+}
+
+struct ResolutionContext {
+    page: Url,
+    origin: url::Origin,
+    base: Url,
+}
+
+impl LinkResolver {
+    pub(crate) fn new(page_url: &str, site_origin: &str, effective_base: Option<&str>) -> Self {
+        fn valid_http(value: &str) -> Option<Url> {
+            let url = Url::parse(value).ok()?;
+            (matches!(url.scheme(), "http" | "https")
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none())
+            .then_some(url)
+        }
+        let context = (|| {
+            let mut page = valid_http(page_url).ok_or("page URL is missing or invalid")?;
+            let site = valid_http(site_origin).ok_or("site origin is missing or invalid")?;
+            let origin = site.origin();
+            if page.origin() != origin {
+                return Err("page URL does not match the site origin");
             }
-            _ => {
+            let base = match effective_base {
+                Some(value) => match page.join(value) {
+                    Ok(url)
+                        if matches!(url.scheme(), "http" | "https")
+                            && url.username().is_empty()
+                            && url.password().is_none() =>
+                    {
+                        url
+                    }
+                    _ => return Err("effective base URL is invalid"),
+                },
+                None => page.clone(),
+            };
+            page.set_fragment(None);
+            Ok(ResolutionContext { page, origin, base })
+        })();
+        Self { context }
+    }
+
+    pub(crate) fn resolve(&self, href: &str) -> LinkResolution {
+        let context = match &self.context {
+            Ok(context) => context,
+            Err(reason) => {
                 return LinkResolution::Indeterminate {
-                    reason: "effective base URL is invalid".into(),
+                    reason: (*reason).into(),
                 };
             }
-        },
-        None => page.clone(),
-    };
-    let mut target = match base.join(href) {
-        Ok(url) => url,
-        Err(_) => {
-            return LinkResolution::Indeterminate {
-                reason: "link URL is invalid".into(),
+        };
+        let mut target = match context.base.join(href) {
+            Ok(url) => url,
+            Err(_) => {
+                return LinkResolution::Indeterminate {
+                    reason: "link URL is invalid".into(),
+                };
+            }
+        };
+        if !matches!(target.scheme(), "http" | "https") {
+            return LinkResolution::Unsupported {
+                scheme: target.scheme().into(),
             };
         }
-    };
-    if !matches!(target.scheme(), "http" | "https") {
-        return LinkResolution::Unsupported {
-            scheme: target.scheme().into(),
-        };
-    }
-    if !target.username().is_empty() || target.password().is_some() {
-        return LinkResolution::Indeterminate {
-            reason: "link URL contains credentials".into(),
-        };
-    }
-    target.set_fragment(None);
-    let mut source = page;
-    source.set_fragment(None);
-    if target == source {
-        LinkResolution::SameDocument { url: target.into() }
-    } else if target.origin() == site.origin() {
-        LinkResolution::Internal { url: target.into() }
-    } else {
-        LinkResolution::External { url: target.into() }
+        if !target.username().is_empty() || target.password().is_some() {
+            return LinkResolution::Indeterminate {
+                reason: "link URL contains credentials".into(),
+            };
+        }
+        target.set_fragment(None);
+        if target == context.page {
+            LinkResolution::SameDocument { url: target.into() }
+        } else if target.origin() == context.origin {
+            LinkResolution::Internal { url: target.into() }
+        } else {
+            LinkResolution::External { url: target.into() }
+        }
     }
 }
 
