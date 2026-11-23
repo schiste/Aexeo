@@ -7,7 +7,13 @@ const adapterDocument = { route: "/article", title: "Article", body: [{
   children: [{ _type: "span", text: "One." }, { _type: "span", text: "[12]", marks: ["ref"] }, { _type: "span", text: " Two." }],
   markDefs: [{ _key: "ref", _type: "link", href: "#cite_note-source-12" }],
 }] };
-const adapterProjection = await projectContentAdapter(adapterDocument);
+const projectionEvents = [];
+const adapterProjection = await projectContentAdapter(adapterDocument, event => projectionEvents.push(event));
+assert.equal(projectionEvents.length, 1);
+assert.equal(projectionEvents[0].text_observed, true);
+assert.equal(projectionEvents[0].literal_projection_supplied, true);
+assert(!JSON.stringify(projectionEvents).includes("cite_note"));
+assert.deepEqual(await projectContentAdapter(adapterDocument, () => { throw new Error("telemetry failed"); }), adapterProjection);
 assert.equal(adapterProjection.text, "One.     Two.");
 assert.equal(adapterProjection.literal_text, "One.[12] Two.");
 assert.deepEqual(adapterProjection.link_destinations, ["#cite_note-source-12"]);

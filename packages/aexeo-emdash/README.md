@@ -415,7 +415,9 @@ projection suitable for Aexeo's `content --input-format adapter-json` or
 views of numeric citations and explicitly withholds unavailable capabilities.
 Empty paragraph observations are withheld because the CLI contract cannot
 represent empty paragraphs. The projection contains content and URLs: handle it
-as private data.
+as private data. An optional telemetry callback receives duration and aggregate
+capability availability only, without content, URLs or document identity; callback
+failures do not affect the export.
 
 The export omits metadata and native block/span locations. Supply metadata only
 when the host independently establishes complete values and absence; do not

@@ -94,9 +94,34 @@ export interface ContentAdapterProjection {
   link_destinations?: string[];
 }
 
+/** Aggregate projection coverage; never includes content, URLs or document identity. */
+export interface ContentAdapterProjectionTelemetry {
+  projection_ms: number;
+  text_observed: boolean;
+  headings_observed: boolean;
+  paragraphs_observed: boolean;
+  lists_observed: boolean;
+  links_observed: boolean;
+  literal_projection_supplied: boolean;
+}
+
 /** Export observed body capabilities; metadata and native source coordinates are not included. */
-export async function projectContentAdapter(document: EmdashDocument): Promise<ContentAdapterProjection> {
-  return JSON.parse(await projectContentAdapterWasm(JSON.stringify(document))) as ContentAdapterProjection;
+export async function projectContentAdapter(
+  document: EmdashDocument,
+  onTelemetry?: (event: ContentAdapterProjectionTelemetry) => void,
+): Promise<ContentAdapterProjection> {
+  const started = onTelemetry ? performance.now() : 0;
+  const projection = JSON.parse(await projectContentAdapterWasm(JSON.stringify(document))) as ContentAdapterProjection;
+  if (onTelemetry) emitTelemetry(onTelemetry, {
+    projection_ms: performance.now() - started,
+    text_observed: projection.text !== null,
+    headings_observed: projection.headings !== undefined,
+    paragraphs_observed: projection.paragraphs !== undefined,
+    lists_observed: projection.lists !== undefined,
+    links_observed: projection.link_destinations !== undefined,
+    literal_projection_supplied: projection.literal_text !== undefined,
+  });
+  return projection;
 }
 
 /** Snapshot and link occurrences in adapter order. This may contain private content and URLs. */
