@@ -30,6 +30,15 @@ unavailable check may become a pass.
 
 ## Aexeo delivery and limits
 
+Candidate inventory evaluation also bounds the combined UTF-8 bytes of item
+identities, routes, media types, revisions, digests and link destinations to
+64 MiB, separately from the existing source-byte and link-count limits. The
+combined post-change inventory is checked before copying it. Exceeding the
+limit rejects the operation; `content-impact` reports `not_checked` when an
+overlay cannot be evaluated. This protects in-process callers as well as the
+separately size-bounded CLI; it does
+not establish inventory provenance, freshness or completeness.
+
 - [Aexeo #868](https://github.com/schiste/Aexeo/pull/868),
   [#869](https://github.com/schiste/Aexeo/pull/869),
   [#870](https://github.com/schiste/Aexeo/pull/870) and
