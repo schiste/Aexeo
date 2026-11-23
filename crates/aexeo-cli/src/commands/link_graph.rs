@@ -98,12 +98,11 @@ fn write_graph_json<W: Write, T: serde::Serialize>(
     Ok(())
 }
 
-/// Write the same pretty JSON bytes as before, without building a second
-/// report-sized buffer. Like the previous direct file write, a failed write can
-/// leave a partial destination; caller path checks are unchanged.
-pub(super) fn write_link_graph_file(path: &str, report: &LinkReport) -> Result<()> {
+/// Stream the complete report without allocating a second report-sized buffer.
+/// A failed write can leave a partial destination; caller path checks are unchanged.
+pub(super) fn write_link_graph_file(path: &str, report: &LinkReport, compact: bool) -> Result<()> {
     let file = fs::File::create(path)?;
-    write_graph_json(io::BufWriter::new(file), report, false, false)
+    write_graph_json(io::BufWriter::new(file), report, compact, false)
 }
 
 /// Read an audit link context file, for `link-graph --audit --context` and

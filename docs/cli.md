@@ -597,6 +597,9 @@ Options:
       --link-graph-context <link-graph-context>
           Optional inventory and identity context JSON
 
+      --link-graph-compact
+          Write compact link graph JSON without omitting evidence
+
       --link-graph-telemetry
           Emit aggregate link graph timing and counts to stderr
 
@@ -669,6 +672,9 @@ Options:
 
       --link-graph-summary
           Include an observational link graph coverage summary in the crawl output
+
+      --link-graph-compact
+          Write compact link graph JSON without omitting evidence
 
       --link-graph-telemetry
           Emit aggregate link graph timing and counts to stderr

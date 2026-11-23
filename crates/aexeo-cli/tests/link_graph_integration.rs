@@ -1283,9 +1283,15 @@ fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
             "https://example.org",
             "--link-graph-url-map",
             map.to_str().unwrap(),
+            "--link-graph-compact",
         ])
         .output()
         .unwrap();
+    let compact_bytes = fs::read(&graph).unwrap();
+    let compact_report: aexeo_core::link_report::LinkReport =
+        serde_json::from_slice(&compact_bytes).unwrap();
+    assert_eq!(compact_bytes, serde_json::to_vec(&compact_report).unwrap());
+    assert!(compact_bytes.len() < serde_json::to_vec_pretty(&compact_report).unwrap().len());
     let direct_text = String::from_utf8_lossy(&direct.stdout);
     assert!(
         direct_text.contains("not verifiable: crawl incomplete"),
@@ -1494,4 +1500,19 @@ fn inert_links_are_retained_as_conditional_body_evidence() {
     let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(event["conditional_link_count"], 1);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("private anchor"));
+}
+
+#[test]
+fn compact_graph_option_requires_an_output_file() {
+    for args in [
+        vec!["check", "--link-graph-compact"],
+        vec!["crawl", "https://example.org", "--link-graph-compact"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--link-graph-output"));
+    }
 }

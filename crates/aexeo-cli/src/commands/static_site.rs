@@ -148,8 +148,12 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
             artifact.summary = aexeo_core::reporting::summarize_findings(&artifact.findings);
             graph.bind_audit(&artifact)?;
         }
-        super::link_graph::write_link_graph_file(path, &graph)
-            .map_err(|error| anyhow::anyhow!("cannot write link graph report {path}: {error}"))?;
+        super::link_graph::write_link_graph_file(
+            path,
+            &graph,
+            submatches.get_flag("link-graph-compact"),
+        )
+        .map_err(|error| anyhow::anyhow!("cannot write link graph report {path}: {error}"))?;
         if submatches.get_flag("link-graph-telemetry") {
             super::link_graph::emit_link_graph_telemetry(&graph, started);
         }
