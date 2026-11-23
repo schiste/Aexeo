@@ -48,6 +48,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   clear a lock. If concurrent broker operations report a lock, wait for each
   command to finish, check the broker and any external action's actual state,
   then retry only the unfinished operations sequentially.
+  On macOS, if a live cleanup process remains blocked, a process sample can
+  show whether it is waiting in a system call. Use `sample <pid> 1 1 -file
+  <absolute-session-scratch-path>`: without `-file`, `sample` writes its own
+  report under system temporary storage. Samples can contain private paths;
+  inspect locally and do not expose them or stop another session’s process.
 - Before an npm release, query the registry for the published versions and
   dist-tags; a version in the manifest or changelog does not establish that it
   was published. Build and test the archive from the release source tree, then
