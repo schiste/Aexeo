@@ -2297,6 +2297,15 @@ field = "slug"
     }
 
     #[test]
+    fn oversized_native_coordinates_do_not_discard_usable_projection() {
+        let limit = aexeo_core::content_revision_loop::MAX_DRAFT_BYTES;
+        let value = serde_json::json!({"text":"x".repeat(limit - 100), "native_source_map":{"spans":[{"padding":"y".repeat(200)}]}});
+        let projection = bounded_adapter_projection(value).unwrap();
+        assert!(projection.get("native_source_map").is_none());
+        assert_eq!(projection["text"].as_str().unwrap().len(), limit - 100);
+    }
+
+    #[test]
     fn adapter_projection_rejects_too_many_links() {
         let mut children = Vec::new();
         for _ in 0..=MAX_ADAPTER_OBSERVATIONS {

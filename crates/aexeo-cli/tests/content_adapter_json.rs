@@ -726,6 +726,8 @@ fn native_paths_map_prose_to_bounded_utf16_positions() {
         json!({"spans":[{"start":0,"end":4,"path":[true]}]}),
         json!({"spans":[{"start":0,"end":4,"path":["a"]},{"start":0,"end":4,"path":["b"]}]}),
         json!({"spans":[{"start":0,"end":4,"path":[]}]}),
+        json!({"spans":[{"start":0,"end":4,"path":[9007199254740992u64]}]}),
+        json!({"spans":[{"start":0,"end":4,"path":["body"],"utf16_start":9007199254740991u64}]}),
     ] {
         let input =
             json!({"schema":"aexeo.content-adapter/v1", "text":source, "native_source_map":map});
