@@ -315,6 +315,16 @@ describe("revision audits", () => {
     expect(observed.input_coverage.metadata.observed_fields).toContain("title");
     expect(evaluate.mock.calls[1]?.[0].title).toBe("Historical title");
   });
+  it("audits configured title fields from the historical revision", async () => {
+    const { ctx, revision } = host();
+    (revision.data as Record<string, unknown>).term = "Historical term";
+    const evaluate = vi.fn(async (_document: { title: string }) => report);
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article" }, titleFieldsByCollection: { posts: ["term"] }, evaluate,
+    });
+    expect(evaluate.mock.calls[0]?.[0].title).toBe("Historical term");
+    expect(result).toMatchObject({ input_coverage: { title: { field_selection: "configured", configured_fields: ["term"], source_observed: true } } });
+  });
   it("reports projection coverage separately from rendered metadata", async () => {
     const { ctx, revision } = host();
     const data = revision.data as Record<string, unknown>;

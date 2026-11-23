@@ -791,6 +791,18 @@ blocking=false
   assert.ok(host.store.get("findings:/bounded-fallback").assessment.gates.some((gate) => gate.status === "not_checked"));
 }
 
+// Host title fields reach both save and Refresh without treating a slug as metadata.
+{
+  const mapped = item("mapped-title", { data: { body: [block("p", "Content")], term: "Glossary term" } });
+  const host = fakeHost([mapped]);
+  const configured = createPlugin({ titleFieldsByCollection: { pages: ["term"] } });
+  await configured.hooks["content:afterSave"].handler({ content: mapped, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("document:/mapped-title").document.title, "Glossary term");
+  assert.ok(host.store.get("document:/mapped-title").document.observed_metadata_fields.includes("title"));
+  await configured.routes.refresh.handler(host.ctx);
+  assert.equal(host.store.get("document:/mapped-title").document.title, "Glossary term");
+}
+
 // Ordered host metadata mappings reach both save and Refresh.
 {
   const mapped = item("mapped", { data: { body: [block("p", "Content")], seo_description: "Preferred", excerpt: "Fallback" } });

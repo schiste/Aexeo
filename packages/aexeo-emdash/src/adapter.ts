@@ -141,6 +141,7 @@ export async function adaptContentItemWithContext(
   contentFields?: readonly string[],
   descriptionFields?: readonly DescriptionField[],
   metadataFields?: MetadataFields,
+  titleFields?: readonly DescriptionField[],
 ): Promise<AdaptedContent> {
   const publicUrl =
     content.status === "published"
@@ -156,6 +157,7 @@ export async function adaptContentItemWithContext(
     ...(contentFields === undefined ? {} : { contentFields }),
     ...(descriptionFields === undefined ? {} : { descriptionFields }),
     ...(metadataFields === undefined ? {} : { metadataFields }),
+    ...(titleFields === undefined ? {} : { titleFields }),
   });
 
   const translationSet = await contentApi.getTranslations(
@@ -209,6 +211,7 @@ export type AdaptContentOptions = {
   blockMappings?: CustomBlockMappings | undefined;
   contentFields?: readonly string[];
   descriptionFields?: readonly DescriptionField[];
+  titleFields?: readonly DescriptionField[];
   metadataFields?: MetadataFields;
 };
 
@@ -218,11 +221,26 @@ export function adaptContentItem(content: EmdashContentItem, options: AdaptConte
 
 function adaptContentItemInternal(content: EmdashContentItem, options: AdaptContentOptions, includeSourcePaths: boolean): AdaptedContent {
   const route = options.route ?? deriveRoute(content);
-  const sourceTitle = content.seo?.title ?? content.data["title"];
-  const title = stringOrEmpty(sourceTitle ?? content.slug ?? content.id);
+  let sourceTitle: unknown = content.seo?.title ?? content.data["title"];
+  let titleObserved = typeof sourceTitle === "string";
+  if (options.titleFields !== undefined) {
+    sourceTitle = undefined;
+    titleObserved = Array.isArray(options.titleFields) && options.titleFields.length > 0 && options.titleFields.every(isDescriptionField);
+    if (titleObserved) {
+      for (const field of options.titleFields) {
+        const projected = descriptionFieldValue(content, field);
+        if (!projected.observed) { titleObserved = false; break; }
+        if (typeof projected.value === "string" && projected.value.length > 0) {
+          sourceTitle = projected.value;
+          break;
+        }
+      }
+    }
+  }
+  const title = titleObserved && sourceTitle === undefined ? "" : stringOrEmpty(sourceTitle ?? content.slug ?? content.id);
   const document: EmdashDocument = { route, title, description_source_observed: false };
   // Slug and ID are useful display labels, but they are not observed titles.
-  const observedMetadata = typeof sourceTitle === "string" ? ["title"] : [];
+  const observedMetadata = titleObserved ? ["title"] : [];
   // Only host-declared fields are projected. Missing or malformed sources are
   // explicitly unavailable, not evidence that a value is absent.
   if (isRecord(options.metadataFields)) {

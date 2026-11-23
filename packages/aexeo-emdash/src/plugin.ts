@@ -658,6 +658,7 @@ export async function handleAfterSaveConfigured(
   descriptionFields?: readonly DescriptionField[],
   contentFieldsUnavailable = false,
   metadataFields?: MetadataFields,
+  titleFields?: readonly DescriptionField[],
 ): Promise<void> {
   // Freeze a configured fragment source before host calls can yield.
   const sourceSnapshot = evaluator.captureSourceItem?.(event.content);
@@ -677,6 +678,7 @@ export async function handleAfterSaveConfigured(
       contentFields,
       descriptionFields,
       metadataFields,
+      titleFields,
     );
   } catch {
     // No reliable route exists for a new item or an ambiguous prior identity.
@@ -873,6 +875,7 @@ export async function evaluateAndPersistAll(
     contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
     contentFieldsUnavailable?: boolean | undefined;
     descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+  titleFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
     metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   },
 ): Promise<RefreshSummary> {
@@ -933,6 +936,7 @@ export async function evaluateAndPersistAll(
               options.contentFieldsByCollection?.[collection],
               options.descriptionFieldsByCollection?.[collection],
               options.metadataFieldsByCollection?.[collection],
+              options.titleFieldsByCollection?.[collection],
             );
             if (options.contentFieldsUnavailable && adapted.document.body !== undefined) adapted.document.body_capabilities = [];
             documents.push(adapted.document);

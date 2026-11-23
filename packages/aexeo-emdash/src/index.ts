@@ -65,6 +65,7 @@ export interface AexeoPluginOptions {
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>;
+  titleFieldsByCollection?: Record<string, readonly DescriptionField[]>;
   metadataFieldsByCollection?: Record<string, MetadataFields>;
   /** Request historical revision access on a compatible EmDash host. */
   revisionAudits?: boolean;
@@ -189,6 +190,7 @@ export function aexeoPlugin(
       ...(options.blockMappings === undefined ? {} : { blockMappings: options.blockMappings }),
       ...(options.contentFieldsByCollection === undefined ? {} : { contentFieldsByCollection: options.contentFieldsByCollection }),
       ...(options.descriptionFieldsByCollection === undefined ? {} : { descriptionFieldsByCollection: options.descriptionFieldsByCollection }),
+      ...(options.titleFieldsByCollection === undefined ? {} : { titleFieldsByCollection: options.titleFieldsByCollection }),
       ...(options.metadataFieldsByCollection === undefined ? {} : { metadataFieldsByCollection: options.metadataFieldsByCollection }),
       ...(options.contentPreset === undefined
         ? {}

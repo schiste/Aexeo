@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5]
 
+- Map collection-specific title fields in configured CMS saves, refreshes and revision audits. Reports distinguish an observed empty title from an unavailable title; hosts must configure fields to match their renderer.
+
 - Preserve newer saved, deleted or reassigned CMS records when a refresh observes concurrent changes; mark the site inventory incomplete and emit aggregate-only telemetry. The host KV does not provide atomic compare-and-set, so concurrent writes can still race.
 - Carry host-provided native CMS source paths into prose and structural findings, preserving independent partial observations and marking unavailable capabilities as not checked. Hosts must bind mappings to the exact content revision.
 - Expose the CMS row adapter and export bounded body observations for CLI content and revision workflows. Numeric citations retain separate rhythm and literal views, unavailable capabilities stay unassessed, and optional aggregate telemetry excludes content and identifiers. Hosts remain responsible for mappings and revision identity.

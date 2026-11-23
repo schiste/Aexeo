@@ -178,6 +178,7 @@ export interface RefreshOptions {
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   contentFieldsUnavailable?: boolean | undefined;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+  titleFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
   metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   /**
    * Host context. `evaluateAndPersistAll` needs kv/http/content/log, and
@@ -226,6 +227,7 @@ export async function handleRefresh(
       contentFieldsByCollection: options.contentFieldsByCollection,
       contentFieldsUnavailable: options.contentFieldsUnavailable,
       descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+      titleFieldsByCollection: options.titleFieldsByCollection,
       metadataFieldsByCollection: options.metadataFieldsByCollection,
       // Always forwarded. See RefreshOptions.suppressionFilter.
       suppressionFilter: options.suppressionFilter,

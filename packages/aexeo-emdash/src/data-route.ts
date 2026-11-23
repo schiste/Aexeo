@@ -118,6 +118,7 @@ interface DataRouteOptions {
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+  titleFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
   metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   collections: readonly string[];
   evaluator: EvaluatorFn;
@@ -146,6 +147,7 @@ export async function handleDataRoute(
       blockMappings: options.blockMappings,
       contentFieldsByCollection: options.contentFieldsByCollection,
       descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+      titleFieldsByCollection: options.titleFieldsByCollection,
       metadataFieldsByCollection: options.metadataFieldsByCollection,
       ...(options.suppressionFilter === undefined
         ? {}
