@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 use url::Url;
 
-use crate::link_graph::{LinkResolution, resolve_link, same_crawl_origin};
+#[cfg(test)]
+use crate::link_graph::resolve_link;
+use crate::link_graph::{LinkResolution, LinkResolver, same_crawl_origin};
 use crate::site::route_from_urlish;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -278,6 +280,7 @@ pub fn extract_document(
             nodes.extend(node.children.borrow().iter().rev().cloned());
         }
     }
+    let resolver = LinkResolver::new(source_url, site_origin, base.as_deref());
     let initial = Scope {
         context: LinkContext::Unknown,
         component: None,
@@ -377,7 +380,7 @@ pub fn extract_document(
                 None
             };
             if let Some(href) = href {
-                let resolution = resolve_link(&href, source_url, site_origin, base.as_deref());
+                let resolution = resolver.resolve(&href);
                 let anchor = anchor_label(&node);
                 links.push(LinkEvidence {
                     source: source_url.to_string(),
@@ -672,6 +675,55 @@ mod tests {
         assert_eq!(routes(html, "https://example.org/fr/page"), ["en/intro"]);
         let foreign = r#"<head><base href="https://cdn.example.net/"></head><a href="x">X</a>"#;
         assert!(routes(foreign, "https://example.org/").is_empty());
+    }
+
+    #[test]
+    fn shared_resolution_context_preserves_each_link_classification() {
+        let html = r#"<base href="/docs/"><main><a href="item#part">item</a><a href="https://example.org/page#part">same</a><a href="https://elsewhere.test/">external</a><a href="mailto:a@example.org">mail</a><a href="https://user:pass@example.org/">credentials</a></main>"#;
+        let links = extract_links(
+            html,
+            "https://example.org/page",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| &link.resolution)
+                .collect::<Vec<_>>(),
+            vec![
+                &LinkResolution::Internal {
+                    url: "https://example.org/docs/item".into()
+                },
+                &LinkResolution::SameDocument {
+                    url: "https://example.org/page".into()
+                },
+                &LinkResolution::External {
+                    url: "https://elsewhere.test/".into()
+                },
+                &LinkResolution::Unsupported {
+                    scheme: "mailto".into()
+                },
+                &LinkResolution::Indeterminate {
+                    reason: "link URL contains credentials".into()
+                },
+            ]
+        );
+        let invalid = extract_links(html, "invalid", "also-invalid", None);
+        assert!(invalid.iter().all(|link| link.resolution
+            == LinkResolution::Indeterminate {
+                reason: "page URL is missing or invalid".into()
+            }));
+        let invalid_base = extract_links(
+            "<base href='javascript:x'><a href='/a'>a</a><a href='#b'>b</a>",
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        assert!(invalid_base.iter().all(|link| link.resolution
+            == LinkResolution::Indeterminate {
+                reason: "effective base URL is invalid".into()
+            }));
     }
 
     #[test]
