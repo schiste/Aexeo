@@ -159,6 +159,13 @@ pub fn rule_prefix(rule_id: &str) -> &str {
 pub fn rule_metadata_for_id(rule_id: &str) -> RuleMetadata {
     let prefix = rule_prefix(rule_id);
     let mut metadata = metadata_for_prefix(prefix);
+    // Inbound counts depend on the observed surface; anchor wording and the
+    // desired number of links require editorial judgment. Keep these signals
+    // advisory even though the LNK family also includes technical checks.
+    if matches!(rule_id, "LNK002" | "LNK003" | "LNK004") {
+        metadata.class = RuleClass::Heuristic;
+        metadata.confidence = ConfidenceLevel::Medium;
+    }
     if rule_id.starts_with("GEO0") {
         metadata.confidence = ConfidenceLevel::Low;
     }
@@ -433,7 +440,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "LNK002",
                     sitewide: false,
-                    summary: "orphan page",
+                    summary: "no observed inbound internal links",
                 },
                 RuleDescriptor {
                     rule_id: "LNK003",
@@ -1416,6 +1423,21 @@ mod tests {
 
         let geo = rule_metadata_for_id("GEO007");
         assert!(matches!(geo.class, RuleClass::Heuristic));
+    }
+
+    #[test]
+    fn link_editorial_observations_are_not_hard_errors() {
+        for id in ["LNK002", "LNK003", "LNK004"] {
+            let metadata = rule_metadata_for_id(id);
+            assert!(matches!(metadata.class, RuleClass::Heuristic), "{id}");
+            assert!(
+                matches!(metadata.confidence, ConfidenceLevel::Medium),
+                "{id}"
+            );
+        }
+        let broken = rule_metadata_for_id("LNK001");
+        assert!(matches!(broken.class, RuleClass::Hard));
+        assert!(matches!(broken.confidence, ConfidenceLevel::High));
     }
 
     #[test]
