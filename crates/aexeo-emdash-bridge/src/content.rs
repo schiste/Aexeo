@@ -301,6 +301,16 @@ pub fn content_adapter_projection(
         );
     }
     if !text_available {
+        if headings_available || links_available {
+            out["native_source_map"] = serde_json::json!({"spans":[]});
+        }
+        project_native_headings_and_links(
+            &mut out,
+            document,
+            headings_available,
+            links_available,
+            true,
+        )?;
         return bounded_adapter_projection(out);
     }
     let text = input.text.as_deref().unwrap_or("");
@@ -386,6 +396,26 @@ pub fn content_adapter_projection(
             out["native_source_map"]["list_paths"] = serde_json::json!(paths);
         }
     }
+    project_native_headings_and_links(
+        &mut out,
+        document,
+        headings_available,
+        links_available,
+        native_complete,
+    )?;
+    bounded_adapter_projection(out)
+}
+
+/// Project independently observed structures without assuming prose is available.
+fn project_native_headings_and_links(
+    out: &mut serde_json::Value,
+    document: &EmdashDocument,
+    headings_available: bool,
+    links_available: bool,
+    native_complete: bool,
+) -> Result<()> {
+    let path =
+        |block: usize, span: usize| serde_json::json!(["body", block, "children", span, "text"]);
     if links_available {
         let links = content_links(document);
         anyhow::ensure!(
@@ -424,7 +454,7 @@ pub fn content_adapter_projection(
             .collect();
         out["native_source_map"]["heading_paths"] = serde_json::json!(paths);
     }
-    bounded_adapter_projection(out)
+    Ok(())
 }
 
 /// Observe explicit Markdown links in complete rich text. Code-marked spans
@@ -2846,5 +2876,53 @@ quote = "14 participants"
         batch.destinations.reverse();
         batch.observations.pop();
         assert!(bound_link_observations(&batch, &raw, &document, true).is_none());
+    }
+    #[test]
+    fn partial_projection_retains_independent_headings_and_links() {
+        let document: EmdashDocument = serde_json::from_str(r##"{"route":"/partial","title":"T","body":[{"style":"h2","children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"Link","marks":["link"]}],"markDefs":[{"_key":"link","_type":"link","href":"http://example.test"}]}]}"##).unwrap();
+        let projected =
+            content_adapter_projection(&document, [false, true, false, true], false).unwrap();
+        assert!(projected["text"].is_null());
+        assert_eq!(projected["headings"], serde_json::json!(["Heading"]));
+        assert_eq!(
+            projected["link_destinations"],
+            serde_json::json!(["http://example.test"])
+        );
+        assert_eq!(
+            projected["native_source_map"]["spans"],
+            serde_json::json!([])
+        );
+        assert_eq!(
+            projected["native_source_map"]["heading_paths"],
+            serde_json::json!([["body", 0, "children", 0, "text"]])
+        );
+        assert_eq!(
+            projected["native_source_map"]["link_paths"],
+            serde_json::json!([["body", 1, "children", 0, "text"]])
+        );
+        assert!(projected.get("paragraphs").is_none());
+        assert!(projected.get("lists").is_none());
+        let headings_only =
+            content_adapter_projection(&document, [false, true, false, false], false).unwrap();
+        assert!(headings_only.get("headings").is_some());
+        assert!(headings_only.get("link_destinations").is_none());
+        assert!(
+            headings_only["native_source_map"]
+                .get("link_paths")
+                .is_none()
+        );
+        let links_only =
+            content_adapter_projection(&document, [false, false, false, true], false).unwrap();
+        assert!(links_only.get("headings").is_none());
+        assert!(links_only.get("link_destinations").is_some());
+        assert!(
+            links_only["native_source_map"]
+                .get("heading_paths")
+                .is_none()
+        );
+        let unavailable = content_adapter_projection(&document, [false; 4], false).unwrap();
+        assert!(unavailable.get("headings").is_none());
+        assert!(unavailable.get("link_destinations").is_none());
+        assert!(unavailable.get("native_source_map").is_none());
     }
 }

@@ -56,6 +56,17 @@ assert.deepEqual(structured.native_source_map.list_paths, [["data", "content", 1
 const structuredWithoutPaths = await projectAdaptedContentAdapter({ ...structuredAdapted, meta: {} });
 assert.deepEqual(structuredWithoutPaths.native_source_map.heading_paths, [null]);
 assert.deepEqual(structuredWithoutPaths.native_source_map.list_paths, [null]);
+const partiallyObserved = adaptContentItem(cmsRow, { contentFields: ["content"], blockMappings: { unknownWidget: [] } });
+partiallyObserved.document.body_capabilities = ["headings", "links"];
+const partialProjection = await projectAdaptedContentAdapter(partiallyObserved);
+assert.equal(partialProjection.text, null);
+assert.equal(partialProjection.paragraphs, undefined);
+assert.equal(partialProjection.lists, undefined);
+assert.deepEqual(partialProjection.headings, []);
+assert.deepEqual(partialProjection.link_destinations, ["#cite_note-source-12", "#cite_note-source-12"]);
+assert.deepEqual(partialProjection.native_source_map.spans, []);
+assert.deepEqual(partialProjection.native_source_map.link_paths, [["data", "content", 0, "children", 1, "text"], ["data", "content", 2, "children", 1, "text"]]);
+
 const withoutSourcePaths = await projectAdaptedContentAdapter({ ...mapped, meta: { ...mapped.meta, bodySourcePaths: undefined, bodySourceSpanPaths: undefined } });
 assert.deepEqual(withoutSourcePaths.native_source_map.spans, []);
 
