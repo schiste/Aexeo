@@ -2404,6 +2404,7 @@ mod tests {
                 None,
                 candidate.get(&item.entity_id),
                 false,
+                false,
             )
             .unwrap();
             assert_eq!(
@@ -2544,6 +2545,7 @@ mod tests {
                 None,
                 None,
                 None,
+                false,
                 false,
             )
             .unwrap();
