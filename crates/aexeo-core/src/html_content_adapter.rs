@@ -1005,6 +1005,8 @@ fn html_source_map_inner(
                             | "h5"
                             | "h6"
                             | "span"
+                            | "bdi"
+                            | "bdo"
                             | "b"
                             | "strong"
                             | "del"
@@ -2065,6 +2067,8 @@ mod tests {
             "<main><p>Avant <bdi>مرحبا</p></main>",
             "<main><p>Avant <bdo hidden>نص</bdo></p></main>",
             "<main><p>Avant <bdi>مرحبا</bdo></p></main>",
+            "<main><bdi>Avant<div>مرحبا</div>après</bdi></main>",
+            "<main><bdo>Avant<section>نص</section>après</bdo></main>",
         ] {
             let adapted = html_content("x", html).unwrap();
             assert!(
