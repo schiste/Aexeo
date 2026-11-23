@@ -202,7 +202,7 @@ export function contentItemToEmdashDocument(
   return adaptContentItemInternal(content, { blockMappings }, false).document;
 }
 
-type AdaptContentOptions = {
+export type AdaptContentOptions = {
   route?: string;
   publicUrl?: string | null;
   defaultLocale?: string;

@@ -179,8 +179,8 @@ child's exit with its gate report, binds the report to the candidate bytes and
 checks that the resolved policy and metadata fingerprints do not change between
 evaluations. This detects these changes, not a malicious evaluator or future
 publication races. Auxiliary sources, external services, collection/site
-contexts and CMS projections are not supported by this session; gates needing
-them remain unavailable. A proposal may be at most 16 MiB; the JSON line and
+contexts and direct CMS retrieval are not supported by this session; gates needing
+them remain unavailable. Hosts may supply their own content projections as described below. A proposal may be at most 16 MiB; the JSON line and
 child report also have byte limits. The caller must manage idle timeouts and
 model costs. `--telemetry` emits aggregate counts and durations to stderr; total
 time includes waiting for the agent and evaluation time includes child startup.

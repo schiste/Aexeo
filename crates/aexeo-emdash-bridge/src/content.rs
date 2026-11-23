@@ -209,6 +209,124 @@ fn content_input_with_context(
     )
 }
 
+// Must match the adapter-json reader's per-observation limit.
+const MAX_ADAPTER_OBSERVATIONS: usize = 100_000;
+
+fn bounded_adapter_projection(value: serde_json::Value) -> Result<serde_json::Value> {
+    anyhow::ensure!(
+        serde_json::to_vec(&value)?.len() <= aexeo_core::content_revision_loop::MAX_DRAFT_BYTES,
+        "serialized projection exceeds byte limit"
+    );
+    Ok(value)
+}
+
+/// Project observed body capabilities for the CLI host adapter contract.
+/// Metadata and source locations are deliberately omitted: that contract cannot
+/// represent EmDash's per-field coverage or Portable Text coordinates.
+pub fn content_adapter_projection(
+    document: &EmdashDocument,
+    capabilities: [bool; 4],
+    list_structure_complete: bool,
+) -> Result<serde_json::Value> {
+    anyhow::ensure!(
+        document.body.len() <= MAX_ADAPTER_OBSERVATIONS,
+        "body exceeds projection limit"
+    );
+    // Bound the input before building the masked and literal copies. Separators
+    // contribute one byte between blocks; every span is UTF-8 encoded already.
+    let source_bytes = document.body.iter().try_fold(0usize, |size, block| {
+        block.children.iter().try_fold(size, |size, child| {
+            let PortableTextChild::Span(span) = child;
+            size.checked_add(span.text.len())
+        })
+    });
+    let source_bytes = source_bytes
+        .and_then(|size| size.checked_add(document.body.len().saturating_sub(1)))
+        .ok_or_else(|| anyhow::anyhow!("body exceeds projection limit"))?;
+    anyhow::ensure!(
+        source_bytes <= aexeo_core::content_revision_loop::MAX_DRAFT_BYTES,
+        "body exceeds projection limit"
+    );
+    let (input, context, _, literal) = content_input_with_context(document);
+    let [
+        text_available,
+        headings_available,
+        paragraphs_available,
+        links_available,
+    ] = capabilities;
+    let mut out = serde_json::json!({"schema":"aexeo.content-adapter/v1", "text": null});
+    if headings_available {
+        out["headings"] = serde_json::json!(input.headings);
+        out["heading_levels"] = serde_json::json!(
+            document
+                .body
+                .iter()
+                .filter_map(|block| heading_level(&block.style))
+                .collect::<Vec<_>>()
+        );
+    }
+    if !text_available {
+        return bounded_adapter_projection(out);
+    }
+    let text = input.text.as_deref().unwrap_or("");
+    anyhow::ensure!(
+        text.len() <= aexeo_core::content_revision_loop::MAX_DRAFT_BYTES,
+        "text exceeds projection limit"
+    );
+    out["text"] = serde_json::json!(text);
+    if let Some(literal) = literal {
+        out["literal_text"] = serde_json::json!(literal);
+    }
+    let ends = context.block_ends.as_deref().unwrap_or_default();
+    out["block_ends"] = serde_json::json!(ends);
+    let lists_complete = list_structure_complete && capabilities.iter().all(|value| *value);
+    let classifications = portable_text_paragraph_list_items(document, lists_complete);
+    if paragraphs_available {
+        let mut start = 0;
+        let mut paragraphs = Vec::new();
+        let mut ordinal = 0;
+        let mut complete = true;
+        for (block, end) in document.body.iter().zip(ends) {
+            if matches!(block.style, crate::BlockStyle::Normal) {
+                if start == *end {
+                    complete = false;
+                    break;
+                }
+                let mut paragraph = serde_json::json!({"start":start, "end":end});
+                if let Some(classification) = classifications
+                    .as_ref()
+                    .and_then(|items| items.get(ordinal))
+                {
+                    paragraph["list_item"] = serde_json::json!(classification);
+                }
+                paragraphs.push(paragraph);
+                ordinal += 1;
+            }
+            start = end.saturating_add(1);
+        }
+        if complete {
+            out["paragraphs"] = serde_json::json!(paragraphs);
+        }
+    }
+    if let Some(lists) = portable_text_structured_lists(document, lists_complete) {
+        out["lists"] = serde_json::json!(
+            lists
+                .iter()
+                .map(|list| serde_json::json!({"item_count":list.item_count, "depth":list.depth}))
+                .collect::<Vec<_>>()
+        );
+    }
+    if links_available {
+        let destinations = content_link_destinations(document);
+        anyhow::ensure!(
+            destinations.len() <= MAX_ADAPTER_OBSERVATIONS,
+            "link observations exceed projection limit"
+        );
+        out["link_destinations"] = serde_json::json!(destinations);
+    }
+    bounded_adapter_projection(out)
+}
+
 /// Observe explicit Markdown links in complete rich text. Code-marked spans
 /// are masked by byte length, preserving coordinates into the original text.
 fn literal_markdown_links(document: &EmdashDocument) -> Option<Vec<(usize, usize)>> {
@@ -2052,6 +2170,72 @@ field = "slug"
         assert_eq!(locations.len(), 31);
         assert_eq!((locations[1].span_index, locations[1].utf16_offset), (3, 0));
         assert_eq!(document.body[0].children.len(), 69);
+    }
+
+    #[test]
+    fn adapter_projection_preserves_citations_and_observation_boundaries() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{
+                "markDefs":[{"_key":"ref", "_type":"link", "href":"#cite_note-source-17"}],
+                "children":[{"_type":"span", "text":"Élan."}, {"_type":"span", "text":"[17]", "marks":["ref"]}, {"_type":"span", "text":" Next."}]
+            }]
+        })).unwrap();
+        let projected = content_adapter_projection(&document, [true; 4], true).unwrap();
+        assert_eq!(projected["text"], "Élan.     Next.");
+        assert_eq!(projected["literal_text"], "Élan.[17] Next.");
+        assert_eq!(projected["paragraphs"][0]["start"], 0);
+        assert_eq!(projected["paragraphs"][0]["end"], "Élan.     Next.".len());
+        assert_eq!(projected["link_destinations"][0], "#cite_note-source-17");
+        assert_eq!(projected["paragraphs"][0]["list_item"], false);
+        assert!(projected.get("source_map").is_none());
+
+        let unavailable = content_adapter_projection(&document, [false; 4], false).unwrap();
+        assert!(unavailable["text"].is_null());
+        assert!(unavailable.get("literal_text").is_none());
+        assert!(unavailable.get("paragraphs").is_none());
+        assert!(unavailable.get("link_destinations").is_none());
+    }
+
+    #[test]
+    fn adapter_projection_rejects_too_many_links() {
+        let mut children = Vec::new();
+        for _ in 0..=MAX_ADAPTER_OBSERVATIONS {
+            children.push(serde_json::json!({"_type":"span", "text":"x", "marks":["link"]}));
+            children.push(serde_json::json!({"_type":"span", "text":" ", "marks":[]}));
+        }
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{
+                "children":children, "markDefs":[{"_key":"link", "_type":"link", "href":"https://example.test"}]
+            }]
+        })).unwrap();
+        let error = content_adapter_projection(&document, [true; 4], false).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("link observations exceed projection limit")
+        );
+    }
+
+    #[test]
+    fn adapter_projection_rejects_oversized_input_before_building_views() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{"children":[{
+                "_type":"span", "text":"x".repeat(aexeo_core::content_revision_loop::MAX_DRAFT_BYTES + 1)
+            }]}]
+        })).unwrap();
+        let error = content_adapter_projection(&document, [true; 4], true).unwrap_err();
+        assert!(error.to_string().contains("body exceeds projection limit"));
+    }
+
+    #[test]
+    fn adapter_projection_withholds_empty_paragraphs_and_unattested_lists() {
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/test", "title":"Test", "body":[{"children":[]}]
+        }))
+        .unwrap();
+        let projected = content_adapter_projection(&document, [true; 4], false).unwrap();
+        assert!(projected.get("paragraphs").is_none());
+        assert!(projected.get("lists").is_none());
     }
 
     #[test]
