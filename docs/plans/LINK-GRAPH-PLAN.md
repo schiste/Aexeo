@@ -299,6 +299,12 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 ## Remaining integration and validation
 
+Legacy `LNK002`, `LNK003` and `LNK004` are editorial heuristics rather than
+hard technical failures: inbound observations depend on coverage, and link
+wording and counts require judgment. Their rule IDs, finding severities and
+fingerprints remain unchanged; the report classification and ordering change.
+This does not make an incomplete crawl or unmatched inventory conclusive.
+
 The EmDash exporter accepts asynchronous host classifiers with independently
 bounded concurrency and aggregate classification-time telemetry. This lets a
 host consult its static publication status separately from native CMS status;
