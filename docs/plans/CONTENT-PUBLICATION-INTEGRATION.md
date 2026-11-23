@@ -1,6 +1,6 @@
 # Aexeo–Aethyme publication integration
 
-Status snapshot: 22 November 2026. This is an active integration plan, not a
+Status snapshot: 23 November 2026. This is an active integration plan, not a
 claim that the publication design is complete. The v1 runner contract remains
 in force: `0` means pass, `1` means fail, `2` means not checked or invalid
 input, and other codes indicate errors. The runner must cross-check the
@@ -29,6 +29,20 @@ unavailable check may become a pass.
   path-based baselines and advisory comparisons remain distinct.
 
 ## Aexeo delivery and limits
+
+- [Aexeo #853](https://github.com/schiste/Aexeo/pull/853) supports editorial
+  pacing in adapted incremental evaluation with per-entity composition
+  snapshots; changed evidence invalidates reuse and stale or missing inputs stay
+  not checked. [Aexeo #854](https://github.com/schiste/Aexeo/pull/854) and
+  [Aethyme #1960](https://github.com/schiste/Aethyme/pull/1960) require the
+  configured per-entity composition source before their portable candidate
+  verifiers accept a claimed checked result. [Aexeo #856](https://github.com/schiste/Aexeo/pull/856)
+  adds an interprocess regression: all 12 tests passed with Aexeo built from
+  `bf494551` and Aethyme built from `aed5491d`; the new regression accepted
+  an honest unavailable result and detected acceptance of a forged result by
+  the previous installed Aethyme 0.8.160 binary. Native comparator coverage is
+  optional unless its executable is supplied. These checks do not authenticate
+  the evaluator or sources, establish freshness or authorize publication.
 
 - [Aexeo #848](https://github.com/schiste/Aexeo/pull/848) binds a
   host-provided source inventory to experimental portable candidate verdicts.
