@@ -934,7 +934,7 @@ fn link_template_export_respects_html_scope() {
 }
 
 #[test]
-fn link_template_export_refuses_unobserved_markdown_links() {
+fn link_template_export_marks_unobserved_markdown_links_unavailable() {
     let mut input = batch();
     let source = "<a href=\"/hidden\">link</a>";
     let digest = "996a41864e0cb19cc71c7a214a69bd566f79b1bb5eac47819d6bcbf856b794bd";
@@ -951,9 +951,19 @@ fn link_template_export_refuses_unobserved_markdown_links() {
         p["change"]["entries"][0]["after"]["sha256"] = json!(digest);
     }
     let output = run(&input, &["--export-link-observations"]);
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("not completely observed"));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let templates: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(templates["base_link_unavailable"], json!(["b"]));
+    assert_eq!(templates["base_link_observations"], json!({}));
+    assert_eq!(
+        templates["proposals"][0]["link_unavailable"],
+        json!(["a", "b"])
+    );
+    assert_eq!(templates["proposals"][0]["link_observations"], json!({}));
 }
 
 #[test]
@@ -1145,5 +1155,296 @@ fn adapted_html_literal_link_review_reports_and_reuses_without_exposing_content(
     assert_eq!(
         serde_json::from_str::<Value>(&telemetry).unwrap()["reused"],
         2
+    );
+}
+
+#[test]
+fn partial_link_inventories_keep_available_results_and_fail_closed() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("links");
+    input["preset_sources"] = json!({"links":"version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"});
+    let source = "[example](https://example.org)";
+    let digest = "b64cfc245d95ab25d38166f5a37f7263a0495a5588c728f959f3cb596e4a55d8";
+    input["base_link_observations"] = json!({});
+    input["base_link_unavailable"] = json!(["b"]);
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["after"][0]["source"] = json!(source);
+        proposal["after"][0]["sha256"] = json!(digest);
+        proposal["after"][0]["media_type"] = json!("text/markdown");
+        proposal["change"]["entries"][0]["after"]["inline"] = json!(source);
+        proposal["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+        proposal["change"]["entries"][0]["media_type"] = json!("text/markdown");
+        proposal["link_observations"] = json!({"a":{"version":1,"source_sha256":digest,"destinations":["https://example.org"],"observations":["reachable"]}});
+        proposal["link_unavailable"] = json!(["b"]);
+    }
+    let output = run(&input, &["--telemetry"]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows = lines(&output);
+    for row in &rows {
+        assert_eq!(row["result"]["status"], "evaluated");
+        assert_eq!(
+            row["result"]["reports"]["a"]["gates"][0]["status"],
+            "passed"
+        );
+        assert_eq!(
+            row["result"]["reports"]["b"]["gates"][0]["status"],
+            "not_checked"
+        );
+        assert_eq!(
+            row["result"]["reports"]["b"]["gates"][1]["status"],
+            "passed"
+        );
+        assert_eq!(
+            row["result"]["reports"]["b"]["summary"]["blocking_not_checked"],
+            1
+        );
+    }
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("example.org"));
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["base_link_unavailable_count"], 1);
+    assert_eq!(telemetry["candidate_link_unavailable_count"], 2);
+    let mut invalid = input.clone();
+    invalid["proposals"][0]["link_unavailable"] = json!([]);
+    assert_eq!(
+        lines(&run(&invalid, &[]))[0]["result"]["status"],
+        "not_checked"
+    );
+    invalid["proposals"][0]["link_unavailable"] = json!(["a", "b"]);
+    assert_eq!(
+        lines(&run(&invalid, &[]))[0]["result"]["status"],
+        "not_checked"
+    );
+    invalid["proposals"][0]["link_unavailable"] = json!(["b", "b"]);
+    assert!(!run(&invalid, &[]).status.success());
+    let mut missing_map = input.clone();
+    missing_map["proposals"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("link_observations");
+    assert_eq!(
+        lines(&run(&missing_map, &[]))[0]["result"]["status"],
+        "not_checked"
+    );
+    let mut missing_base = input.clone();
+    missing_base
+        .as_object_mut()
+        .unwrap()
+        .remove("base_link_observations");
+    assert_eq!(
+        lines(&run(&missing_base, &[]))[0]["result"]["status"],
+        "not_checked"
+    );
+    input["preset_sources"]["links"] = json!(
+        "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+    );
+    input["base_metadata"] = json!({"b":{"slug":"b"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["change"]["entries"][0]["metadata"] = json!({"slug":"a"});
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for row in lines(&output) {
+        assert_eq!(
+            row["result"]["items"]["reports"]["b"]["gates"][0]["status"],
+            "not_checked"
+        );
+        assert_eq!(row["result"]["collection"]["status"], "report");
+    }
+    input["preset_sources"]["links"] = json!(
+        "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n[[gates]]\nid='anchor'\nkind='evidence_anchors'\nsource='study'\nclaim='abc'\nquote='quote'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+    );
+    input["base_evidence"] = json!({"b":{"study":"quote"}});
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["evidence"] = json!({"a":{"study":"quote"},"b":{"study":"quote"}});
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["items"]["reports"]["b"]["gates"][0]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["collection"]["status"],
+        "report"
+    );
+    input["proposals"][0]["evidence"]
+        .as_object_mut()
+        .unwrap()
+        .remove("b");
+    let output = run(&input, &[]);
+    assert_eq!(
+        lines(&output)[0]["result"]["items"]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["collection"]["status"],
+        "report"
+    );
+}
+
+#[test]
+fn partial_link_templates_round_trip_mixed_plain_and_markdown() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("links");
+    input["preset_sources"] = json!({"links":"version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n"});
+    let source = "[example](https://example.org)";
+    let digest = "b64cfc245d95ab25d38166f5a37f7263a0495a5588c728f959f3cb596e4a55d8";
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["after"][0]["source"] = json!(source);
+        proposal["after"][0]["sha256"] = json!(digest);
+        proposal["after"][0]["media_type"] = json!("text/markdown");
+        proposal["change"]["entries"][0]["after"]["inline"] = json!(source);
+        proposal["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+        proposal["change"]["entries"][0]["media_type"] = json!("text/markdown");
+    }
+    let output = run(&input, &["--export-link-observations"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut templates: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(templates["base_link_unavailable"], json!(["b"]));
+    assert_eq!(templates["base_link_observations"], json!({}));
+    input["base_link_unavailable"] = templates["base_link_unavailable"].take();
+    input["base_link_observations"] = templates["base_link_observations"].take();
+    for (i, proposal) in input["proposals"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        assert_eq!(templates["proposals"][i]["link_unavailable"], json!(["b"]));
+        proposal["link_unavailable"] = templates["proposals"][i]["link_unavailable"].take();
+        proposal["link_observations"] = templates["proposals"][i]["link_observations"].take();
+        proposal["link_observations"]["a"]["observations"][0] = json!("reachable");
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["reports"]["b"]["gates"][0]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        lines(&output)[0]["result"]["reports"]["a"]["gates"][0]["status"],
+        "passed"
+    );
+}
+
+#[test]
+fn partial_link_template_marks_base_mode_when_only_candidate_is_unavailable() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    let source = "[example](https://example.org)";
+    let digest = "b64cfc245d95ab25d38166f5a37f7263a0495a5588c728f959f3cb596e4a55d8";
+    input["snapshot"]["items"][0]["media_type"] = json!("text/markdown");
+    input["snapshot"]["items"][0]["source"] = json!(source);
+    input["snapshot"]["items"][0]["sha256"] = json!(digest);
+    let output = run(&input, &["--export-link-observations"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let templates: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(templates["base_link_unavailable"], json!([]));
+    assert_eq!(
+        templates["base_link_observations"]["b"]["destinations"],
+        json!(["https://example.org"])
+    );
+    for proposal in templates["proposals"].as_array().unwrap() {
+        assert_eq!(proposal["link_unavailable"], json!(["a"]));
+        assert_eq!(
+            proposal["link_observations"]["b"]["destinations"],
+            json!(["https://example.org"])
+        );
+    }
+}
+
+#[test]
+fn partial_link_batch_keeps_other_items_when_html_scope_is_unavailable() {
+    let mut input = batch();
+    input["mode"] = json!("adapted_main");
+    input["preset"] = json!("links");
+    input["preset_sources"] = json!({"links":"version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_reachability'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"});
+    input["snapshot"]["items"][0]["media_type"] = json!("text/html");
+    input["snapshot"]["items"][0]["source"] = json!("<nav>Missing main</nav>");
+    input["snapshot"]["items"][0]["sha256"] =
+        json!("6637dd03f5a38e10ff223c751f58dbd5b940931fbb4390e00c19a2111dfa3ddc");
+    let source = "[example](https://example.org)";
+    let digest = "b64cfc245d95ab25d38166f5a37f7263a0495a5588c728f959f3cb596e4a55d8";
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        proposal["after"][0]["source"] = json!(source);
+        proposal["after"][0]["sha256"] = json!(digest);
+        proposal["after"][0]["media_type"] = json!("text/markdown");
+        proposal["change"]["entries"][0]["after"]["inline"] = json!(source);
+        proposal["change"]["entries"][0]["after"]["sha256"] = json!(digest);
+        proposal["change"]["entries"][0]["media_type"] = json!("text/markdown");
+    }
+    let output = run(&input, &["--export-link-observations"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut templates: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(templates["base_link_unavailable"], json!(["b"]));
+    input["base_link_unavailable"] = templates["base_link_unavailable"].take();
+    input["base_link_observations"] = templates["base_link_observations"].take();
+    for (i, proposal) in input["proposals"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        proposal["link_unavailable"] = templates["proposals"][i]["link_unavailable"].take();
+        proposal["link_observations"] = templates["proposals"][i]["link_observations"].take();
+        proposal["link_observations"]["a"]["observations"][0] = json!("reachable");
+    }
+    let output = run(&input, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows = lines(&output);
+    assert_eq!(rows[0]["result"]["status"], "evaluated");
+    assert_eq!(
+        rows[0]["result"]["reports"]["a"]["gates"][0]["status"],
+        "passed"
+    );
+    assert_eq!(
+        rows[0]["result"]["reports"]["b"]["gates"][0]["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        rows[0]["result"]["reports"]["b"]["gates"][1]["status"],
+        "not_checked"
     );
 }

@@ -22,7 +22,7 @@ use anyhow::{Result, bail};
 use clap::ArgMatches;
 use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::File,
     io::{self, Read, Write},
     path::Path,
@@ -46,6 +46,8 @@ struct Batch {
     base_metadata: Option<Metadata>,
     #[serde(default, deserialize_with = "observations_if_present")]
     base_link_observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
+    #[serde(default, deserialize_with = "unavailable_if_present")]
+    base_link_unavailable: Option<BTreeSet<String>>,
     #[serde(default, deserialize_with = "evidence_if_present")]
     base_evidence: Option<IncrementalEvidence>,
     proposals: Vec<Proposal>,
@@ -62,6 +64,20 @@ fn observations_if_present<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<BTreeMap<String, LinkObservationSnapshot>>, D::Error> {
     BTreeMap::deserialize(deserializer).map(Some)
+}
+
+fn unavailable_if_present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BTreeSet<String>>, D::Error> {
+    let values = Vec::<String>::deserialize(deserializer)?;
+    let count = values.len();
+    let values: BTreeSet<_> = values.into_iter().collect();
+    if values.len() != count {
+        return Err(serde::de::Error::custom(
+            "duplicate unavailable link identity",
+        ));
+    }
+    Ok(Some(values))
 }
 
 fn evidence_if_present<'de, D: serde::Deserializer<'de>>(
@@ -85,6 +101,8 @@ struct Proposal {
     after: Vec<CandidateItem>,
     #[serde(default, deserialize_with = "observations_if_present")]
     link_observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
+    #[serde(default, deserialize_with = "unavailable_if_present")]
+    link_unavailable: Option<BTreeSet<String>>,
     #[serde(default, deserialize_with = "evidence_if_present")]
     evidence: Option<IncrementalEvidence>,
 }
@@ -102,7 +120,13 @@ fn prepare_baseline(
     mode: Mode,
     observations: Option<BTreeMap<String, LinkObservationSnapshot>>,
     evidence: Option<IncrementalEvidence>,
+    unavailable: Option<BTreeSet<String>>,
 ) -> Result<Baseline, NotChecked> {
+    if unavailable.is_some() && observations.is_none() {
+        return Err(NotChecked {
+            reason: "partial link inventory requires observations".into(),
+        });
+    }
     let collection_gates = preset
         .gates
         .iter()
@@ -130,7 +154,19 @@ fn prepare_baseline(
                 });
             }
         };
-        let composed = if let Some(evidence) = evidence {
+        let composed = if let Some(unavailable) = unavailable {
+            ComposedBaseline::prepare_adapted_with_partial_links(
+                snapshot,
+                metadata,
+                preset,
+                scope,
+                observations.ok_or_else(|| NotChecked {
+                    reason: "partial link inventory requires observations".into(),
+                })?,
+                unavailable,
+                evidence,
+            )
+        } else if let Some(evidence) = evidence {
             ComposedBaseline::prepare_adapted_with_evidence(
                 snapshot,
                 metadata,
@@ -151,6 +187,29 @@ fn prepare_baseline(
             ComposedBaseline::prepare_adapted_with_html_scope(snapshot, metadata, preset, scope)
         };
         return composed.map(|baseline| Baseline::Composed(Box::new(baseline)));
+    }
+    if let Some(unavailable) = unavailable {
+        let scope = match mode {
+            Mode::Adapted => HtmlContentScope::Document,
+            Mode::AdaptedMain => HtmlContentScope::Main,
+            _ => {
+                return Err(NotChecked {
+                    reason: "link observations require an adapted mode".into(),
+                });
+            }
+        };
+        return IncrementalBaseline::prepare_adapted_with_partial_links(
+            snapshot,
+            preset,
+            scope,
+            metadata,
+            observations.ok_or_else(|| NotChecked {
+                reason: "partial link inventory requires observations".into(),
+            })?,
+            unavailable,
+            evidence,
+        )
+        .map(Baseline::Items);
     }
     if let Some(evidence) = evidence {
         let scope = match mode {
@@ -241,7 +300,7 @@ impl Totals {
                 self.evaluated += evaluated;
                 self.reused += reused;
                 self.blocking_failed |= reports.values().any(|r| r.summary.blocking_failed > 0);
-                false
+                reports.values().any(|r| r.summary.not_checked > 0)
             }
         }
     }
@@ -261,10 +320,15 @@ impl Totals {
 fn observation_template(
     items: &[CandidateItem],
     scope: HtmlContentScope,
-) -> Result<BTreeMap<String, LinkObservationSnapshot>> {
+) -> Result<(BTreeMap<String, LinkObservationSnapshot>, BTreeSet<String>)> {
     use aexeo_core::content_gate::LinkReachabilityObservation;
     let mut snapshots = BTreeMap::new();
+    let mut unavailable = BTreeSet::new();
+    let mut seen = BTreeSet::new();
     for item in items {
+        if !seen.insert(item.entity_id.clone()) {
+            bail!("duplicate item identity in link observation inventory");
+        }
         let destinations = match item.media_type.as_str() {
             "text/markdown" => {
                 aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
@@ -272,18 +336,20 @@ fn observation_template(
                     &item.source,
                 )?
                 .destinations
-                .ok_or_else(|| anyhow::anyhow!("link destinations are not completely observed"))?
             }
-            "text/html" => {
-                aexeo_core::html_content_adapter::html_content_with_scope(
-                    &item.entity_id,
-                    &item.source,
-                    scope,
-                )
-                .map_err(|_| anyhow::anyhow!("HTML link projection is unavailable"))?
-                .destinations
-            }
-            _ => bail!("link observation templates require Markdown or HTML items"),
+            "text/html" => aexeo_core::html_content_adapter::html_content_with_scope(
+                &item.entity_id,
+                &item.source,
+                scope,
+            )
+            .ok()
+            .map(|projection| projection.destinations),
+            "text/plain" => None,
+            _ => bail!("link observation templates require supported adapted items"),
+        };
+        let Some(destinations) = destinations else {
+            unavailable.insert(item.entity_id.clone());
+            continue;
         };
         let observations = vec![LinkReachabilityObservation::NotChecked; destinations.len()];
         if snapshots
@@ -301,7 +367,7 @@ fn observation_template(
             bail!("duplicate item identity in link observation inventory");
         }
     }
-    Ok(snapshots)
+    Ok((snapshots, unavailable))
 }
 
 fn export_observation_templates(
@@ -325,15 +391,19 @@ fn export_observation_templates(
         bail!("remove evidence inventories before exporting link templates");
     }
     if batch.base_link_observations.is_some()
+        || batch.base_link_unavailable.is_some()
         || batch
             .proposals
             .iter()
-            .any(|p| p.link_observations.is_some())
+            .any(|p| p.link_observations.is_some() || p.link_unavailable.is_some())
     {
         bail!("remove existing link observations before exporting templates");
     }
-    let base = observation_template(&batch.snapshot.items, scope)?;
-    let mut retained_bytes = serde_json::to_vec(&base)?.len();
+    let (base, base_unavailable) = observation_template(&batch.snapshot.items, scope)?;
+    let mut retained_bytes = serde_json::to_vec(&base)?
+        .len()
+        .checked_add(serde_json::to_vec(&base_unavailable)?.len())
+        .ok_or_else(|| anyhow::anyhow!("link observation templates exceed size limit"))?;
     if retained_bytes as u64 > MAX_BYTES {
         bail!("link observation templates exceed size limit");
     }
@@ -345,6 +415,8 @@ fn export_observation_templates(
         .collect();
     let mut projected = 0usize;
     let mut reused = 0usize;
+    let base_unavailable_count = base_unavailable.len();
+    let mut candidate_unavailable_count = 0usize;
     let mut candidates = Vec::with_capacity(batch.proposals.len());
     for (index, proposal) in batch.proposals.iter().enumerate() {
         let overlay = overlay_candidate(&batch.snapshot, &proposal.change, &proposal.after)
@@ -371,26 +443,37 @@ fn export_observation_templates(
             .map_err(|_| anyhow::anyhow!("referenced candidate content could not be verified"))?;
         }
         let mut observations = BTreeMap::new();
+        let mut unavailable = BTreeSet::new();
         for item in &overlay.candidate.items {
-            let snapshot = if base_items.get(item.entity_id.as_str()).copied() == Some(item) {
+            if base_items.get(item.entity_id.as_str()).copied() == Some(item) {
                 reused += 1;
-                base.get(&item.entity_id)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("base link observation template is unavailable")
-                    })?
-                    .clone()
+                if let Some(snapshot) = base.get(&item.entity_id) {
+                    observations.insert(item.entity_id.clone(), snapshot.clone());
+                } else if base_unavailable.contains(&item.entity_id) {
+                    unavailable.insert(item.entity_id.clone());
+                } else {
+                    bail!("base link observation template is unavailable");
+                }
             } else {
                 projected += 1;
-                observation_template(std::slice::from_ref(item), scope)?
-                    .remove(&item.entity_id)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("candidate link observation template is unavailable")
-                    })?
-            };
-            observations.insert(item.entity_id.clone(), snapshot);
+                let (mut projected_observations, projected_unavailable) =
+                    observation_template(std::slice::from_ref(item), scope)?;
+                if let Some(snapshot) = projected_observations.remove(&item.entity_id) {
+                    observations.insert(item.entity_id.clone(), snapshot);
+                } else if projected_unavailable.contains(&item.entity_id) {
+                    unavailable.insert(item.entity_id.clone());
+                } else {
+                    bail!("candidate link observation template is unavailable");
+                }
+            }
         }
-        let row = serde_json::json!({"proposal_index":index, "change_id":proposal.change.change_id,
+        candidate_unavailable_count += unavailable.len();
+        let mut row = serde_json::json!({"proposal_index":index, "change_id":proposal.change.change_id,
             "link_observations":observations});
+        // Include the field even when empty if the base opts into partial inventories.
+        if !base_unavailable.is_empty() || !unavailable.is_empty() {
+            row["link_unavailable"] = serde_json::json!(unavailable);
+        }
         retained_bytes = retained_bytes
             .checked_add(serde_json::to_vec(&row)?.len())
             .ok_or_else(|| anyhow::anyhow!("link observation templates exceed size limit"))?;
@@ -399,13 +482,26 @@ fn export_observation_templates(
         }
         candidates.push(row);
     }
+    let partial = !base_unavailable.is_empty()
+        || candidates
+            .iter()
+            .any(|row| row.get("link_unavailable").is_some());
+    if partial {
+        for row in &mut candidates {
+            if row.get("link_unavailable").is_none() {
+                row["link_unavailable"] = serde_json::json!([]);
+            }
+        }
+    }
     let count: usize = base
         .values()
         .map(|snapshot| snapshot.destinations.len())
         .sum();
-    let output = serde_json::to_vec(
-        &serde_json::json!({"schema":"aexeo.content-incremental-link-templates/v1-experimental", "base_link_observations":base, "proposals":candidates}),
-    )?;
+    let mut value = serde_json::json!({"schema":"aexeo.content-incremental-link-templates/v1-experimental", "base_link_observations":base, "proposals":candidates});
+    if partial {
+        value["base_link_unavailable"] = serde_json::json!(base_unavailable);
+    }
+    let output = serde_json::to_vec(&value)?;
     if output.len() as u64 > MAX_BYTES {
         bail!("link observation templates exceed size limit");
     }
@@ -416,7 +512,7 @@ fn export_observation_templates(
     if telemetry {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-link-template-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "base_items":batch.snapshot.items.len(), "base_destinations":count, "proposals":batch.proposals.len(), "projected_items":projected, "reused_items":reused})
+            serde_json::json!({"schema":"aexeo.content-incremental-link-template-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "base_items":batch.snapshot.items.len(), "base_destinations":count, "base_unavailable":base_unavailable_count, "candidate_unavailable":candidate_unavailable_count, "proposals":batch.proposals.len(), "projected_items":projected, "reused_items":reused})
         );
     }
     Ok(0)
@@ -520,6 +616,13 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         .iter()
         .filter(|p| p.evidence.is_some())
         .count();
+    let base_link_unavailable_count = batch.base_link_unavailable.as_ref().map(BTreeSet::len);
+    let candidate_link_unavailable_count: usize = batch
+        .proposals
+        .iter()
+        .filter_map(|proposal| proposal.link_unavailable.as_ref())
+        .map(BTreeSet::len)
+        .sum();
     let base_link_observations_supplied = batch.base_link_observations.is_some();
     let proposals_with_link_observations = batch
         .proposals
@@ -536,6 +639,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         batch.mode,
         batch.base_link_observations,
         batch.base_evidence,
+        batch.base_link_unavailable,
     );
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     let mut totals = Totals::default();
@@ -546,7 +650,34 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 true,
             ),
             Ok(Baseline::Items(baseline)) => {
-                let result = if let Some(evidence) = &proposal.evidence {
+                let result = if let Some(unavailable) = &proposal.link_unavailable {
+                    if let Some(observations) = &proposal.link_observations {
+                        if let Some(provider) = providers[index].as_mut() {
+                            baseline.evaluate_with_sources_and_partial_links(
+                                &proposal.change,
+                                &proposal.after,
+                                provider,
+                                MAX_CONTENT_INPUT_BYTES,
+                                MAX_TOTAL_CONTENT_BYTES,
+                                observations,
+                                unavailable,
+                                proposal.evidence.as_ref(),
+                            )
+                        } else {
+                            baseline.evaluate_with_partial_links(
+                                &proposal.change,
+                                &proposal.after,
+                                observations,
+                                unavailable,
+                                proposal.evidence.as_ref(),
+                            )
+                        }
+                    } else {
+                        IncrementalEvaluation::NotChecked {
+                            reason: "partial link inventory requires observations".into(),
+                        }
+                    }
+                } else if let Some(evidence) = &proposal.evidence {
                     if let Some(provider) = providers[index].as_mut() {
                         baseline.evaluate_with_sources_and_evidence(
                             &proposal.change,
@@ -597,7 +728,9 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                 (serde_json::to_value(result)?, unchecked)
             }
             Ok(Baseline::Collection(_))
-                if proposal.link_observations.is_some() || proposal.evidence.is_some() =>
+                if proposal.link_observations.is_some()
+                    || proposal.link_unavailable.is_some()
+                    || proposal.evidence.is_some() =>
             {
                 (
                     serde_json::json!({"status":"not_checked", "reason":"link observations and evidence require item gates"}),
@@ -622,8 +755,39 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                     unchecked,
                 )
             }
+            Ok(Baseline::Composed(_))
+                if proposal.link_unavailable.is_some() && proposal.link_observations.is_none() =>
+            {
+                (
+                    serde_json::json!({"status":"not_checked", "reason":"partial link inventory requires observations"}),
+                    true,
+                )
+            }
             Ok(Baseline::Composed(baseline)) => {
-                let result = if let Some(evidence) = &proposal.evidence {
+                let result = if let (Some(unavailable), Some(observations)) =
+                    (&proposal.link_unavailable, &proposal.link_observations)
+                {
+                    if let Some(provider) = providers[index].as_mut() {
+                        baseline.evaluate_with_sources_and_partial_links(
+                            &proposal.change,
+                            &proposal.after,
+                            provider,
+                            MAX_CONTENT_INPUT_BYTES,
+                            MAX_TOTAL_CONTENT_BYTES,
+                            observations,
+                            unavailable,
+                            proposal.evidence.as_ref(),
+                        )
+                    } else {
+                        baseline.evaluate_with_partial_links(
+                            &proposal.change,
+                            &proposal.after,
+                            observations,
+                            unavailable,
+                            proposal.evidence.as_ref(),
+                        )
+                    }
+                } else if let Some(evidence) = &proposal.evidence {
                     if let Some(provider) = providers[index].as_mut() {
                         baseline.evaluate_with_sources_and_evidence(
                             &proposal.change,
@@ -690,7 +854,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "base_link_unavailable_count":base_link_unavailable_count, "candidate_link_unavailable_count":candidate_link_unavailable_count, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
         );
     }
     Ok(if totals.not_checked != 0 {
