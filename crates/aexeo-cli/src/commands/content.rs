@@ -439,6 +439,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "paragraph_list_classification": adapted.paragraph_list_items.is_some(),
                 "source_spans": adapted.source_map.as_ref().map(|map| map.span_count()),
                 "native_source_spans": adapted.native_source_map.as_ref().map(|map| map.span_count()),
+                "native_structure_paths": adapted.native_source_map.as_ref().map(|map| map.structure_path_counts()),
                 "heading_offsets": adapted.source_map.as_ref().map(|map| map.heading_offset_count()),
                 "link_offsets": adapted.source_map.as_ref().map(|map| map.link_offset_count()),
                 "list_anchors": adapted.source_map.as_ref().map(|map| map.list_anchor_count())
@@ -757,6 +758,31 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         })
         .map(aexeo_core::text_index::LineIndex::new);
     for (gate, result) in preset.gates.iter().zip(&report.gates) {
+        if let Some(paths) = native_source_map.as_ref().and_then(|map| {
+            map.structure_positions(
+                gate,
+                result,
+                &super::content_adapter::NativeStructureObservations {
+                    headings: input.headings.as_deref(),
+                    levels: heading_levels.as_deref(),
+                    destinations: destinations.as_deref(),
+                    links: link_observations.as_deref(),
+                    lists: structured_lists.as_deref(),
+                },
+            )
+        }) {
+            for (finding_index, path) in paths.into_iter().enumerate() {
+                if let Some(path) = path {
+                    native_source_locations.push(NativeSourceLocation {
+                        gate_id: &result.gate_id,
+                        finding_index,
+                        source: "host_supplied_native_path",
+                        path,
+                        utf16_offset: 0,
+                    });
+                }
+            }
+        }
         if aexeo_core::source_mapping::prose_gate_has_positions(gate)
             && let (Some(map), Some(index), Some(text)) = (
                 &native_source_map,

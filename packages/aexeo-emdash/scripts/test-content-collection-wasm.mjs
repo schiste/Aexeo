@@ -37,6 +37,25 @@ assert.equal((await projectContentAdapter(mapped.document)).text, "One.     Two.
 const cmsProjection = await projectAdaptedContentAdapter(mapped);
 assert.deepEqual(cmsProjection.native_source_map.spans[0].path, ["data", "content", 0, "children", 0, "text"]);
 assert.deepEqual(cmsProjection.native_source_map.spans[3].path, ["data", "content", 2, "children", 0, "text"]);
+assert.deepEqual(cmsProjection.native_source_map.link_paths, [["data", "content", 0, "children", 1, "text"], ["data", "content", 2, "children", 1, "text"]]);
+const structuredRow = { id: "structured", type: "articles", slug: "structured", status: "published", data: { content: [
+  { _type: "block", style: "h2", children: [{ _type: "span", text: "Heading" }] },
+  { _type: "block", listItem: "bullet", children: [{ _type: "span", text: "One" }] },
+  { _type: "block", listItem: "bullet", children: [{ _type: "span", text: "Two" }] },
+] } };
+const structuredEvents = [];
+const structuredAdapted = adaptContentItem(structuredRow, { contentFields: ["content"] });
+// The host must explicitly attest that the complete list structure was supplied.
+assert.equal((await projectAdaptedContentAdapter(structuredAdapted)).lists, undefined);
+structuredAdapted.document.list_structure_complete = true;
+const structured = await projectAdaptedContentAdapter(structuredAdapted, event => structuredEvents.push(event));
+assert.deepEqual(structuredEvents[0].native_structure_paths, { headings: 1, links: 0, lists: 1 });
+assert(!JSON.stringify(structuredEvents).includes("Heading"));
+assert.deepEqual(structured.native_source_map.heading_paths, [["data", "content", 0, "children", 0, "text"]]);
+assert.deepEqual(structured.native_source_map.list_paths, [["data", "content", 1, "children", 0, "text"]]);
+const structuredWithoutPaths = await projectAdaptedContentAdapter({ ...structuredAdapted, meta: {} });
+assert.deepEqual(structuredWithoutPaths.native_source_map.heading_paths, [null]);
+assert.deepEqual(structuredWithoutPaths.native_source_map.list_paths, [null]);
 const withoutSourcePaths = await projectAdaptedContentAdapter({ ...mapped, meta: { ...mapped.meta, bodySourcePaths: undefined, bodySourceSpanPaths: undefined } });
 assert.deepEqual(withoutSourcePaths.native_source_map.spans, []);
 
