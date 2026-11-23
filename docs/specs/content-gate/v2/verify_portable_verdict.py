@@ -97,7 +97,7 @@ _ITEM_GATE_KINDS = frozenset({
 })
 
 
-def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None):
+def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None, plain_text_paragraphs=False):
     """Reject a verdict omitting a configured gate instance or its blocking flag."""
     if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
             or type(policy['version']) is not int or policy['version'] != 1
@@ -157,6 +157,16 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                                  'duplicate_headings', 'prose_sentence_length_variance'}
                     and check.get('status') != 'not_checked'):
                 raise VerificationError('candidate evaluator cannot inspect structure in plain text')
+            paragraph_gate = (kind in {'paragraph_count', 'paragraph_length', 'paragraph_character_length',
+                                       'repeated_paragraph_openings', 'repeated_sentence_openings',
+                                       'sentence_opening_window', 'sentence_opening_terms', 'repeated_punctuation',
+                                       'trailing_ing_clause', 'similar_sentence_lengths', 'sentence_length_variance',
+                                       'inline_triple_candidates', 'duplicate_paragraphs'}
+                              or (kind in {'sentence_length', 'sentence_character_length'}
+                                  and gate.get('paragraphs_only') is True))
+            if (paragraph_gate and item_media.get(entity) == 'text/plain'
+                    and not plain_text_paragraphs and check.get('status') != 'not_checked'):
+                raise VerificationError('candidate evaluator cannot inspect unavailable paragraphs')
             if (kind in {'required_metadata', 'metadata_length', 'metadata_age'}
                     and item_metadata.get(entity) is None and check.get('status') != 'not_checked'):
                 raise VerificationError('candidate evaluator cannot inspect unavailable metadata')
@@ -239,7 +249,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (links is not None) or source_bound != (sources is not None):
             raise VerificationError('external evidence does not match the verdict profile')
         validate_verdict(verdict)
-        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources)
+        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'])
         if links is not None:
             verify_link_observation_statuses(links, policy, verdict, change)
         if verdict['validator']['version'] != host_options['engine_version']:

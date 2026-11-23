@@ -289,6 +289,49 @@ class PortableComparison(unittest.TestCase):
                         with self.assertRaises(VerificationError):
                             require_policy_coverage(policy, change, False, verdict)
 
+    def test_plain_text_without_paragraph_observations_cannot_claim_checks(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        for kind in ('paragraph_count', 'paragraph_length', 'paragraph_character_length',
+                     'repeated_paragraph_openings', 'repeated_sentence_openings',
+                     'sentence_opening_window', 'sentence_opening_terms', 'repeated_punctuation',
+                     'trailing_ing_clause', 'similar_sentence_lengths', 'sentence_length_variance',
+                     'inline_triple_candidates', 'duplicate_paragraphs'):
+            policy['gates'][0]['kind'] = kind
+            for status in ('passed', 'failed', 'not_checked'):
+                verdict['checks'][0]['status'] = status
+                with self.subTest(kind=kind, status=status):
+                    if status == 'not_checked':
+                        require_policy_coverage(policy, change, False, verdict)
+                    else:
+                        with self.assertRaises(VerificationError):
+                            require_policy_coverage(policy, change, False, verdict)
+
+    def test_paragraph_capability_respects_host_mode_and_sentence_scope(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'][0]['status'] = 'passed'
+        for kind in ('paragraph_count', 'sentence_length', 'sentence_character_length'):
+            policy['gates'][0]['kind'] = kind
+            for paragraphs_only in (False, True):
+                policy['gates'][0]['paragraphs_only'] = paragraphs_only
+                for media in ('text/plain', 'text/markdown', 'text/html'):
+                    change['entries'][0]['media_type'] = media
+                    for available in (False, True):
+                        should_pass = media != 'text/plain' or available or (
+                            kind != 'paragraph_count' and not paragraphs_only)
+                        with self.subTest(kind=kind, media=media, available=available,
+                                          paragraphs_only=paragraphs_only):
+                            if should_pass:
+                                require_policy_coverage(policy, change, False, verdict,
+                                                        plain_text_paragraphs=available)
+                            else:
+                                with self.assertRaises(VerificationError):
+                                    require_policy_coverage(policy, change, False, verdict,
+                                                            plain_text_paragraphs=available)
+
     def test_missing_metadata_cannot_be_reported_as_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])
