@@ -1480,9 +1480,9 @@ fn verify_candidate_plain_counts(
                         }
                         paragraphs = Some(count);
                     }
-                    paragraphs.expect("paragraph count initialized")
+                    paragraphs.ok_or_else(|| anyhow::anyhow!("paragraph count unavailable"))?
                 }
-                _ => unreachable!(),
+                _ => bail!("unsupported count gate"),
             };
             let failed =
                 min.is_some_and(|bound| count < bound) || max.is_some_and(|bound| count > bound);
@@ -3945,8 +3945,8 @@ mod tests {
         failed_advisory.verdict.summary.passed -= 1;
         failed_advisory.verdict.summary.failed += 1;
         assert!(
-            verify(&failed_advisory).is_ok(),
-            "advisory failures remain nonblocking"
+            verify(&failed_advisory).is_err(),
+            "a fabricated advisory failure must not match the source"
         );
         let mut changed_blocking = envelope.clone();
         changed_blocking
