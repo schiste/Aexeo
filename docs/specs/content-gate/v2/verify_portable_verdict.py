@@ -23,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 REQUIRED = {'change', 'resolved_policy', 'host_options', 'evaluator'}
 MAX_ENVELOPE_BYTES = 8 * 1024 * 1024
 MAX_U64 = (1 << 64) - 1
+_PUNCTUATION_MAX_WORK_BYTES = 64 * 1024 * 1024
 
 
 def validate_schema(value, path):
@@ -218,6 +219,53 @@ def verify_plain_paragraph_count_statuses(policy, verdict, after, counts):
     verify_plain_count_statuses(policy, verdict, after, counts, 'paragraph_count')
 
 
+def verify_plain_punctuation_statuses(policy, verdict, after, counts):
+    """Recompute checked paragraph punctuation on unchanged plain text only."""
+    checks = {check['id']: check for check in verdict['checks']}
+    for gate in policy['gates']:
+        if gate['kind'] != 'repeated_punctuation':
+            continue
+        for item in after:
+            if item['media_type'] != 'text/plain':
+                continue
+            entity = item['entity_id']
+            check = checks[f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}']
+            if check['status'] not in ('passed', 'failed'):
+                continue
+            key = (entity, gate['mark'])
+            if key not in counts:
+                source = item['source']
+                source_bytes = len(source.encode('utf-8'))
+                if source_bytes > 16 * 1024 * 1024:
+                    raise VerificationError('punctuation source exceeds conservative comparison limit')
+                counts['_work'] = counts.get('_work', 0) + source_bytes
+                if counts['_work'] > _PUNCTUATION_MAX_WORK_BYTES:
+                    raise VerificationError('punctuation comparison work limit exceeded')
+                highest = current = cursor = paragraphs = 0
+                in_paragraph = False
+                while cursor < len(source):
+                    end = source.find('\n', cursor)
+                    if end < 0:
+                        end = len(source)
+                    line = source[cursor:end].rstrip('\r')
+                    if _rust_blank(line):
+                        highest = max(highest, current)
+                        current = 0
+                        in_paragraph = False
+                    else:
+                        if not in_paragraph:
+                            paragraphs += 1
+                            if paragraphs > 100_000:
+                                raise VerificationError('punctuation paragraph limit exceeded')
+                            in_paragraph = True
+                        current += line.count(gate['mark'])
+                    cursor = end + 1
+                counts[key] = max(highest, current)
+            expected = 'failed' if counts[key] > gate['max_per_paragraph'] else 'passed'
+            if check['status'] != expected:
+                raise VerificationError('plain-text repeated punctuation status differs from source')
+
+
 def _calendar_day(value):
     """Ordinal for Rust's four-digit proleptic Gregorian dates, including year zero."""
     if not isinstance(value, str) or re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value) is None:
@@ -350,6 +398,16 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 or kind not in _ITEM_GATE_KINDS | {'unique_collection_metadata'}):
             raise VerificationError('unsupported resolved gate')
         validate_count_gate(gate)
+        if kind == 'repeated_punctuation':
+            if (set(gate) != {'kind', 'id', 'severity', 'blocking', 'mark', 'max_per_paragraph'}
+                    or gate['severity'] not in ('warning', 'error')
+                    or not isinstance(gate['mark'], str) or len(gate['mark']) != 1
+                    or 0xD800 <= ord(gate['mark']) <= 0xDFFF
+                    or gate['mark'].isalnum() or gate['mark'].isspace()
+                    or ord(gate['mark']) < 0x20 or 0x7F <= ord(gate['mark']) <= 0x9F
+                    or type(gate['max_per_paragraph']) is not int
+                    or not 0 <= gate['max_per_paragraph'] <= (1 << 64) - 1):
+                raise VerificationError('invalid resolved repeated punctuation gate')
         if kind == 'final_newline' and (set(gate) != {'kind', 'id', 'severity', 'blocking'}
                                         or gate['severity'] not in ('warning', 'error')):
             raise VerificationError('invalid resolved final newline gate')
@@ -495,6 +553,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     word_counts = {}
     character_counts = {}
     paragraph_counts = {}
+    punctuation_counts = {}
     for envelope in (previous, fresh):
         if not hmac.compare_digest(envelope['binding_sha256'], current_binding):
             raise VerificationError('candidate input binding differs')
@@ -511,6 +570,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         verify_plain_word_count_statuses(policy, verdict, after, word_counts)
         verify_plain_character_count_statuses(policy, verdict, after, character_counts)
         verify_plain_paragraph_count_statuses(policy, verdict, after, paragraph_counts)
+        verify_plain_punctuation_statuses(policy, verdict, after, punctuation_counts)
         verify_metadata_statuses(policy, verdict, change)
         verify_final_newline_statuses(policy, verdict, after)
         if links is not None:
@@ -529,7 +589,9 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     if not _typed_equal(*verdicts):
         raise VerificationError('verdicts differ')
     if telemetry_counts is not None:
-        telemetry_counts.update(policy_gate_count=coverage_counts[0], policy_check_count=coverage_counts[1])
+        telemetry_counts.update(policy_gate_count=coverage_counts[0], policy_check_count=coverage_counts[1],
+                                punctuation_source_mark_pairs_checked=len(punctuation_counts) - ('_work' in punctuation_counts),
+                                punctuation_bytes_checked=punctuation_counts.get('_work', 0))
     return {'input_binding': 'match', 'fresh_verdict_match': True,
             'required_check_count': len(required_checks), 'publication_authorized': False}
 

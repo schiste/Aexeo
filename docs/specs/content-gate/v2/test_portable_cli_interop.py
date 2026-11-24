@@ -243,6 +243,13 @@ class PortableCliInterop(unittest.TestCase):
             ('bare_cr', 'one\r', None, None, 'failed', False),
         ])
 
+    def test_real_repeated_punctuation_verdicts_match_python_comparator(self):
+        self._check_real_plain_count_verdicts('repeated_punctuation', [
+            ('separate', 'One — here.\n\nNext — here.', 1, None, 'passed', False),
+            ('same_paragraph', 'One — here.\r\nNext — here.', 1, None, 'failed', False),
+            ('unicode_blank', 'One — here.\r\n\u00a0\r\nNext — here.', 1, None, 'passed', False),
+        ])
+
     def test_real_metadata_age_verdicts_match_python_comparator(self):
         # Native parity requires an independently updated Aethyme runner.
         self._check_real_plain_count_verdicts('metadata_age', [
@@ -271,12 +278,13 @@ class PortableCliInterop(unittest.TestCase):
                     f"version=1\nname='test'\n[[gates]]\nid='count'\nkind='{kind}'\n"
                     + ("blocking=false\n" if kind == "final_newline" else
                        f"field='reviewed'\nas_of='2024-03-01'\nmax_days={minimum}\nblocking=false\n" if kind == 'metadata_age' else
+                       f"mark='—'\nmax_per_paragraph={minimum}\nblocking=false\n" if kind == 'repeated_punctuation' else
                        f"min={minimum}\nmax={maximum}\nblocking=false\n")
                     + (f"ignore_whitespace={str(ignore_whitespace).lower()}\n" if kind == 'character_count' else '')
                     + "[[gates]]\nid='always'\nkind='word_count'\nmin=1\n", encoding='utf-8')
                 common = executable + ['content-change', '--preset', 'test', '--preset-source',
                     'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build']
-                if kind == 'paragraph_count':
+                if kind in ('paragraph_count', 'repeated_punctuation'):
                     common.append('--plain-text-paragraphs')
                 env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
                 bundle_run = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
@@ -306,11 +314,18 @@ class PortableCliInterop(unittest.TestCase):
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
                 native_binary = os.environ.get('AETHYME_CLI_BIN')
-                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary and kind not in ('final_newline', 'metadata_age') else None
+                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary and kind not in ('final_newline', 'metadata_age', 'repeated_punctuation') else None
                 for command in filter(None, (verify, native)):
                     result = subprocess.run(command, env=native_env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+                if kind == 'repeated_punctuation':
+                    measured = subprocess.run(verify + ['--telemetry'], env=native_env, capture_output=True, text=True)
+                    self.assertEqual(measured.returncode, 0, measured.stdout + measured.stderr)
+                    event = json.loads(measured.stderr)
+                    self.assertEqual(event['punctuation_source_mark_pairs_checked'], 1)
+                    self.assertEqual(event['punctuation_bytes_checked'], len(source.encode('utf-8')))
+                    self.assertNotIn(source, measured.stderr)
                 if expected == 'failed':
                     check['status'] = 'passed'
                     check.pop('reason', None)
