@@ -80,6 +80,10 @@ fn incomplete_baseline_and_stale_proposal_fail_closed() {
     let results = lines(&output);
     assert_eq!(results[0]["result"]["status"], "evaluated");
     assert_eq!(results[1]["result"]["status"], "not_checked");
+    let mapped = run(&input, &["--source-locations"]);
+    let mapped_results = lines(&mapped);
+    assert_eq!(mapped_results[1]["source_mapping"]["status"], "unavailable");
+    assert_eq!(mapped_results[1]["source_mapping"]["items"], json!({}));
 }
 #[test]
 fn plain_final_newline_reports_blocking_findings() {
@@ -1585,4 +1589,71 @@ fn partial_results_preserve_independent_metadata_when_html_scope_is_unavailable(
     let unverifiable = run(&input, &[]);
     assert_eq!(unverifiable.status.code(), Some(2));
     assert_eq!(lines(&unverifiable)[0]["result"]["status"], "not_checked");
+}
+
+#[test]
+fn opt_in_source_locations_follow_candidate_and_reused_snapshots() {
+    for (mode, media, source, digest, line, column) in [
+        (
+            "plain",
+            "text/plain",
+            "xx\nabc",
+            "163aeeae5cdcd994a1b976eb2ea237a0a269b8c89388a5d70f3bbdc38b35c274",
+            2,
+            1,
+        ),
+        (
+            "adapted",
+            "text/markdown",
+            "# Title\n\n**abc**",
+            "e9282224a0cf188a264db3b85c832275126609be59cf9a36027dcd565d6c676f",
+            3,
+            3,
+        ),
+        (
+            "adapted",
+            "text/html",
+            "<p>abc</p>",
+            "25d0f020f6881a92742eadf0dda2a864025b35ec0008886497ed1d21efe99d20",
+            1,
+            4,
+        ),
+    ] {
+        let mut input = batch();
+        input["mode"] = json!(mode);
+        input["preset"] = json!("terms");
+        input["preset_sources"] = json!({"terms":"version=1\nname='terms'\n[[gates]]\nid='term'\nkind='forbidden_terms'\nterms=['abc']\nblocking=false\n"});
+        let update = |item: &mut Value| {
+            item["media_type"] = json!(media);
+            item["source"] = json!(source);
+            item["sha256"] = json!(digest);
+        };
+        update(&mut input["snapshot"]["items"][0]);
+        for proposal in input["proposals"].as_array_mut().unwrap() {
+            update(&mut proposal["after"][0]);
+            proposal["change"]["entries"][0]["media_type"] = json!(media);
+            proposal["change"]["entries"][0]["after"] = json!({"inline":source,"sha256":digest});
+        }
+        let output = run(&input, &["--source-locations", "--telemetry"]);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for row in lines(&output) {
+            for id in ["a", "b"] {
+                let mapping = &row["source_mapping"]["items"][id];
+                assert_eq!(mapping["status"], "available", "{media}: {mapping}");
+                assert_eq!(mapping["coverage"]["source_sha256"], digest);
+                assert_eq!(mapping["coverage"]["eligible"], 1);
+                assert_eq!(mapping["coverage"]["mapped"], 1);
+                assert_eq!(mapping["coverage"]["unmapped"], 0);
+                assert_eq!(mapping["coverage"]["locations"][0]["line"], line);
+                assert_eq!(mapping["coverage"]["locations"][0]["column"], column);
+            }
+        }
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(source));
+        assert!(lines(&run(&input, &[]))[0].get("source_mapping").is_none());
+    }
 }

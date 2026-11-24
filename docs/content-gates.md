@@ -2056,6 +2056,19 @@ cat crates/aexeo-cli/tests/fixtures/incremental-batch.json | aexeo-cli content-i
 Both file and stdin input use the same byte limit and strict duplicate-key
 validation. Results stream to stdout; telemetry, when enabled, goes to stderr.
 
+`--source-locations` optionally adds `source_mapping` to each proposal. For
+item reports, it supplies line and column positions for supported findings in
+plain text, Markdown and HTML, together with the SHA-256 of the exact candidate
+source and counts of eligible, mapped and unmapped findings. A mapping can be
+partial or unavailable; missing positions must not be interpreted as a clean
+result. Positions refer to the supplied snapshot, which the caller must compare
+with the current revision before navigating or editing. The digest does not
+establish provenance or freshness. Collection-only checks have no item source
+mapping. Existing findings and verdicts are unchanged. This optional operation
+reprojects candidate content and costs additional time and memory. With
+`--telemetry`, aggregate mapping coverage and elapsed time are emitted to stderr
+without source text or paths.
+
 For referenced file states, explicitly authorize an absolute `--content-root`;
 its value must match the change's `content_root`. For URI states, also supply
 `--host-content-map INDEX=PATH` for the zero-based proposal index. Each map is a

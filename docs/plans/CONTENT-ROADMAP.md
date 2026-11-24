@@ -1123,3 +1123,11 @@ missing fields retain observed prose but make body capabilities unavailable.
   publication authorization. Native Portable Text paths are host-supplied
   observations; absent paths stay unmapped. The host must bind and verify their
   correspondence to the exact revision.
+
+
+### Incremental report source locations
+
+The experimental incremental CLI offers opt-in source locations for supported
+item findings, with snapshot digests, explicit mapping coverage and aggregate
+telemetry. The host remains responsible for checking revision freshness. This
+does not supply native CMS block locations or authenticate the snapshot.
