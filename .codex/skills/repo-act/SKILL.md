@@ -27,6 +27,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   commands run by the broker and may be unset in the interactive shell. Check that
   a variable is nonempty before using it as an output directory, and quote paths
   with spaces.
+- After `broker finish`, verify the exact session scratch path is gone even
+  when the broker reports cleanup completed. If it remains, inspect it and
+  remove only that session's disposable artifacts when retention permits;
+  preserve required review evidence and other sessions' files.
 - For the content-gate v2 Python tests, create a virtual environment in the
   session scratch directory and install the pinned
   `docs/specs/content-gate/v2/requirements-test.txt` before running the suite.
