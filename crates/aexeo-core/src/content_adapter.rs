@@ -1,5 +1,5 @@
 //! Bounded, host-supplied content observations for non-native adapters.
-use aexeo_core::{
+use crate::{
     content_gate::{ContentContext, ContentInput, ContentParagraph},
     markdown_adapter::StructuredList,
     text_index::LineIndex,
@@ -7,6 +7,9 @@ use aexeo_core::{
 use anyhow::{Result, ensure};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Explicit media type for a host observation snapshot (not arbitrary JSON).
+pub const MEDIA_TYPE: &str = "application/vnd.aexeo.content-adapter+json";
 
 const MAX_OBSERVATIONS: usize = 100_000;
 
@@ -59,7 +62,7 @@ struct List {
 /// correspondence to native content remain the host's responsibility.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct NativeSourceMap {
+pub struct NativeSourceMap {
     spans: Vec<NativeSourceSpan>,
     #[serde(default)]
     heading_paths: Option<Vec<Option<Vec<serde_json::Value>>>>,
@@ -69,11 +72,11 @@ pub(super) struct NativeSourceMap {
     list_paths: Option<Vec<Option<Vec<serde_json::Value>>>>,
 }
 
-pub(super) struct NativeStructureObservations<'a> {
+pub struct NativeStructureObservations<'a> {
     pub headings: Option<&'a [String]>,
     pub levels: Option<&'a [u8]>,
     pub destinations: Option<&'a [String]>,
-    pub links: Option<&'a [aexeo_core::content_gate::LinkReachabilityObservation]>,
+    pub links: Option<&'a [crate::content_gate::LinkReachabilityObservation]>,
     pub lists: Option<&'a [StructuredList]>,
 }
 
@@ -139,9 +142,9 @@ impl NativeSourceMap {
                     .ok_or_else(|| anyhow::anyhow!("native UTF-16 offset overflow"))?;
             }
             ensure!(
-                span.utf16_start
-                    .checked_add(units)
-                    .is_some_and(|end| end <= 9_007_199_254_740_991),
+                span.utf16_start.checked_add(units).is_some_and(
+                    |end| u64::try_from(end).is_ok_and(|end| end <= 9_007_199_254_740_991)
+                ),
                 "native UTF-16 offset exceeds interoperable integer range"
             );
             previous_end = span.end;
@@ -149,7 +152,7 @@ impl NativeSourceMap {
         Ok(())
     }
 
-    pub(super) fn position<'a>(
+    pub fn position<'a>(
         &'a self,
         projected: &str,
         offset: usize,
@@ -177,13 +180,13 @@ impl NativeSourceMap {
         ))
     }
 
-    pub(super) fn structure_positions<'a>(
+    pub fn structure_positions<'a>(
         &'a self,
-        gate: &aexeo_core::content_gate::ContentGate,
-        result: &aexeo_core::content_gate::ContentGateResult,
+        gate: &crate::content_gate::ContentGate,
+        result: &crate::content_gate::ContentGateResult,
         observed: &NativeStructureObservations<'_>,
     ) -> Option<Vec<Option<&'a [serde_json::Value]>>> {
-        use aexeo_core::content_gate::{
+        use crate::content_gate::{
             ContentGate, heading_finding_indices, heading_hierarchy_indices,
         };
         if result.findings.is_empty() {
@@ -207,7 +210,7 @@ impl NativeSourceMap {
                 }
                 (
                     self.link_paths.as_ref()?,
-                    aexeo_core::source_mapping::link_finding_indices(
+                    crate::source_mapping::link_finding_indices(
                         gate,
                         observed.destinations,
                         observed.links,
@@ -216,7 +219,7 @@ impl NativeSourceMap {
             }
             ContentGate::ListItemCount { .. } => (
                 self.list_paths.as_ref()?,
-                aexeo_core::markdown_adapter::list_finding_indices(observed.lists?, gate, result)?,
+                crate::markdown_adapter::list_finding_indices(observed.lists?, gate, result)?,
             ),
             _ => return None,
         };
@@ -232,11 +235,11 @@ impl NativeSourceMap {
         )
     }
 
-    pub(super) fn span_count(&self) -> usize {
+    pub fn span_count(&self) -> usize {
         self.spans.len()
     }
 
-    pub(super) fn structure_path_counts(&self) -> [Option<usize>; 3] {
+    pub fn structure_path_counts(&self) -> [Option<usize>; 3] {
         [&self.heading_paths, &self.link_paths, &self.list_paths]
             .map(|paths| paths.as_ref().map(|paths| paths.iter().flatten().count()))
     }
@@ -258,7 +261,7 @@ fn valid_native_path(path: &[serde_json::Value]) -> bool {
 /// Their correspondence to the actual host content remains the host's responsibility.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct HostSourceMap {
+pub struct HostSourceMap {
     source_text: String,
     spans: Vec<HostSourceSpan>,
     #[serde(default)]
@@ -389,12 +392,12 @@ impl HostSourceMap {
         Ok(())
     }
 
-    pub(super) fn list_positions(
+    pub fn list_positions(
         &self,
         source_index: &LineIndex,
         lists: Option<&[StructuredList]>,
-        gate: &aexeo_core::content_gate::ContentGate,
-        result: &aexeo_core::content_gate::ContentGateResult,
+        gate: &crate::content_gate::ContentGate,
+        result: &crate::content_gate::ContentGateResult,
     ) -> Option<Vec<Option<(usize, usize)>>> {
         if result.findings.is_empty() {
             return None;
@@ -404,7 +407,7 @@ impl HostSourceMap {
         if anchors.len() != lists.len() {
             return None;
         }
-        let indices = aexeo_core::markdown_adapter::list_finding_indices(lists, gate, result)?;
+        let indices = crate::markdown_adapter::list_finding_indices(lists, gate, result)?;
         Some(
             indices
                 .into_iter()
@@ -419,22 +422,22 @@ impl HostSourceMap {
         )
     }
 
-    pub(super) fn has_list_anchors(&self) -> bool {
+    pub fn has_list_anchors(&self) -> bool {
         self.list_anchors.is_some()
     }
-    pub(super) fn list_anchor_count(&self) -> usize {
+    pub fn list_anchor_count(&self) -> usize {
         self.list_anchors
             .as_ref()
             .map_or(0, |anchors| anchors.iter().flatten().count())
     }
 
-    pub(super) fn link_positions(
+    pub fn link_positions(
         &self,
         source_index: &LineIndex,
         destinations: Option<&[String]>,
-        observations: Option<&[aexeo_core::content_gate::LinkReachabilityObservation]>,
-        gate: &aexeo_core::content_gate::ContentGate,
-        result: &aexeo_core::content_gate::ContentGateResult,
+        observations: Option<&[crate::content_gate::LinkReachabilityObservation]>,
+        gate: &crate::content_gate::ContentGate,
+        result: &crate::content_gate::ContentGateResult,
     ) -> Option<Vec<Option<(usize, usize)>>> {
         if result.findings.is_empty() {
             return None;
@@ -446,11 +449,8 @@ impl HostSourceMap {
         {
             return None;
         }
-        let indices = aexeo_core::source_mapping::link_finding_indices(
-            gate,
-            Some(destinations),
-            observations,
-        )?;
+        let indices =
+            crate::source_mapping::link_finding_indices(gate, Some(destinations), observations)?;
         if indices.len() != result.total_findings() {
             return None;
         }
@@ -465,24 +465,24 @@ impl HostSourceMap {
         )
     }
 
-    pub(super) fn has_link_offsets(&self) -> bool {
+    pub fn has_link_offsets(&self) -> bool {
         self.link_offsets.is_some()
     }
-    pub(super) fn link_offset_count(&self) -> usize {
+    pub fn link_offset_count(&self) -> usize {
         self.link_offsets.as_ref().map_or(0, |offsets| {
             offsets.iter().filter(|offset| offset.is_some()).count()
         })
     }
 
-    pub(super) fn heading_positions(
+    pub fn heading_positions(
         &self,
         source_index: &LineIndex,
         headings: Option<&[String]>,
         levels: Option<&[u8]>,
-        gate: &aexeo_core::content_gate::ContentGate,
-        result: &aexeo_core::content_gate::ContentGateResult,
+        gate: &crate::content_gate::ContentGate,
+        result: &crate::content_gate::ContentGateResult,
     ) -> Option<Vec<Option<(usize, usize)>>> {
-        use aexeo_core::content_gate::{
+        use crate::content_gate::{
             ContentGate, heading_finding_indices, heading_hierarchy_indices,
         };
         if result.findings.is_empty() {
@@ -510,25 +510,25 @@ impl HostSourceMap {
         )
     }
 
-    pub(super) fn has_heading_offsets(&self) -> bool {
+    pub fn has_heading_offsets(&self) -> bool {
         self.heading_offsets.is_some()
     }
 
-    pub(super) fn heading_offset_count(&self) -> usize {
+    pub fn heading_offset_count(&self) -> usize {
         self.heading_offsets.as_ref().map_or(0, |offsets| {
             offsets.iter().filter(|offset| offset.is_some()).count()
         })
     }
 
-    pub(super) fn gate_positions(
+    pub fn gate_positions(
         &self,
         projected: &str,
         projected_index: &LineIndex,
         source_index: &LineIndex,
-        gate: &aexeo_core::content_gate::ContentGate,
-        result: &aexeo_core::content_gate::ContentGateResult,
+        gate: &crate::content_gate::ContentGate,
+        result: &crate::content_gate::ContentGateResult,
     ) -> Option<Vec<Option<(usize, usize)>>> {
-        if !aexeo_core::source_mapping::prose_gate_has_positions(gate) {
+        if !crate::source_mapping::prose_gate_has_positions(gate) {
             return None;
         }
         Some(
@@ -554,15 +554,15 @@ impl HostSourceMap {
         )
     }
 
-    pub(super) fn source_index(&self) -> LineIndex {
+    pub fn source_index(&self) -> LineIndex {
         LineIndex::new(&self.source_text)
     }
-    pub(super) fn span_count(&self) -> usize {
+    pub fn span_count(&self) -> usize {
         self.spans.len()
     }
 }
 
-pub(super) struct AdapterProjection {
+pub struct AdapterProjection {
     pub input: ContentInput,
     pub literal_text: Option<String>,
     pub context: ContentContext,
@@ -574,7 +574,7 @@ pub(super) struct AdapterProjection {
     pub native_source_map: Option<NativeSourceMap>,
 }
 
-pub(super) fn parse(id: String, data: &str) -> Result<AdapterProjection> {
+pub fn parse(id: String, data: &str) -> Result<AdapterProjection> {
     let value =
         aexeo_contracts::content_gate_change_validation::parse_unique_json_value(data.as_bytes())?;
     let projection: AdapterInput = serde_json::from_value(value)?;

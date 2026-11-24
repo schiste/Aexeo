@@ -100,7 +100,8 @@ impl ProjectionMode {
     fn supports(self, media_type: &str) -> bool {
         media_type == "text/plain"
             || (matches!(self, Self::Adapted(_))
-                && matches!(media_type, "text/markdown" | "text/html"))
+                && (matches!(media_type, "text/markdown" | "text/html")
+                    || media_type == crate::content_adapter::MEDIA_TYPE))
     }
 }
 
@@ -276,6 +277,22 @@ fn evaluate_item(
         .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }));
     let mut structured_lists = None;
     let (mut input, context, link_count) = match (mode, item.media_type.as_str()) {
+        (ProjectionMode::Adapted(_), crate::content_adapter::MEDIA_TYPE) => {
+            let adapted = crate::content_adapter::parse(item.entity_id.clone(), &item.source)
+                .map_err(|_| unavailable("host adapter projection is invalid"))?;
+            if adapted.input.metadata.is_some() && preset.gates.iter().any(is_item_metadata_gate) {
+                return Err(unavailable(
+                    "embedded host metadata is not supported for incremental metadata gates",
+                ));
+            }
+            literal_projection = adapted.literal_text;
+            structured_lists = adapted.lists;
+            heading_levels = adapted.headings;
+            paragraph_list_items = adapted.paragraph_list_items;
+            let count = adapted.destinations.as_ref().map(Vec::len);
+            destinations = adapted.destinations;
+            (adapted.input, Some(adapted.context), count)
+        }
         (ProjectionMode::Adapted(_), "text/markdown") => {
             let adapted = crate::markdown_adapter::markdown_project(
                 &item.entity_id,
@@ -2840,6 +2857,133 @@ mod tests {
             result.items,
             IncrementalEvaluation::NotChecked { .. }
         ));
+    }
+
+    #[test]
+    fn incremental_host_projection_checks_bound_content_and_unknowns() {
+        let (mut snapshot, _, mut change) = fixture();
+        snapshot.items.truncate(1);
+        let make = |text: Option<&str>| {
+            let source = serde_json::json!({
+                "schema":"aexeo.content-adapter/v1",
+                "text":text,
+                "headings":["Heading"],
+                "heading_levels":[2],
+                "link_destinations":[]
+            })
+            .to_string();
+            let mut result = item("a", &source, None);
+            result.media_type = crate::content_adapter::MEDIA_TYPE.into();
+            result
+        };
+        snapshot.items[0] = make(Some("one two"));
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='words'\n[[gates]]\nid='words'\nkind='word_count'\nmin=2\n",
+        )
+        .unwrap();
+        let baseline = IncrementalBaseline::prepare_adapted(snapshot.clone(), preset).unwrap();
+        let next = make(Some("one"));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        );
+        update.media_type = crate::content_adapter::MEDIA_TYPE.into();
+        change.entries = vec![update];
+        let IncrementalEvaluation::Evaluated {
+            reports, evaluated, ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("host snapshot should be evaluated");
+        };
+        assert_eq!(evaluated, 1);
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Failed);
+        let missing = make(None);
+        change.entries[0].after = Some(state(&missing));
+        assert!(matches!(
+            baseline.evaluate(&change, &[missing]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        change.entries[0].after = Some(state(&next));
+        let mut tampered = next.clone();
+        tampered.source.push(' ');
+        assert!(matches!(
+            baseline.evaluate(&change, &[tampered]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        let mut invalid = item(
+            "a",
+            "{\"schema\":\"aexeo.content-adapter/v1\",\"text\":\"x\",\"text\":\"y\"}",
+            None,
+        );
+        invalid.media_type = crate::content_adapter::MEDIA_TYPE.into();
+        change.entries[0].after = Some(state(&invalid));
+        assert!(matches!(
+            baseline.evaluate(&change, &[invalid]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
+
+    #[test]
+    fn incremental_host_structures_are_independent_of_text_and_preserve_unknowns() {
+        let preset = ContentPreset::from_toml("version=1\nname='structure'\n[[gates]]\nid='heads'\nkind='heading_hierarchy'\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n").unwrap();
+        let check = |source: serde_json::Value| {
+            let mut candidate = item("a", &source.to_string(), None);
+            candidate.media_type = crate::content_adapter::MEDIA_TYPE.into();
+            evaluate_item(
+                &preset,
+                &candidate,
+                ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+                None,
+                None,
+                None,
+                true,
+            )
+            .unwrap()
+        };
+        let report = check(serde_json::json!({
+            "schema":"aexeo.content-adapter/v1", "text":null,
+            "headings":["First", "Skipped"], "heading_levels":[1,3],
+            "lists":[{"item_count":3,"depth":1}], "link_destinations":[]
+        }));
+        assert!(
+            report
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::Failed)
+        );
+        let missing = check(serde_json::json!({"schema":"aexeo.content-adapter/v1", "text":null}));
+        assert!(
+            missing
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+    }
+
+    #[test]
+    fn host_projection_cannot_override_unavailable_external_metadata() {
+        let preset = ContentPreset::from_toml("version=1\nname='metadata'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n").unwrap();
+        let source = serde_json::json!({
+            "schema":"aexeo.content-adapter/v1",
+            "text":"body",
+            "metadata":{"description":"embedded"},
+            "observed_metadata_fields":["description"]
+        })
+        .to_string();
+        let mut candidate = item("a", &source, None);
+        candidate.media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let result = evaluate_item(
+            &preset,
+            &candidate,
+            ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

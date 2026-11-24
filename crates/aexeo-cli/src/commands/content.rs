@@ -426,7 +426,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             }
         }
         (Some("adapter-json"), Some(data)) => {
-            let adapted = super::content_adapter::parse(id, &data)
+            let adapted = aexeo_core::content_adapter::parse(id, &data)
                 .user_context("invalid adapter JSON projection")?;
             host_projection = Some(serde_json::json!({
                 "paragraphs": adapted.context.paragraphs.as_ref().map(Vec::len),
@@ -766,7 +766,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             map.structure_positions(
                 gate,
                 result,
-                &super::content_adapter::NativeStructureObservations {
+                &aexeo_core::content_adapter::NativeStructureObservations {
                     headings: input.headings.as_deref(),
                     levels: heading_levels.as_deref(),
                     destinations: destinations.as_deref(),

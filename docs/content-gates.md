@@ -2033,6 +2033,16 @@ therefore reflect an incomplete audit. The host must establish these facts
 independently before using any comparison in a publication decision. In
 particular, these manifests do not attest freshness or ownership of an identity.
 
+The in-process `IncrementalBaseline::prepare_adapted` API also accepts host
+observation snapshots with media type `application/vnd.aexeo.content-adapter+json`
+and schema `aexeo.content-adapter/v1`. The snapshot digest binds the complete
+JSON bytes, including its observations. Missing capabilities and invalid snapshots
+fail closed; host observation completeness and truth remain host responsibilities.
+For incremental metadata gates, provide the separate revision-bound metadata
+inventory; embedded host metadata is rejected when these gates are selected.
+This support does not by itself extend `content-change`, establish source
+freshness or authorize publication.
+
 ### Experimental incremental batches
 
 `aexeo-cli content-incremental --input batch.json` (or `--input -` for a
