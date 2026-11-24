@@ -329,6 +329,16 @@ it does not establish deployment or completeness. Real pages use elements
 including SVG and interactive components outside the mapper's supported subset;
 broader safe mapping and real-site validation remain open.
 
+A follow-up prototype using an error-free HTML5 tokenizer and unique token and
+graph destinations located 30,578 of the same 128,223 links, spanning all 1,501
+pages. An independent local scan checked each mapped coordinate against its
+opening anchor and decoded destination and found no mismatches. The complete
+report matched the report without locations after removing only link coordinates.
+One optimized local run measured 20.179 seconds of graph analysis and 21.527
+seconds wall time. These single-run observations are not a performance guarantee;
+the remaining links have no established position and mapping a snapshot does
+not establish deployment or CMS provenance. Further coverage remains open.
+
 
 Text and Markdown graph summaries count inbound findings present in the rendered
 audit, including findings absent from the graph as not verifiable. The number
