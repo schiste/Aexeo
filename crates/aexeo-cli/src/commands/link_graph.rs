@@ -154,10 +154,13 @@ fn write_graph_json<W: Write, T: serde::Serialize>(
 }
 
 /// Stream the complete report without allocating a second report-sized buffer.
-/// A failed write can leave a partial destination; caller path checks are unchanged.
+/// Write through a sibling temporary file; caller path checks are unchanged.
 pub(super) fn write_link_graph_file(path: &str, report: &LinkReport, compact: bool) -> Result<()> {
-    let file = fs::File::create(path)?;
-    write_graph_json(io::BufWriter::new(file), report, compact, false)
+    super::atomic_output::write_atomic(
+        std::path::Path::new(path),
+        super::atomic_output::OutputMode::Preserve,
+        |file| write_graph_json(io::BufWriter::new(file), report, compact, false),
+    )
 }
 
 /// Read an audit link context file, for `link-graph --audit --context` and

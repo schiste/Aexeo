@@ -27,15 +27,13 @@ use anyhow::Result;
 use clap::ArgMatches;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 const MAX_CHANGE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_CONTENT_BYTES: usize = 64 * 1024 * 1024;
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1537,38 +1535,12 @@ fn export_link_observations(
 }
 
 fn write_atomic(destination: &Path, contents: &[u8]) -> io::Result<()> {
-    let parent = destination
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    for _ in 0..32 {
-        let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let path: PathBuf = parent.join(format!(".aexeo-verdict-{}-{id}.tmp", std::process::id()));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = match options.open(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        };
-        let result = (|| {
+    super::atomic_output::write_atomic(
+        destination,
+        super::atomic_output::OutputMode::Private,
+        |file| {
             file.write_all(contents)?;
-            file.write_all(b"\n")?;
-            drop(file);
-            fs::rename(&path, destination)
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&path);
-        }
-        return result;
-    }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "could not allocate verdict temporary file",
-    ))
+            file.write_all(b"\n")
+        },
+    )
 }

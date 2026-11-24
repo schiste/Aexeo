@@ -1,3 +1,4 @@
+mod atomic_output;
 pub mod common;
 pub mod composition;
 pub mod config;
