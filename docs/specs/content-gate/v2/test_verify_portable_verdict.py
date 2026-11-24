@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -126,6 +126,56 @@ class PortableComparison(unittest.TestCase):
             with self.subTest(maximum=invalid), self.assertRaises(VerificationError):
                 require_policy_coverage(policy, change, False, verdict)
 
+    def test_host_paragraph_lengths_are_recomputed(self):
+        policy = {'gates': [{'kind': 'paragraph_length', 'id': 'words', 'max_words': 2},
+                            {'kind': 'paragraph_character_length', 'id': 'chars', 'max_chars': 3}]}
+        verdict = {'checks': [{'id': 'gate:1:a:words', 'status': 'passed'},
+                              {'id': 'gate:1:a:chars', 'status': 'passed'}], 'findings': []}
+        projection = {'schema': 'aexeo.content-adapter/v1', 'text': 'é x',
+                      'paragraphs': [{'start': 0, 'end': 4}]}
+        item = {'entity_id': 'a', 'media_type': 'application/vnd.aexeo.content-adapter+json',
+                'source': json.dumps(projection)}
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [item]))
+        for index, field in ((0, 'max_words'), (1, 'max_chars')):
+            bad = copy.deepcopy(policy)
+            bad['gates'][index][field] -= 1
+            with self.assertRaises(VerificationError):
+                verify_host_candidate_projection(bad, verdict, [item])
+            matching = copy.deepcopy(verdict)
+            matching['checks'][index]['status'] = 'failed'
+            self.assertTrue(verify_host_candidate_projection(bad, matching, [item]))
+        missing = dict(item, source=json.dumps({'schema': projection['schema'], 'text': projection['text']}))
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_projection(policy, verdict, [missing])
+        for check in verdict['checks']:
+            check['status'] = 'not_checked'
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [missing]))
+
+    def test_paragraph_length_policy_validation(self):
+        for kind, field in (('paragraph_length', 'max_words'), ('paragraph_character_length', 'max_chars')):
+            gate = {'kind': kind, 'id': 'x', 'severity': 'warning', 'blocking': False, field: 1}
+            validate_paragraph_length_gate(gate)
+            for value in (0, -1, True, None, '1', 1 << 64):
+                bad = dict(gate, **{field: value})
+                with self.subTest(kind=kind, value=value), self.assertRaises(VerificationError):
+                    validate_paragraph_length_gate(bad)
+            for change in ({'extra': 1}, {'severity': 'invalid'}):
+                with self.assertRaises(VerificationError):
+                    validate_paragraph_length_gate(dict(gate, **change))
+
+    def test_unchecked_paragraph_length_still_validates_policy(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'][0]['status'] = 'not_checked'
+        for kind, field in (('paragraph_length', 'max_words'), ('paragraph_character_length', 'max_chars')):
+            policy['gates'][0] = {'kind': kind, 'id': 'words', 'severity': 'warning',
+                                  'blocking': True, field: 1}
+            require_policy_coverage(policy, change, False, verdict)
+            policy['gates'][0][field] = 0
+            with self.assertRaises(VerificationError):
+                require_policy_coverage(policy, change, False, verdict)
+
     def test_host_paragraph_counts_and_ranges_are_recomputed(self):
         policy = {'gates': [{'kind': 'paragraph_count', 'id': 'count', 'min': 2, 'max': 2}]}
         verdict = {'checks': [{'id': 'gate:1:a:count', 'status': 'passed'}], 'findings': []}
@@ -196,9 +246,11 @@ class PortableComparison(unittest.TestCase):
             {'kind': 'heading_length', 'id': 'length', 'severity': 'warning', 'blocking': True, 'max_chars': 5},
             {'kind': 'heading_hierarchy', 'id': 'hierarchy', 'severity': 'warning', 'blocking': True, 'initial_level': 1},
             {'kind': 'paragraph_count', 'id': 'paragraphs', 'severity': 'warning', 'blocking': True, 'min': 1, 'max': 1},
+            {'kind': 'paragraph_length', 'id': 'pwords', 'severity': 'warning', 'blocking': True, 'max_words': 1},
+            {'kind': 'paragraph_character_length', 'id': 'pchars', 'severity': 'warning', 'blocking': True, 'max_chars': 3},
         ])
         self.artifacts['resolved_policy'] = self.encoded(policy)
-        new_checks = ['gate:7:article:head', 'gate:7:article:length', 'gate:7:article:hierarchy', 'gate:7:article:paragraphs']
+        new_checks = ['gate:7:article:head', 'gate:7:article:length', 'gate:7:article:hierarchy', 'gate:7:article:paragraphs', 'gate:7:article:pwords', 'gate:7:article:pchars']
         self.required.extend(new_checks)
         for envelope in (self.previous, self.fresh):
             envelope['verdict']['checks'].extend(
@@ -935,6 +987,10 @@ class PortableComparison(unittest.TestCase):
             policy['gates'][0] = dict(kind=kind, id='words', severity='warning', blocking=True)
             if kind == 'paragraph_count':
                 policy['gates'][0].update(min=1, max=None)
+            elif kind == 'paragraph_length':
+                policy['gates'][0].update(max_words=10)
+            elif kind == 'paragraph_character_length':
+                policy['gates'][0].update(max_chars=10)
             elif kind == 'repeated_punctuation':
                 policy['gates'][0].update(mark='—', max_per_paragraph=1)
             for status in ('passed', 'failed', 'not_checked'):

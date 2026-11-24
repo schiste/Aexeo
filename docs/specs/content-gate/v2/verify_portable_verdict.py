@@ -159,6 +159,21 @@ def validate_heading_gate(gate):
             raise VerificationError('invalid initial heading level')
 
 
+def validate_paragraph_length_gate(gate):
+    """Validate exact resolved fields and producer bounds before checking outcomes."""
+    kind = gate.get('kind')
+    fields = {'paragraph_length': 'max_words', 'paragraph_character_length': 'max_chars'}
+    if not isinstance(kind, str) or kind not in fields:
+        return
+    field = fields[kind]
+    if (set(gate) != {'kind', 'id', 'severity', 'blocking', field}
+            or gate['severity'] not in ('warning', 'error')):
+        raise VerificationError('invalid resolved paragraph length gate shape')
+    limit = gate[field]
+    if type(limit) is not int or not 1 <= limit <= (1 << 64) - 1:
+        raise VerificationError('invalid paragraph length limit')
+
+
 # Bounds mirror the currently supported Aexeo collection evaluator; the
 # independent comparator also caps aggregate work across distinct gates.
 _COLLECTION_MAX_KEYS = 10_000
@@ -410,13 +425,15 @@ def verify_host_candidate_projection(policy, verdict, after):
     if not host:
         return False
     if (not isinstance(policy, dict) or not isinstance(policy.get('gates'), list)
-            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'paragraph_count', 'required_headings', 'heading_length', 'heading_hierarchy'}
+            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'paragraph_count', 'paragraph_length', 'paragraph_character_length', 'required_headings', 'heading_length', 'heading_hierarchy'}
                    for gate in policy['gates'])):
         raise VerificationError('host adapter portable verification does not support this gate')
     checks = {check['id']: check for check in verdict['checks']}
     plain = []
     word_counts = {}
     paragraph_counts = {}
+    needs_paragraph_words = any(gate['kind'] == 'paragraph_length' for gate in policy['gates'])
+    needs_paragraph_chars = any(gate['kind'] == 'paragraph_character_length' for gate in policy['gates'])
     for item in host:
         projection = parse(item['source'].encode('utf-8'))
         if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings', 'heading_levels', 'paragraphs'}
@@ -425,6 +442,7 @@ def verify_host_candidate_projection(policy, verdict, after):
             raise VerificationError('unsupported portable host projection')
         text(projection['text'])
         paragraphs = projection.get('paragraphs')
+        longest_words = longest_chars = 0
         if 'paragraphs' in projection:
             if not isinstance(paragraphs, list) or len(paragraphs) > 100_000:
                 raise VerificationError('invalid host paragraphs')
@@ -441,16 +459,33 @@ def verify_host_candidate_projection(policy, verdict, after):
                     raise VerificationError('invalid host paragraph range')
                 try:
                     source_bytes[previous_end:paragraph['start']].decode('utf-8')
-                    source_bytes[paragraph['start']:paragraph['end']].decode('utf-8')
+                    value = source_bytes[paragraph['start']:paragraph['end']].decode('utf-8')
                 except UnicodeDecodeError as exc:
                     raise VerificationError('invalid host paragraph range') from exc
+                if needs_paragraph_words:
+                    longest_words = max(longest_words, plain_text_word_count(value))
+                if needs_paragraph_chars:
+                    longest_chars = max(longest_chars, len(value))
                 previous_end = paragraph['end']
             paragraph_counts[(item['entity_id'], False)] = len(paragraphs)
         for gate in policy['gates']:
-            if gate['kind'] == 'paragraph_count' and paragraphs is None:
-                check_id = f'gate:{len(item["entity_id"].encode("utf-8"))}:{item["entity_id"]}:{gate["id"]}'
-                if checks.get(check_id, {}).get('status') != 'not_checked':
-                    raise VerificationError('host paragraphs unavailable')
+            kind = gate['kind']
+            if kind not in {'paragraph_count', 'paragraph_length', 'paragraph_character_length'}:
+                continue
+            check_id = f'gate:{len(item["entity_id"].encode("utf-8"))}:{item["entity_id"]}:{gate["id"]}'
+            check = checks.get(check_id)
+            if check is None:
+                raise VerificationError('resolved policy check is missing')
+            if check['status'] == 'not_checked':
+                continue
+            if paragraphs is None:
+                raise VerificationError('host paragraphs unavailable')
+            if kind == 'paragraph_count':
+                continue
+            value, limit = ((longest_words, gate['max_words']) if kind == 'paragraph_length'
+                            else (longest_chars, gate['max_chars']))
+            if check['status'] != ('failed' if value > limit else 'passed'):
+                raise VerificationError('host paragraph length status differs from observations')
         headings = projection.get('headings')
         if 'headings' in projection:
             if (not isinstance(headings, list) or len(headings) > 100_000
@@ -564,6 +599,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
             raise VerificationError('unsupported resolved gate')
         validate_count_gate(gate)
         validate_heading_gate(gate)
+        validate_paragraph_length_gate(gate)
         if kind == 'unique_collection_metadata':
             required = {'kind', 'id', 'severity', 'blocking', 'field'}
             if (not required <= set(gate) or set(gate) - required - {'group_by'}
@@ -684,6 +720,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
             if not isinstance(gate, dict) or not isinstance(gate.get('kind'), str):
                 raise VerificationError('invalid resolved gate')
             validate_heading_gate(gate)
+            validate_paragraph_length_gate(gate)
     if not isinstance(policy, dict) or 'name' not in policy:
         raise VerificationError('resolved policy name is unavailable')
     text(policy['name'], empty=False)
