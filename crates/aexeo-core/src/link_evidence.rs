@@ -1,4 +1,6 @@
 //! Extract attributable links from rendered HTML without guessing unknown contexts.
+#[path = "link_evidence_positions.rs"]
+mod positions;
 use crate::site::markup::tag_breaks_text;
 use html5ever::{
     ParseOpts, ns, parse_document, tendril::TendrilSink, tree_builder::TreeBuilderOpts,
@@ -262,6 +264,27 @@ pub fn extract_document_with_source_locations(
         for (index, (line, column)) in matches {
             links[index].line = Some(line);
             links[index].column = Some(column);
+        }
+    }
+    let mut counts = std::collections::HashMap::new();
+    for link in &links {
+        *counts.entry(link.href.clone()).or_insert(0usize) += 1;
+    }
+    if links
+        .iter()
+        .any(|link| link.line.is_none() && counts.get(&link.href) == Some(&1))
+        && let Some(offsets) = positions::unique_anchor_offsets(html)
+    {
+        let index = crate::text_index::LineIndex::new(html);
+        for link in &mut links {
+            if link.line.is_none()
+                && counts.get(&link.href) == Some(&1)
+                && let Some(Some(offset)) = offsets.get(&link.href)
+                && let Some((line, column)) = index.position(html, *offset)
+            {
+                link.line = Some(line);
+                link.column = Some(column);
+            }
         }
     }
     (links, metadata)
@@ -645,9 +668,44 @@ mod tests {
         assert!(
             links
                 .iter()
-                .filter(|link| link.href != "/unique")
-                .all(|link| link.line.is_none() && link.column.is_none())
+                .filter(|link| link.href == "/shared")
+                .all(|link| link.line.is_none())
         );
+        let footer = links.iter().find(|link| link.href == "/footer").unwrap();
+        let expected = crate::site::markup::LineIndex::new(source)
+            .line_column(source.find("<a href='/footer'>").unwrap());
+        assert_eq!(
+            (footer.line, footer.column),
+            (Some(expected.0), Some(expected.1))
+        );
+    }
+
+    #[test]
+    fn html5_token_fallback_locates_unique_realistic_links_and_retains_ambiguity() {
+        let source = "<!doctype html><html><head><title>x</title><script>const a = '<a href=\"/fake\">';</script></head><body><main><svg><path d='M0 0'></path></svg><p>é <a href='/unique?x=1&amp;y=2'>one</a><a href='/same'>two</a><a href='/same'>three</a></p></main></body></html>";
+        let (links, _) = extract_document_with_source_locations(
+            source,
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        let unique = links
+            .iter()
+            .find(|link| link.href == "/unique?x=1&y=2")
+            .unwrap();
+        let expected = crate::site::markup::LineIndex::new(source)
+            .line_column(source.find("<a href='/unique").unwrap());
+        assert_eq!(
+            (unique.line, unique.column),
+            (Some(expected.0), Some(expected.1))
+        );
+        assert!(
+            links
+                .iter()
+                .filter(|link| link.href == "/same")
+                .all(|link| link.line.is_none())
+        );
+        assert!(!links.iter().any(|link| link.href == "/fake"));
     }
 
     fn routes(html: &str, page_url: &str) -> Vec<String> {

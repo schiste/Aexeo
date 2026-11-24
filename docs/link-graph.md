@@ -166,8 +166,11 @@ one-based Unicode-character positions in the supplied HTML snapshot, not in
 CMS content or templates. The conservative map must agree with the parsed
 projection and ordered destinations. If the full document cannot be mapped,
 a separately validated `main` scope may supply positions for destinations that
-occur exactly once in the graph for that page. Ambiguous or unsupported links
-remain null. This option adds processing time and does not
+occur exactly once in the graph for that page. For an error-free HTML5 parse,
+a tokenizer-based fallback can also locate a destination that occurs once in
+both the page's link graph and source tokens, when its opening tag has a single
+unambiguous source candidate. HTML parsing errors and duplicate or ambiguous
+candidates withhold this fallback. Ambiguous or unsupported links remain null. This option adds processing time and does not
 change link counts or coverage conclusions. Opt-in telemetry includes the
 aggregate `source_location_link_count`, without source paths or link content.
 For `check` and `crawl`, use `--link-graph-source-locations` together with
