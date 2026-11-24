@@ -206,7 +206,6 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertIn('policy check is missing', native_bad.stdout)
                 self.assertFalse(json.loads(native_bad.stdout)['publication_authorized'])
 
-    @unittest.skipUnless(os.environ.get('AETHYME_CLI_BIN'), 'native comparator not supplied')
     def test_real_collection_verdicts_match_both_comparators(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         binary = os.environ.get('AEXEO_CLI_BIN')
@@ -267,8 +266,9 @@ class PortableCliInterop(unittest.TestCase):
                 (root / 'manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
-                native = [os.environ['AETHYME_CLI_BIN'], 'content-gate', 'compare-v2', str(root / 'manifest')]
-                for command in (verify, native):
+                native_binary = os.environ.get('AETHYME_CLI_BIN')
+                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary else None
+                for command in filter(None, (verify, native)):
                     result = subprocess.run(command, env=native_env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -279,7 +279,7 @@ class PortableCliInterop(unittest.TestCase):
                     portable['verdict']['summary']['passed'] += 1
                     for artifact in ('previous', 'fresh'):
                         (root / artifact).write_text(json.dumps(portable), encoding='utf-8')
-                    for command in (verify, native):
+                    for command in filter(None, (verify, native)):
                         result = subprocess.run(command, env=native_env, capture_output=True, text=True)
                         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                         self.assertFalse(json.loads(result.stdout)['publication_authorized'])
