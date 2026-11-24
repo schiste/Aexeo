@@ -73,6 +73,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `gh pr view --json headRefOid` and pass that exact value to
   `--match-head-commit`; never reconstruct a full SHA from an abbreviated log.
   Recheck the head and its checks if it changes before the merge.
+- If a known edited file is absent from Git status, compare with
+  `git -c core.fsmonitor=false status --short` and inspect the actual diff.
+  A stale filesystem-monitor cache can hide changes; verify tracked and staged
+  paths with the monitor disabled before committing or declaring a tree clean.
 - Before publishing even a new session, inspect its actual branch and any
   same-named remote branch; a different `--short-name` need not change the
   generated branch name. A stale remote can belong to an earlier session.
