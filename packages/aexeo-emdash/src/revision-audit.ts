@@ -96,6 +96,9 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
   if (!current || !snapshot || snapshot.id !== revision || snapshot.collection !== collection || snapshot.entryId !== id) {
     return { status: "not_checked", reason: "revision_unavailable" } as const;
   }
+  if (!matchesCurrentIdentity(current, collection, id)) {
+    return { status: "not_checked", reason: "current_identity_mismatch" } as const;
+  }
   // Host data is an external runtime boundary: malformed historical payloads
   // are unavailable, never an empty document or an exception to the caller.
   if (snapshot.data === null || typeof snapshot.data !== "object" || Array.isArray(snapshot.data)) {
@@ -234,9 +237,16 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
   return { ...result, revision_status: revisionStatus(latest, revision), locale_status: localeStatus(result.locale_at_audit, latest) };
 }
 
+function matchesCurrentIdentity(value: unknown, collection: string, id: string): value is Current {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as { id?: unknown; type?: unknown };
+  return record.id === id && record.type === collection;
+}
+
 async function currentOrUnknown(ctx: RevisionContext, collection: string, id: string): Promise<Current | null> {
   try {
-    return ctx.content.get ? await ctx.content.get(collection, id) : null;
+    const value = ctx.content.get ? await ctx.content.get(collection, id) : null;
+    return matchesCurrentIdentity(value, collection, id) ? value : null;
   } catch {
     return null;
   }

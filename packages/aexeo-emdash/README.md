@@ -318,6 +318,13 @@ does not establish complete coverage, a valid mapping, or rendered-page
 equivalence. Names are bounded and the list reports `truncated` when entries
 are omitted. These report details are not included in aggregate telemetry.
 
+Before evaluating a revision or proposed fragment, Aexeo checks that the
+current record's ID and collection match the request. A mismatch returns
+`not_checked` with `current_identity_mismatch`, and the audit is not persisted.
+If a later read returns another record, revision and locale status become
+`unknown`. The aggregate audit log contains the reason but no identifiers.
+Matching IDs do not authenticate the host or prove freshness.
+
 New reports record `locale_at_audit` from the current CMS record, not the
 historical revision. `locale_status` compares it to the current locale when
 creating or retrieving the audit: `changed` calls for a new audit, and `unknown`
