@@ -30,6 +30,13 @@ unavailable check may become a pass.
 
 ## Aexeo delivery and limits
 
+- [Aexeo #953](https://github.com/schiste/Aexeo/pull/953) independently
+  checks final-newline verdicts against bound plain-text, Markdown and HTML
+  sources in the experimental Python comparator. The candidate Rust verifier
+  also checks this gate against independently validated candidate bytes. These
+  checks neither authenticate inputs nor authorize publication. The Aethyme
+  native runner still needs its own implementation and interoperability tests.
+
 - [Aethyme #1982](https://github.com/schiste/Aethyme/pull/1982) independently
   verifies checked plain-text character counts. [Aexeo #941](https://github.com/schiste/Aexeo/pull/941)
   exercises word and character outcomes with real Aexeo and Aethyme CLIs,
