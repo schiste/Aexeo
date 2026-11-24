@@ -341,7 +341,7 @@ pub fn extract_document(
                 "aside" | "header" if !scope.explicit && scope.context == LinkContext::Body => {
                     Some(LinkContext::Unknown)
                 }
-                "nav" | "div" | "section"
+                "nav" | "div" | "section" | "span"
                     if !scope.explicit
                         && (tag == "nav"
                             || attribute(&node, "role").is_some_and(|role| {
@@ -1092,6 +1092,42 @@ mod tests {
         assert_eq!(
             contexts("<main><div class='related-posts'><a href='/a'>a</a></div></main>"),
             vec![LinkContext::Body]
+        );
+    }
+
+    #[test]
+    fn inline_navigation_landmarks_do_not_count_as_body() {
+        let links = extract_links(
+            "<main><span role='navigation'><a href='/target'>menu</a></span><span role='navigation' aria-label='Breadcrumb'><a href='/target'>crumb</a></span><span><a href='/target'>body</a></span><span role='navigation' data-aexeo-link-context='related'><a href='/target'>related</a></span></main>",
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(
+            links.iter().map(|link| link.context).collect::<Vec<_>>(),
+            vec![
+                LinkContext::Navigation,
+                LinkContext::Breadcrumb,
+                LinkContext::Body,
+                LinkContext::RelatedContent
+            ]
+        );
+        let counts = crate::link_counts::count_links(links);
+        let target = &counts.destinations[0];
+        assert_eq!(target.distinct_source_pages, 1);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Navigation], 1);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Body], 1);
+        let navigation_only = extract_links(
+            "<main><span role='navigation'><a href='/target'>menu</a></span></main>",
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        );
+        let counts = crate::link_counts::count_links(navigation_only);
+        assert!(
+            !counts.destinations[0]
+                .source_pages_by_context
+                .contains_key(&LinkContext::Body)
         );
     }
 
