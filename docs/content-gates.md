@@ -2047,8 +2047,10 @@ selected. The experimental v2 Rust verifier and independent Python comparator
 accept only a narrow host subset: the JSON object must contain exactly the
 schema and string text fields, optionally with ordered UTF-8 byte boundaries
 in `block_ends` and a string array of observed `headings`. The preset must
-contain only word-count, character-count or required-headings gates. Missing
-heading observations cannot satisfy a checked heading gate. Block boundaries
+contain only word-count, character-count, required-headings, heading-length
+or heading-hierarchy gates. Optional heading levels must align with the observed
+headings and range from 1 to 6. Missing observations cannot satisfy a checked
+heading gate. Block boundaries
 split adjacent words without changing character counts. The verifiers
 independently recompute outcomes, reject
 claimed source positions for host findings, and bind the complete snapshot

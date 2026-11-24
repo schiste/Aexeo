@@ -380,7 +380,7 @@ def verify_host_candidate_projection(policy, verdict, after):
     if not host:
         return False
     if (not isinstance(policy, dict) or not isinstance(policy.get('gates'), list)
-            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'required_headings'}
+            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'required_headings', 'heading_length', 'heading_hierarchy'}
                    for gate in policy['gates'])):
         raise VerificationError('host adapter portable verification does not support this gate')
     checks = {check['id']: check for check in verdict['checks']}
@@ -388,7 +388,7 @@ def verify_host_candidate_projection(policy, verdict, after):
     word_counts = {}
     for item in host:
         projection = parse(item['source'].encode('utf-8'))
-        if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings'}
+        if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings', 'heading_levels'}
                 or projection['schema'] != 'aexeo.content-adapter/v1'
                 or not isinstance(projection['text'], str)):
             raise VerificationError('unsupported portable host projection')
@@ -400,13 +400,15 @@ def verify_host_candidate_projection(policy, verdict, after):
                 raise VerificationError('invalid host headings')
             for heading in headings:
                 text(heading)
-            headings = set(headings)
+        heading_set = None if headings is None else set(headings)
+        levels = projection.get('heading_levels')
+        if 'heading_levels' in projection:
+            if (not isinstance(levels, list) or headings is None or len(levels) != len(headings)
+                    or any(type(level) is not int or not 1 <= level <= 6 for level in levels)):
+                raise VerificationError('invalid host heading levels')
         for gate in policy['gates']:
-            if gate['kind'] != 'required_headings':
+            if gate['kind'] not in {'required_headings', 'heading_length', 'heading_hierarchy'}:
                 continue
-            required = gate.get('headings')
-            if not isinstance(required, list) or any(not isinstance(heading, str) for heading in required):
-                raise VerificationError('invalid required headings')
             entity = item['entity_id']
             check_id = f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}'
             check = checks.get(check_id)
@@ -416,8 +418,37 @@ def verify_host_candidate_projection(policy, verdict, after):
                 continue
             if headings is None:
                 raise VerificationError('host headings unavailable')
-            expected = 'passed' if all(heading in headings for heading in required) else 'failed'
-            if check['status'] != expected:
+            if gate['kind'] == 'required_headings':
+                required = gate.get('headings')
+                if not isinstance(required, list) or any(not isinstance(heading, str) for heading in required):
+                    raise VerificationError('invalid required headings')
+                failed = any(heading not in heading_set for heading in required)
+            elif gate['kind'] == 'heading_length':
+                maximum = gate.get('max_chars')
+                if type(maximum) is not int or maximum < 0:
+                    raise VerificationError('invalid heading length')
+                def trimmed_length(heading):
+                    start, end = 0, len(heading)
+                    while start < end and _rust_blank(heading[start]):
+                        start += 1
+                    while end > start and _rust_blank(heading[end - 1]):
+                        end -= 1
+                    return end - start
+                failed = any(trimmed_length(heading) > maximum for heading in headings)
+            else:
+                initial = gate.get('initial_level')
+                if initial is not None and (type(initial) is not int or not 1 <= initial <= 6):
+                    raise VerificationError('invalid initial heading level')
+                if levels is None:
+                    raise VerificationError('host heading levels unavailable')
+                previous = initial
+                failed = False
+                for level in levels:
+                    if previous is not None and level > previous + 1:
+                        failed = True
+                        break
+                    previous = level
+            if check['status'] != ('failed' if failed else 'passed'):
                 raise VerificationError('host heading status differs from observations')
         source = projection['text'].encode('utf-8')
         ends = projection.get('block_ends', [])
