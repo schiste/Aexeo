@@ -339,6 +339,20 @@ seconds wall time. These single-run observations are not a performance guarantee
 the remaining links have no established position and mapping a snapshot does
 not establish deployment or CMS provenance. Further coverage remains open.
 
+A subsequent node-identity prototype was checked on the separate archived
+candidate `ecc238b1-cd0b-45b2-94b9-fc554983dc3a` (archive SHA-256
+`c6eecad498d0723c65bca0fe42d071971bd42f71ad9c777e585a7d3bb9b640a8`).
+The archive matched its metadata. The inferred URL map covered 1,718 HTML
+pages and the source-location run reported 160,479 located links out of
+160,479 observations. An independent Python HTML parser checked the position
+and decoded href of every observation and found zero mismatches; no inferred
+URL matched multiple files. Removing only positions made the full reports
+identical. These results describe this particular artifact, not every HTML
+input or its deployed state, and do not establish CMS provenance or inventory
+completeness. One run under heavy concurrent compilation took 44.1 seconds
+without and 101.8 seconds with source positions; the machine load prevents
+using these numbers as a controlled benchmark or latency guarantee.
+
 
 Text and Markdown graph summaries count inbound findings present in the rendered
 audit, including findings absent from the graph as not verifiable. The number
