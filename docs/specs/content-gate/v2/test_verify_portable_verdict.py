@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -319,6 +319,27 @@ class PortableComparison(unittest.TestCase):
         self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
         with self.assertRaisesRegex(VerificationError, 'final newline status differs'):
             self.check()
+
+    def test_rebound_metadata_cannot_claim_a_false_pass(self):
+        for gate, metadata in [
+            (dict(kind='required_metadata', id='words', severity='warning', blocking=True, fields=['description']), {'title': 'é'}),
+            (dict(kind='metadata_length', id='words', severity='warning', blocking=True, field='title', min=2, max=None), {'title': 'é'}),
+        ]:
+            with self.subTest(gate=gate):
+                policy = json.loads(self.artifacts['resolved_policy'])
+                policy['gates'] = [gate]
+                self.artifacts['resolved_policy'] = self.encoded(policy)
+                change = json.loads(self.artifacts['change'])
+                change['entries'][0]['metadata'] = metadata
+                self.artifacts['change'] = self.encoded(change)
+                candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+                inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                              candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                              candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                              candidate_revision_sha256=revision_digest(candidate))
+                self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+                with self.assertRaisesRegex(VerificationError, 'metadata status differs'):
+                    self.check()
 
     def test_rebound_plain_character_count_cannot_claim_a_false_pass(self):
         policy = json.loads(self.artifacts['resolved_policy'])
@@ -682,6 +703,40 @@ class PortableComparison(unittest.TestCase):
                                 with self.assertRaises(VerificationError):
                                     require_policy_coverage(policy, change, False, verdict,
                                                             plain_text_paragraphs=available)
+
+    def test_metadata_statuses_use_bound_values(self):
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        cases = [
+            ({'kind': 'required_metadata', 'fields': ['title']}, {'title': 'Bonjour'}, 'passed'),
+            ({'kind': 'required_metadata', 'fields': ['title']}, {'title': ' \u00a0'}, 'failed'),
+            ({'kind': 'required_metadata', 'fields': ['title']}, {}, 'failed'),
+            ({'kind': 'metadata_length', 'field': 'title', 'min': 2, 'max': 2}, {'title': 'é😀'}, 'passed'),
+            ({'kind': 'metadata_length', 'field': 'title', 'min': 3, 'max': None}, {'title': 'é😀'}, 'failed'),
+        ]
+        for gate, metadata, expected in cases:
+            with self.subTest(gate=gate, metadata=metadata):
+                policy = {'gates': [dict(gate, id='words', severity='warning', blocking=True)]}
+                change['entries'][0]['metadata'] = metadata
+                verdict['checks'][0]['status'] = expected
+                verify_metadata_statuses(policy, verdict, change)
+                verdict['checks'][0]['status'] = 'failed' if expected == 'passed' else 'passed'
+                with self.assertRaises(VerificationError):
+                    verify_metadata_statuses(policy, verdict, change)
+                verdict['checks'][0]['status'] = 'not_checked'
+                verify_metadata_statuses(policy, verdict, change)
+        for fields in ([], [''], [' \u00a0'], [42]):
+            policy = {'gates': [dict(kind='required_metadata', id='words', severity='warning', blocking=True, fields=fields)]}
+            with self.assertRaises(VerificationError):
+                verify_metadata_statuses(policy, verdict, change)
+        policy = {'gates': [{'kind': 'metadata_length', 'id': 'words', 'field': 'title', 'min': 1, 'max': None}]}
+        for metadata in (None, {}):
+            change['entries'][0]['metadata'] = metadata
+            verdict['checks'][0]['status'] = 'passed'
+            with self.assertRaises(VerificationError):
+                verify_metadata_statuses(policy, verdict, change)
+            verdict['checks'][0]['status'] = 'not_checked'
+            verify_metadata_statuses(policy, verdict, change)
 
     def test_missing_metadata_cannot_be_reported_as_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])

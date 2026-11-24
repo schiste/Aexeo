@@ -217,6 +217,41 @@ def verify_plain_paragraph_count_statuses(policy, verdict, after, counts):
     verify_plain_count_statuses(policy, verdict, after, counts, 'paragraph_count')
 
 
+def verify_metadata_statuses(policy, verdict, change):
+    """Compare checked metadata gates to the independently bound change."""
+    checks = {check['id']: check for check in verdict['checks']}
+    for gate in policy['gates']:
+        if gate['kind'] not in ('required_metadata', 'metadata_length'):
+            continue
+        if gate['kind'] == 'required_metadata':
+            fields = gate.get('fields')
+            if (set(gate) != {'kind', 'id', 'severity', 'blocking', 'fields'}
+                    or gate['severity'] not in ('warning', 'error') or not isinstance(fields, list)
+                    or not fields or any(not isinstance(field, str) or _rust_blank(field) for field in fields)):
+                raise VerificationError('invalid required metadata fields')
+        for entry in change['entries']:
+            if entry.get('after') is None:
+                continue
+            entity = entry['entity_id']
+            check = checks[f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}']
+            if check['status'] == 'not_checked':
+                continue
+            metadata = entry.get('metadata')
+            if not isinstance(metadata, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in metadata.items()):
+                raise VerificationError('candidate evaluator cannot inspect unavailable metadata')
+            if gate['kind'] == 'required_metadata':
+                failed = any(field not in metadata or _rust_blank(metadata[field]) for field in fields)
+            else:
+                value = metadata.get(gate['field'])
+                if value is None:
+                    raise VerificationError('candidate evaluator cannot inspect absent metadata field')
+                count = len(value)
+                failed = ((gate['min'] is not None and count < gate['min']) or
+                          (gate['max'] is not None and count > gate['max']))
+            if check['status'] != ('failed' if failed else 'passed'):
+                raise VerificationError('metadata status differs from bound input')
+
+
 def verify_final_newline_statuses(policy, verdict, after):
     """Check source-backed statuses without interpreting projected content."""
     checks = {check['id']: check for check in verdict['checks']}
@@ -450,6 +485,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         verify_plain_word_count_statuses(policy, verdict, after, word_counts)
         verify_plain_character_count_statuses(policy, verdict, after, character_counts)
         verify_plain_paragraph_count_statuses(policy, verdict, after, paragraph_counts)
+        verify_metadata_statuses(policy, verdict, change)
         verify_final_newline_statuses(policy, verdict, after)
         if links is not None:
             verify_link_observation_statuses(links, policy, verdict, change)
