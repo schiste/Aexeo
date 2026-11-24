@@ -414,6 +414,14 @@ pub struct HtmlSourceMap {
 }
 
 impl HtmlSourceMap {
+    /// Positions of links in lexical order, only after this map has been validated.
+    pub(crate) fn link_positions(&self, source: &str) -> Option<Vec<(usize, usize)>> {
+        self.link_starts
+            .iter()
+            .map(|&offset| self.source_index.position(source, offset))
+            .collect()
+    }
+
     /// Source coordinates for projected text; decoded characters point to their entity start.
     pub fn source_position(
         &self,

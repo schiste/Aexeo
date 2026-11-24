@@ -565,6 +565,16 @@ pub fn build_link_report_from_audit_with_static_urls(
     context: Option<&AuditLinkContext>,
     static_urls: Option<&std::collections::BTreeMap<String, String>>,
 ) -> anyhow::Result<LinkReport> {
+    build_link_report_from_audit_with_source_locations(artifact, context, static_urls, false)
+}
+
+/// Optionally map links to conservative coordinates in the supplied HTML.
+pub fn build_link_report_from_audit_with_source_locations(
+    artifact: &aexeo_contracts::AuditArtifact,
+    context: Option<&AuditLinkContext>,
+    static_urls: Option<&std::collections::BTreeMap<String, String>>,
+    source_locations: bool,
+) -> anyhow::Result<LinkReport> {
     let site = artifact
         .site
         .as_ref()
@@ -781,7 +791,7 @@ pub fn build_link_report_from_audit_with_static_urls(
         pages,
         inventory: context.and_then(|value| value.inventory.clone()),
     };
-    let mut report = build_link_report(&input)?;
+    let mut report = build_link_report_with_source_locations(&input, source_locations)?;
     report.static_url_mapping = mapping;
     // Unconfirmed release or contradictory snapshot evidence keeps pages ineligible.
     let extra_issues: Vec<_> = release_issues
@@ -1238,9 +1248,25 @@ fn redirected_from(page: &RenderedPage) -> Option<String> {
 /// This report lists observations and coverage issues. It never declares an
 /// orphan: completeness and semantic classification must be assessed first.
 pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> {
+    build_link_report_with_source_locations(input, false)
+}
+
+/// Optionally map link evidence to coordinates in the supplied HTML snapshot.
+pub fn build_link_report_with_source_locations(
+    input: &LinkReportInput,
+    source_locations: bool,
+) -> anyhow::Result<LinkReport> {
     build_link_report_with(
         input,
-        |page, origin, date| extract_document(&page.html, &page.url, origin, date),
+        |page, origin, date| {
+            if source_locations {
+                crate::link_evidence::extract_document_with_source_locations(
+                    &page.html, &page.url, origin, date,
+                )
+            } else {
+                extract_document(&page.html, &page.url, origin, date)
+            }
+        },
         count_links,
     )
 }

@@ -63,6 +63,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("audit").long("audit").action(ArgAction::SetTrue).help("Read an Aexeo audit artifact instead of a link graph input"))
                 .arg(Arg::new("context").long("context").num_args(1).help("JSON audit identity and inventory context"))
                 .arg(Arg::new("static-url-map").long("static-url-map").num_args(1).help("JSON map of static relative paths to public URLs"))
+                .arg(Arg::new("source-locations").long("source-locations").action(ArgAction::SetTrue).help("Map links to positions in the supplied HTML where unambiguous (additional parsing)"))
                 .arg(Arg::new("compact").long("compact").action(ArgAction::SetTrue).help("Emit compact JSON instead of pretty-printed JSON"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
         )

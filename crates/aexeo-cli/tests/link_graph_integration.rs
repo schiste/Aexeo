@@ -1520,3 +1520,81 @@ fn compact_graph_option_requires_an_output_file() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("--link-graph-output"));
     }
 }
+
+#[test]
+fn optional_graph_source_locations_map_static_html_without_changing_default() {
+    let temp = tempfile::tempdir().unwrap();
+    let site = temp.path().join("site");
+    fs::create_dir(&site).unwrap();
+    fs::write(
+        site.join("index.html"),
+        "<main>\n<p>Été <a href='/other'>link</a></p>\n</main>",
+    )
+    .unwrap();
+    let map = temp.path().join("urls.json");
+    fs::write(&map, r#"{"index.html":"https://example.org/"}"#).unwrap();
+    for enabled in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"));
+        command
+            .args(["link-graph", "--static-site"])
+            .arg(&site)
+            .args(["--site-origin", "https://example.org", "--static-url-map"])
+            .arg(&map);
+        if enabled {
+            command.arg("--source-locations");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let evidence = &report["links"]["destinations"][0]["evidence"][0];
+        assert_eq!(evidence["href"], "/other");
+        if enabled {
+            assert_eq!(evidence["line"], 2);
+            assert_eq!(evidence["column"], 8);
+        } else {
+            assert!(evidence["line"].is_null());
+            assert!(evidence["column"].is_null());
+        }
+    }
+}
+
+#[test]
+fn optional_graph_locations_work_for_json_and_audit_and_emit_aggregate_coverage() {
+    let temp = tempfile::tempdir().unwrap();
+    let html = "<main>\n<p>Été <a href='/b'>private</a></p>\n</main>";
+    let json = serde_json::json!({"version":1, "identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"}, "snapshot_date":null,"crawl_complete":false,"pages":[{"url":"https://example.org/a","status_code":200,"response_headers":{},"html":html}],"inventory":null});
+    let audit = serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org/","root":"crawl","deployment_model":"runtime_snapshot","pages":[{"path":"crawl/a/index.html","relative_path":"a/index.html","route":"a","raw_html":html,"response_headers":{},"crawl_response":{"requested_url":"https://example.org/a","observed_url":"https://example.org/a","status_code":200,"headers_observed":true}}]}});
+    for (name, input, is_audit) in [("input.json", json, false), ("audit.json", audit, true)] {
+        let path = temp.path().join(name);
+        fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"));
+        command
+            .arg("link-graph")
+            .arg(&path)
+            .args(["--source-locations", "--telemetry"]);
+        if is_audit {
+            command.arg("--audit");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let evidence = &report["links"]["destinations"][0]["evidence"][0];
+        assert_eq!(
+            (evidence["line"].as_u64(), evidence["column"].as_u64()),
+            (Some(2), Some(8))
+        );
+        let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(telemetry["source_location_link_count"], 1);
+        let telemetry_text = String::from_utf8(output.stderr).unwrap();
+        assert!(!telemetry_text.contains("private"));
+        assert!(!telemetry_text.contains("example.org"));
+    }
+}

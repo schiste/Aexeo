@@ -54,7 +54,7 @@ pub struct LinkEvidence {
     /// and sorted. Other tokens, such as `noopener`, do not qualify a link.
     #[serde(default)]
     pub rel: Vec<String>,
-    /// DOM parsing does not reliably preserve original byte positions.
+    /// Optional one-based coordinates in the supplied HTML, not the CMS source.
     pub line: Option<usize>,
     pub column: Option<usize>,
     pub resolution: LinkResolution,
@@ -198,6 +198,73 @@ pub fn extract_links(
     snapshot_date: Option<&str>,
 ) -> Vec<LinkEvidence> {
     extract_document(html, source_url, site_origin, snapshot_date).0
+}
+
+/// Extract links with opt-in, conservative coordinates in the supplied HTML.
+/// Unsupported or ambiguous markup retains unknown coordinates. This performs
+/// additional parsing and does not locate the CMS or template source.
+pub fn extract_document_with_source_locations(
+    html: &str,
+    source_url: &str,
+    site_origin: &str,
+    snapshot_date: Option<&str>,
+) -> (Vec<LinkEvidence>, HtmlLinkMetadata) {
+    let (mut links, metadata) = extract_document(html, source_url, site_origin, snapshot_date);
+    if links.is_empty() {
+        return (links, metadata);
+    }
+    use crate::html_content_adapter::{
+        HtmlContentScope, html_content_with_scope, html_source_map_with_scope,
+    };
+    let map_scope = |scope| {
+        let content = html_content_with_scope("", html, scope).ok()?;
+        let text = content.input.text.as_deref()?;
+        let map = html_source_map_with_scope(html, text, scope)?;
+        let positions = map.link_positions(html)?;
+        (positions.len() == content.destinations.len()).then_some((content.destinations, positions))
+    };
+    if let Some((destinations, positions)) =
+        map_scope(HtmlContentScope::Document).filter(|(destinations, _)| {
+            destinations.len() == links.len()
+                && destinations
+                    .iter()
+                    .zip(&links)
+                    .all(|(href, link)| href == &link.href)
+        })
+    {
+        let _ = destinations;
+        for (link, (line, column)) in links.iter_mut().zip(positions) {
+            link.line = Some(line);
+            link.column = Some(column);
+        }
+    } else if let Some((destinations, positions)) = map_scope(HtmlContentScope::Main) {
+        // A unique destination across the complete graph is sufficient to
+        // identify the same anchor in the independently validated main scope.
+        // Repeated hrefs remain unlocated even if they have the same label.
+        let mut indices = std::collections::HashMap::new();
+        for (index, link) in links.iter().enumerate() {
+            indices
+                .entry(link.href.as_str())
+                .and_modify(|entry: &mut Option<usize>| *entry = None)
+                .or_insert(Some(index));
+        }
+        let matches: Vec<_> = destinations
+            .iter()
+            .zip(positions)
+            .filter_map(|(href, position)| {
+                indices
+                    .get(href.as_str())
+                    .copied()
+                    .flatten()
+                    .map(|index| (index, position))
+            })
+            .collect();
+        for (index, (line, column)) in matches {
+            links[index].line = Some(line);
+            links[index].column = Some(column);
+        }
+    }
+    (links, metadata)
 }
 
 /// Children of `node` in document order, followed by the contents of a
@@ -506,6 +573,82 @@ pub(crate) fn crawl_links_and_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_locations_map_only_conservatively_verified_html() {
+        let source =
+            "<main>\n<p>Été <a href='/one'>one</a> and <a href='/two'>two</a></p>\n</main>";
+        let original =
+            extract_document(source, "https://example.org/", "https://example.org", None).0;
+        assert!(original.iter().all(|link| link.line.is_none()));
+        let (mapped, _) = extract_document_with_source_locations(
+            source,
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(mapped.len(), 2);
+        for (link, tag) in mapped.iter().zip(["<a href='/one'>", "<a href='/two'>"]) {
+            let offset = source.find(tag).unwrap();
+            let expected = crate::text_index::LineIndex::new(source)
+                .position(source, offset)
+                .unwrap();
+            assert_eq!(
+                (link.line, link.column),
+                (Some(expected.0), Some(expected.1))
+            );
+        }
+        let mut without_positions = mapped;
+        for link in &mut without_positions {
+            link.line = None;
+            link.column = None;
+        }
+        assert_eq!(without_positions, original);
+        for source in [
+            "<main><p><a href='/one'>one</a><a href='/two'>two</p></main>",
+            "<main><p><a hidden href='/one'>one</a><a href='/two'>two</a></p></main>",
+            "<main><p><a href='/one'>one</a></p><template><a href='/two'>two</a></template></main>",
+        ] {
+            let (links, _) = extract_document_with_source_locations(
+                source,
+                "https://example.org/",
+                "https://example.org",
+                None,
+            );
+            assert!(!links.is_empty());
+            assert!(
+                links
+                    .iter()
+                    .all(|link| link.line.is_none() && link.column.is_none()),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn main_scope_maps_unique_links_without_guessing_repeated_destinations() {
+        let source = "<!DOCTYPE html><html><head><title>Page</title></head><body><nav><a href='/shared'>nav</a></nav><main><p><a href='/unique'>body</a> <a href='/shared'>same</a></p></main><footer><a href='/footer'>footer</a></footer></body></html>";
+        let (links, _) = extract_document_with_source_locations(
+            source,
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        let unique = links.iter().find(|link| link.href == "/unique").unwrap();
+        let expected = crate::text_index::LineIndex::new(source)
+            .position(source, source.find("<a href='/unique'>").unwrap())
+            .unwrap();
+        assert_eq!(
+            (unique.line, unique.column),
+            (Some(expected.0), Some(expected.1))
+        );
+        assert!(
+            links
+                .iter()
+                .filter(|link| link.href != "/unique")
+                .all(|link| link.line.is_none() && link.column.is_none())
+        );
+    }
 
     fn routes(html: &str, page_url: &str) -> Vec<String> {
         crawl_links(html, page_url)

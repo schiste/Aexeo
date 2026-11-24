@@ -159,8 +159,18 @@ marker, are `unknown`. So are links in an `aside` or `header` inside `main` or
 what their links are; nested `nav` and `footer` elements keep their own context.
 Generic containers inherit their surroundings: a related-content block built from
 an unmarked `div` inside `main` counts as `body`, because class names are not
-treated as semantics, and needs an explicit marker. The parser cannot reliably
-preserve source line and column, so these are null.
+treated as semantics, and needs an explicit marker. Source line and column are
+null by default. `link-graph --source-locations` opts into additional parsing to
+map link positions for JSON, audit and static-site inputs. Coordinates are
+one-based Unicode-character positions in the supplied HTML snapshot, not in
+CMS content or templates. The conservative map must agree with the parsed
+projection and ordered destinations. If the full document cannot be mapped,
+a separately validated `main` scope may supply positions for destinations that
+occur exactly once in the graph for that page. Ambiguous or unsupported links
+remain null. This option adds processing time and does not
+change link counts or coverage conclusions. Opt-in telemetry includes the
+aggregate `source_location_link_count`, without source paths or link content.
+Other graph-producing commands do not yet provide this option.
 
 Links in `template`, `noscript`, and a `dialog` without the boolean `open`
 attribute remain in discovery and evidence but have
