@@ -762,3 +762,14 @@ for (const scenario of sharedUrls.cases) {
   assert.equal(report.source_locations[0].utf16_offset, 0, scenario.name);
 }
 console.log("WASM URLs match shared Markdown and HTML sentence boundaries");
+
+// The bundled paragraph preset excludes headings and refuses incomplete observations.
+const paragraphStarterDoc = { route: "/starter", title: "Starter", body: [
+  { style: "h2", children: [{ _type: "span", text: "word ".repeat(31) }] },
+  { children: [{ _type: "span", text: "A short paragraph." }] },
+] };
+const paragraphStarter = await evaluateContent(paragraphStarterDoc, "readability-paragraphs");
+assert.equal(paragraphStarter.gates[0].status, "passed");
+assert.equal(paragraphStarter.gates[0].measurements.sentence_count, 1);
+const unavailableStarter = await evaluateContent({ ...paragraphStarterDoc, body_capabilities: ["text"] }, "readability-paragraphs");
+assert.equal(unavailableStarter.gates[0].status, "not_checked");
