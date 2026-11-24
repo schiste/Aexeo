@@ -849,8 +849,12 @@ registry before considering the release delivered.
   counts, paragraph lengths, and required-heading, heading-length and
   heading-hierarchy outcomes for strictly bounded host projections, including validated UTF-8 block and
   paragraph boundaries and heading levels, in both Rust and the Python
-  comparator. Additional host observations and gates remain unsupported; this
-  does not establish freshness, host provenance, or publication authority.
+  comparator. A real cross-process check on 2026-11-24 found that the installed
+  Aethyme native comparator rejects the host adapter media type as
+  `not_matched`; the Python comparator accepted the same generated candidate.
+  Native support and cross-process parity for these host gates remain open.
+  Additional host observations and gates remain unsupported; this does not
+  establish freshness, host provenance, or publication authority.
   The conservative HTML source mapper preserves positions through explicitly
   nested bidirectional inline elements, including Arabic text and links
   ([PR #705](https://github.com/schiste/Aexeo/pull/705)). Hidden or malformed
