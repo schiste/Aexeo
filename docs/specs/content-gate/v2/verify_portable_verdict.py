@@ -141,6 +141,41 @@ def _rust_blank(value):
     return not value or all(ch.isspace() and ch not in '\x1c\x1d\x1e\x1f' for ch in value)
 
 
+def plain_text_word_count(source):
+    """Match Rust split_whitespace for an unchanged plain-text projection."""
+    count = 0
+    in_word = False
+    for char in source:
+        if _rust_blank(char):
+            in_word = False
+        elif not in_word:
+            count += 1
+            in_word = True
+    return count
+
+
+def verify_plain_word_count_statuses(policy, verdict, after, counts):
+    """Compare observed plain-text counts; structured adapters need other projections."""
+    checks = {check['id']: check for check in verdict['checks']}
+    for gate in policy['gates']:
+        if gate['kind'] != 'word_count':
+            continue
+        for item in after:
+            if item['media_type'] != 'text/plain':
+                continue
+            entity = item['entity_id']
+            check = checks[f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}']
+            if check['status'] not in ('passed', 'failed'):
+                continue
+            if entity not in counts:
+                counts[entity] = plain_text_word_count(item['source'])
+            count = counts[entity]
+            failed = ((gate.get('min') is not None and count < gate['min']) or
+                      (gate.get('max') is not None and count > gate['max']))
+            if check['status'] != ('failed' if failed else 'passed'):
+                raise VerificationError('plain-text word count status differs from source')
+
+
 def collection_uniqueness_status(projection, field, group):
     """Recompute the observable status, without asserting snapshot completeness."""
     if not projection['complete']:
@@ -333,6 +368,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
                             'sha256': entry['after']['sha256'] if entry.get('after') is not None else None}
                            for entry in change['entries']]}
     verdicts = []
+    word_counts = {}
     for envelope in (previous, fresh):
         if not hmac.compare_digest(envelope['binding_sha256'], current_binding):
             raise VerificationError('candidate input binding differs')
@@ -346,6 +382,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
             raise VerificationError('external evidence does not match the verdict profile')
         validate_verdict(verdict)
         coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'], collection_projection)
+        verify_plain_word_count_statuses(policy, verdict, after, word_counts)
         if links is not None:
             verify_link_observation_statuses(links, policy, verdict, change)
         if verdict['validator']['version'] != host_options['engine_version']:
