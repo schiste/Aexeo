@@ -119,6 +119,18 @@ publishing 0.9.5 and host-side validation remain open.
   revision access on the target host, then verify its connected MCP actions and
   permissions against a real revision. Repository support alone does not expose
   an action through an already connected host.
+  - Preview deployment update, 2026-11-24: the published 0.9.5 archive's
+    registry integrity matched the tested archive. Aeptus installed the exact
+    version and enabled article and glossary presets plus revision-audit
+    capabilities in [website PR #653](https://github.com/Aeptus/website-and-content/pull/653).
+    The merged commit passed the host gates, TypeScript check and CI; its
+    [Preview deployment](https://github.com/Aeptus/website-and-content/actions/runs/45348163395)
+    succeeded. The deployed plugin state was active but reported MCP tools
+    disabled and no stored tool consent. EmDash requires an administrator to
+    enable and consent to the declared tools; after that, reconnect or refresh
+    discovery as needed and test permission-scoped audit and retrieval on a real
+    revision. Package deployment and preset configuration alone do not establish
+    MCP availability, historical capability approval, or publication readiness.
 - [ ] Validate the host's historical metadata and component mappings, citations,
   language-specific coverage and redirect HTML against representative rendered
   builds. Style checks do not establish factual accuracy, currency or translation
