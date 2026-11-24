@@ -8,6 +8,7 @@ and protect the publication boundary. Matching hashes do none of these things.
 import argparse
 import hmac
 import json
+import re
 from pathlib import Path
 import sys
 import time
@@ -217,11 +218,23 @@ def verify_plain_paragraph_count_statuses(policy, verdict, after, counts):
     verify_plain_count_statuses(policy, verdict, after, counts, 'paragraph_count')
 
 
+def _calendar_day(value):
+    """Ordinal for Rust's four-digit proleptic Gregorian dates, including year zero."""
+    if not isinstance(value, str) or re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value) is None:
+        return None
+    year, month, day = map(int, value.split('-'))
+    leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+    lengths = (31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    if not 1 <= month <= 12 or not 1 <= day <= lengths[month - 1]:
+        return None
+    return 365 * year + (year + 3) // 4 - (year + 99) // 100 + (year + 399) // 400 + sum(lengths[:month - 1]) + day
+
+
 def verify_metadata_statuses(policy, verdict, change):
     """Compare checked metadata gates to the independently bound change."""
     checks = {check['id']: check for check in verdict['checks']}
     for gate in policy['gates']:
-        if gate['kind'] not in ('required_metadata', 'metadata_length'):
+        if gate['kind'] not in ('required_metadata', 'metadata_length', 'metadata_age'):
             continue
         if gate['kind'] == 'required_metadata':
             fields = gate.get('fields')
@@ -229,6 +242,13 @@ def verify_metadata_statuses(policy, verdict, change):
                     or gate['severity'] not in ('warning', 'error') or not isinstance(fields, list)
                     or not fields or any(not isinstance(field, str) or _rust_blank(field) for field in fields)):
                 raise VerificationError('invalid required metadata fields')
+        if gate['kind'] == 'metadata_age':
+            if (set(gate) != {'kind', 'id', 'severity', 'blocking', 'field', 'as_of', 'max_days'}
+                    or gate['severity'] not in ('warning', 'error')
+                    or not isinstance(gate['field'], str) or _rust_blank(gate['field'])
+                    or _calendar_day(gate['as_of']) is None
+                    or type(gate['max_days']) is not int or not 0 <= gate['max_days'] <= MAX_U64):
+                raise VerificationError('invalid metadata age gate')
         for entry in change['entries']:
             if entry.get('after') is None:
                 continue
@@ -241,6 +261,12 @@ def verify_metadata_statuses(policy, verdict, change):
                 raise VerificationError('candidate evaluator cannot inspect unavailable metadata')
             if gate['kind'] == 'required_metadata':
                 failed = any(field not in metadata or _rust_blank(metadata[field]) for field in fields)
+            elif gate['kind'] == 'metadata_age':
+                date = _calendar_day(metadata.get(gate['field']))
+                reference = _calendar_day(gate['as_of'])
+                if date is None or date > reference:
+                    raise VerificationError('candidate evaluator cannot inspect metadata date')
+                failed = reference - date > gate['max_days']
             else:
                 value = metadata.get(gate['field'])
                 if value is None:

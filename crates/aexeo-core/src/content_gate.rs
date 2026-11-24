@@ -126,7 +126,7 @@ pub(crate) fn literal_projection_matches(projected: &str, literal: &str) -> bool
 
 // Accept only a complete calendar date; timestamps and implicit time zones are
 // deliberately excluded so the caller chooses and binds the evaluation date.
-fn parse_iso_calendar_date(value: &str) -> Option<time::Date> {
+pub(crate) fn parse_iso_calendar_date(value: &str) -> Option<time::Date> {
     let bytes = value.as_bytes();
     if bytes.len() != 10
         || bytes[4] != b'-'

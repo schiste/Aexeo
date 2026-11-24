@@ -1514,7 +1514,8 @@ fn verify_candidate_metadata_statuses(
         for gate in &preset.gates {
             let id = match gate {
                 ContentGate::RequiredMetadata { id, .. }
-                | ContentGate::MetadataLength { id, .. } => id,
+                | ContentGate::MetadataLength { id, .. }
+                | ContentGate::MetadataAge { id, .. } => id,
                 _ => continue,
             };
             let check_id = format!("gate:{}:{}:{}", entry.entity_id.len(), entry.entity_id, id);
@@ -1546,6 +1547,25 @@ fn verify_candidate_metadata_statuses(
                         .chars()
                         .count();
                     min.is_some_and(|bound| count < bound) || max.is_some_and(|bound| count > bound)
+                }
+                ContentGate::MetadataAge {
+                    field,
+                    as_of,
+                    max_days,
+                    ..
+                } => {
+                    let date = metadata
+                        .get(field)
+                        .and_then(|value| crate::content_gate::parse_iso_calendar_date(value))
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("candidate evaluator cannot inspect metadata date")
+                        })?;
+                    let reference = crate::content_gate::parse_iso_calendar_date(as_of)
+                        .ok_or_else(|| anyhow::anyhow!("invalid metadata reference date"))?;
+                    if date > reference {
+                        bail!("candidate evaluator cannot inspect future metadata date");
+                    }
+                    (reference - date).whole_days() as u64 > *max_days as u64
                 }
                 _ => bail!("unsupported metadata gate"),
             };
@@ -4517,6 +4537,21 @@ mod tests {
                 Some("é😀"),
                 CheckStatus::Failed,
             ),
+            (
+                "kind='metadata_age'\nfield='title'\nas_of='2024-03-01'\nmax_days=1",
+                Some("2024-02-29"),
+                CheckStatus::Passed,
+            ),
+            (
+                "kind='metadata_age'\nfield='title'\nas_of='2024-03-01'\nmax_days=1",
+                Some("2024-02-28"),
+                CheckStatus::Failed,
+            ),
+            (
+                "kind='metadata_age'\nfield='title'\nas_of='0001-01-01'\nmax_days=366",
+                Some("0000-01-01"),
+                CheckStatus::Passed,
+            ),
         ];
         for (definition, value, expected) in cases {
             let preset = ContentPreset::from_toml(&format!(
@@ -4540,6 +4575,20 @@ mod tests {
             assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_err());
             verdict.checks[0].status = CheckStatus::NotChecked;
             assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_ok());
+        }
+        let age_preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='metadata_age'\nfield='title'\nas_of='2024-03-01'\nmax_days=1\n").unwrap();
+        let mut age_change = change();
+        let mut age_verdict = evaluate(&age_change, 1).unwrap();
+        for value in ["2024-02-30", "2024-03-02", "2024-2-01"] {
+            age_change.entries[0].metadata = Some([("title".into(), value.into())].into());
+            age_verdict.checks[0].status = CheckStatus::Passed;
+            assert!(
+                verify_candidate_metadata_statuses(&age_verdict, &age_preset, &age_change).is_err()
+            );
+            age_verdict.checks[0].status = CheckStatus::NotChecked;
+            assert!(
+                verify_candidate_metadata_statuses(&age_verdict, &age_preset, &age_change).is_ok()
+            );
         }
         let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='metadata_length'\nfield='title'\nmin=1\n").unwrap();
         let mut change = change();
