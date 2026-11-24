@@ -315,10 +315,13 @@ proof that the supplied collection is authentic or exhaustive. For `word_count`
 and `character_count` checks on `text/plain`, it recomputes counts from the
 independently verified after-projection and rejects checked statuses inconsistent
 with the configured bounds; unavailable checks remain unavailable. Character
-counts use Unicode scalars and the configured whitespace option. It does not
-rebuild Markdown or HTML projections for these checks. This recomputation is
-specific to the Python comparator; a native runner must not be assumed to
-perform it. Other gate parameters remain unvalidated. It cannot prove the
+counts use Unicode scalars and the configured whitespace option. For checked
+`paragraph_count` results with the host's explicit plain-text paragraph option,
+it also counts LF/CRLF-separated blocks using the evaluator's whitespace and
+100,000-paragraph limit. It does not rebuild Markdown or HTML projections for
+these checks. Paragraph recomputation is currently specific to the Python
+comparator; do not assume a native runner performs it. Other gate parameters
+remain unvalidated. It cannot prove the
 evaluator ran the checks correctly or authenticate the
 policy or validator labels. The host must still independently select its required
 checks and enforce completeness, freshness and the publication boundary. It still cannot

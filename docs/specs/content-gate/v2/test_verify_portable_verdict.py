@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, plain_text_word_count, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -201,6 +201,33 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             require_policy_coverage(policy, change, False, verdict)
 
+    def test_plain_paragraph_count_matches_lf_and_rust_whitespace(self):
+        for source, expected in [('', 0), (' \n\t\r\n', 0),
+                                 ('One\r\ntwo\r\n\u00a0\r\nThree', 2),
+                                 ('a\r\rb', 1), ('a\n\x1c\nb', 1),
+                                 ('a\n\nb\n', 2)]:
+            with self.subTest(source=source):
+                self.assertEqual(plain_text_paragraph_count(source), expected)
+        with self.assertRaisesRegex(VerificationError, 'paragraph count exceeds'):
+            plain_text_paragraph_count('x\n\n' * 100_001)
+
+    def test_plain_paragraph_status_checks_bounds_and_preserves_unavailable(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        gate = policy['gates'][0]
+        gate.update(kind='paragraph_count', min=2, max=2)
+        verdict = self.previous['verdict']
+        check = verdict['checks'][0]
+        after = self.fixture['after']
+        after[0]['source'] = 'One\n\nTwo'
+        for status in ('passed', 'not_checked'):
+            check['status'] = status
+            verify_plain_paragraph_count_statuses(policy, verdict, after, {})
+        check['status'] = 'failed'
+        with self.assertRaisesRegex(VerificationError, 'paragraph count status differs'):
+            verify_plain_paragraph_count_statuses(policy, verdict, after, {})
+        after[0]['media_type'] = 'text/markdown'
+        verify_plain_paragraph_count_statuses(policy, verdict, after, {})
+
     def test_plain_word_count_uses_rust_whitespace_boundaries(self):
         self.assertEqual(plain_text_word_count(''), 0)
         self.assertEqual(plain_text_word_count('é\u00a0word\u0085next'), 3)
@@ -261,6 +288,23 @@ class PortableComparison(unittest.TestCase):
                       candidate_revision_sha256=revision_digest(candidate))
         self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
         with self.assertRaisesRegex(VerificationError, 'character count status differs'):
+            self.check()
+
+    def test_rebound_plain_paragraph_count_cannot_claim_a_false_pass(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'][0].update(kind='paragraph_count', min=2)
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        options = json.loads(self.artifacts['host_options'])
+        options['plain_text_paragraphs'] = True
+        self.artifacts['host_options'] = self.encoded(options)
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'paragraph count status differs'):
             self.check()
 
     def test_rebound_plain_text_word_count_cannot_claim_a_false_pass(self):

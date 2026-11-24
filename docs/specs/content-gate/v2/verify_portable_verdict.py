@@ -154,6 +154,25 @@ def plain_text_word_count(source):
     return count
 
 
+def plain_text_paragraph_count(source):
+    """Count LF-separated blocks with the producer's Rust whitespace rules."""
+    count = 0
+    inside = False
+    cursor = 0
+    while cursor < len(source):
+        end = source.find('\n', cursor)
+        if end < 0:
+            end = len(source)
+        blank = _rust_blank(source[cursor:end].rstrip('\r'))
+        if not blank and not inside:
+            count += 1
+            if count > 100_000:
+                raise VerificationError('plain-text paragraph count exceeds evaluator limit')
+        inside = not blank
+        cursor = end + 1
+    return count
+
+
 def verify_plain_count_statuses(policy, verdict, after, counts, kind):
     """Compare checked plain-text counts without inferring rich-text content."""
     checks = {check['id']: check for check in verdict['checks']}
@@ -173,6 +192,8 @@ def verify_plain_count_statuses(policy, verdict, after, counts, kind):
                 source = item['source']
                 if kind == 'word_count':
                     counts[key] = plain_text_word_count(source)
+                elif kind == 'paragraph_count':
+                    counts[key] = plain_text_paragraph_count(source)
                 elif ignore_whitespace:
                     counts[key] = sum(not _rust_blank(char) for char in source)
                 else:
@@ -190,6 +211,10 @@ def verify_plain_word_count_statuses(policy, verdict, after, counts):
 
 def verify_plain_character_count_statuses(policy, verdict, after, counts):
     verify_plain_count_statuses(policy, verdict, after, counts, 'character_count')
+
+
+def verify_plain_paragraph_count_statuses(policy, verdict, after, counts):
+    verify_plain_count_statuses(policy, verdict, after, counts, 'paragraph_count')
 
 
 def collection_uniqueness_status(projection, field, group):
@@ -386,6 +411,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     verdicts = []
     word_counts = {}
     character_counts = {}
+    paragraph_counts = {}
     for envelope in (previous, fresh):
         if not hmac.compare_digest(envelope['binding_sha256'], current_binding):
             raise VerificationError('candidate input binding differs')
@@ -401,6 +427,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'], collection_projection)
         verify_plain_word_count_statuses(policy, verdict, after, word_counts)
         verify_plain_character_count_statuses(policy, verdict, after, character_counts)
+        verify_plain_paragraph_count_statuses(policy, verdict, after, paragraph_counts)
         if links is not None:
             verify_link_observation_statuses(links, policy, verdict, change)
         if verdict['validator']['version'] != host_options['engine_version']:
