@@ -668,7 +668,9 @@ registry before considering the release delivered.
 - [x] In the independent draft Python comparator, require every understood
   resolved-policy gate's item or collection check and the configured blocking
   flag. Matching bindings and a narrow host-required check list cannot hide an
-  omitted advisory or blocking gate. This does not validate all gate parameters,
+  omitted advisory or blocking gate. The Python comparator also validates resolved
+  word, character, paragraph and metadata-length count gate parameters. Other
+  gate parameters still require independent validation; this does not
   authenticate the evaluator, establish freshness or authorize publication;
   Aethyme's native comparator adopted the check in
   [PR #1939](https://github.com/schiste/Aethyme/pull/1939). On 2026-11-22,

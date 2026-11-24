@@ -303,8 +303,10 @@ when a collection is supplied, with the configured blocking flag. It also
 rejects additional checks outside that policy in the supported candidate profile;
 an unconfigured check cannot satisfy a host-required check. Unknown gate
 kinds, policy versions and empty gate lists are rejected. This detects omitted checks even if the
-host's explicit required-check list omits them. It does not validate every gate
-parameter, prove the evaluator ran the checks correctly, or authenticate the
+host's explicit required-check list omits them. For word, character, paragraph,
+and metadata-length count gates, it also validates the resolved field shapes,
+severity, count bounds and gate-specific options. Other gate parameters remain
+unvalidated. It cannot prove the evaluator ran the checks correctly or authenticate the
 policy or validator labels. The host must still independently select its required
 checks and enforce completeness, freshness and the publication boundary. It still cannot
 establish that the independently supplied options were used by the evaluator.
