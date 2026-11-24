@@ -1441,6 +1441,8 @@ fn verify_host_candidate_projection(
             ContentGate::WordCount { .. }
                 | ContentGate::CharacterCount { .. }
                 | ContentGate::RequiredHeadings { .. }
+                | ContentGate::HeadingLength { .. }
+                | ContentGate::HeadingHierarchy { .. }
         )
     }) {
         bail!("host adapter portable verification does not support this gate");
@@ -1459,10 +1461,12 @@ fn verify_host_candidate_projection(
         let object = value
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("invalid portable host projection"))?;
-        if object
-            .keys()
-            .any(|key| !matches!(key.as_str(), "schema" | "text" | "block_ends" | "headings"))
-            || object.get("schema").and_then(|v| v.as_str()) != Some("aexeo.content-adapter/v1")
+        if object.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "schema" | "text" | "block_ends" | "headings" | "heading_levels"
+            )
+        }) || object.get("schema").and_then(|v| v.as_str()) != Some("aexeo.content-adapter/v1")
         {
             bail!("unsupported portable host projection");
         }
@@ -1472,7 +1476,7 @@ fn verify_host_candidate_projection(
             .ok_or_else(|| anyhow::anyhow!("host text is unavailable"))?;
         let headings = object
             .get("headings")
-            .map(|value| -> Result<std::collections::BTreeSet<&str>> {
+            .map(|value| -> Result<Vec<&str>> {
                 let values = value
                     .as_array()
                     .ok_or_else(|| anyhow::anyhow!("invalid host headings"))?;
@@ -1488,35 +1492,89 @@ fn verify_host_candidate_projection(
                     .collect()
             })
             .transpose()?;
-        for gate in &preset.gates {
-            if let ContentGate::RequiredHeadings {
-                id,
-                headings: required,
-                ..
-            } = gate
-            {
-                let check_id = format!("gate:{}:{}:{}", item.entity_id.len(), item.entity_id, id);
-                let check = checks
-                    .get(check_id.as_str())
-                    .copied()
-                    .ok_or_else(|| anyhow::anyhow!("resolved policy check is missing"))?;
-                if check.status == CheckStatus::NotChecked {
-                    continue;
-                }
-                let actual = headings
+        let heading_set = headings.as_ref().map(|values| {
+            values
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+        });
+        let levels = object
+            .get("heading_levels")
+            .map(|value| -> Result<Vec<u8>> {
+                let values = value
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("invalid host heading levels"))?;
+                if headings
                     .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("host headings unavailable"))?;
-                let expected = if required
-                    .iter()
-                    .all(|heading| actual.contains(heading.as_str()))
+                    .is_none_or(|headings| headings.len() != values.len())
                 {
-                    CheckStatus::Passed
-                } else {
-                    CheckStatus::Failed
-                };
-                if check.status != expected {
-                    bail!("host heading status differs from observations");
+                    bail!("heading levels require matching headings");
                 }
+                values
+                    .iter()
+                    .map(|value| {
+                        value
+                            .as_u64()
+                            .filter(|v| (1..=6).contains(v))
+                            .map(|v| v as u8)
+                            .ok_or_else(|| anyhow::anyhow!("invalid host heading level"))
+                    })
+                    .collect()
+            })
+            .transpose()?;
+        for gate in &preset.gates {
+            let id = match gate {
+                ContentGate::RequiredHeadings { id, .. }
+                | ContentGate::HeadingLength { id, .. }
+                | ContentGate::HeadingHierarchy { id, .. } => id,
+                _ => continue,
+            };
+            let check_id = format!("gate:{}:{}:{}", item.entity_id.len(), item.entity_id, id);
+            let check = checks
+                .get(check_id.as_str())
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("resolved policy check is missing"))?;
+            if check.status == CheckStatus::NotChecked {
+                continue;
+            }
+            let actual = headings
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("host headings unavailable"))?;
+            let failed = match gate {
+                ContentGate::RequiredHeadings {
+                    headings: required, ..
+                } => {
+                    let observed = heading_set
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("host headings unavailable"))?;
+                    required
+                        .iter()
+                        .any(|heading| !observed.contains(heading.as_str()))
+                }
+                ContentGate::HeadingLength { max_chars, .. } => actual
+                    .iter()
+                    .any(|heading| heading.trim().chars().count() > *max_chars),
+                ContentGate::HeadingHierarchy { initial_level, .. } => {
+                    let levels = levels
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("host heading levels unavailable"))?;
+                    let mut previous = *initial_level;
+                    levels.iter().any(|level| {
+                        let skipped =
+                            previous.is_some_and(|prior| *level > prior.saturating_add(1));
+                        previous = Some(*level);
+                        skipped
+                    })
+                }
+                _ => unreachable!(),
+            };
+            let expected = if failed {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            };
+            if check.status != expected {
+                bail!("host heading status differs from observations");
             }
         }
         let mut word_count = 0usize;
@@ -9445,6 +9503,51 @@ mod tests {
         );
         item.source = r#"{"schema":"aexeo.content-adapter/v1","text":"x"}"#.into();
         assert!(verify_host_candidate_projection(&verdict, &preset, &[item]).is_err());
+    }
+
+    #[test]
+    fn portable_host_heading_length_and_hierarchy_are_recomputed() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='host-headings'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=3\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\ninitial_level=1\n").unwrap();
+        let source = r#"{"schema":"aexeo.content-adapter/v1","text":"x","headings":[" é ","two"],"heading_levels":[2,3]}"#;
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let verdict = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        let item = crate::content_candidate::CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: crate::content_adapter::MEDIA_TYPE.into(),
+            revision: None,
+            sha256: format!("{:x}", Sha256::digest(source.as_bytes())),
+            source: source.into(),
+            links: None,
+        };
+        assert!(
+            verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                .unwrap()
+        );
+        for altered in [
+            source.replace("two", "long"),
+            source.replace("[2,3]", "[2,4]"),
+            source.replace("[2,3]", "[2]"),
+            source.replace("[2,3]", "[2,true]"),
+            source.replace(",\"heading_levels\":[2,3]", ""),
+        ] {
+            let mut invalid = item.clone();
+            invalid.source = altered;
+            assert!(verify_host_candidate_projection(&verdict, &preset, &[invalid]).is_err());
+        }
     }
 
     #[test]

@@ -89,9 +89,23 @@ class PortableComparison(unittest.TestCase):
         verdict['checks'][0]['status'] = 'not_checked'
         self.assertTrue(verify_host_candidate_projection(policy, verdict, [missing]))
 
+    def test_host_heading_length_and_hierarchy_are_recomputed(self):
+        policy = {'gates': [{'kind': 'heading_length', 'id': 'length', 'max_chars': 3},
+                            {'kind': 'heading_hierarchy', 'id': 'hierarchy', 'initial_level': 1}]}
+        verdict = {'checks': [{'id': 'gate:1:a:length', 'status': 'passed'},
+                              {'id': 'gate:1:a:hierarchy', 'status': 'passed'}], 'findings': []}
+        source = '{"schema":"aexeo.content-adapter/v1","text":"x","headings":[" é ","two"],"heading_levels":[2,3]}'
+        item = {'entity_id': 'a', 'media_type': 'application/vnd.aexeo.content-adapter+json', 'source': source}
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [item]))
+        for value in (source.replace('two', 'long'), source.replace('[2,3]', '[2,4]'),
+                      source.replace('[2,3]', '[2]'), source.replace('[2,3]', '[2,true]'),
+                      source.replace(',"heading_levels":[2,3]', '')):
+            with self.subTest(source=value), self.assertRaises(VerificationError):
+                verify_host_candidate_projection(policy, verdict, [dict(item, source=value)])
+
     def test_bound_host_projection_accepts_only_recomputed_counts(self):
         import hashlib
-        source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1],"headings":["Intro"]}'
+        source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1],"headings":["Intro"],"heading_levels":[2]}'
         digest = hashlib.sha256(source.encode()).hexdigest()
         media = 'application/vnd.aexeo.content-adapter+json'
         change = json.loads(self.artifacts['change'])
@@ -101,12 +115,18 @@ class PortableComparison(unittest.TestCase):
         policy = json.loads(self.artifacts['resolved_policy'])
         policy['gates'].append({'kind': 'required_headings', 'id': 'head', 'severity': 'warning',
                                 'blocking': True, 'headings': ['Intro']})
+        policy['gates'].extend([
+            {'kind': 'heading_length', 'id': 'length', 'severity': 'warning', 'blocking': True, 'max_chars': 5},
+            {'kind': 'heading_hierarchy', 'id': 'hierarchy', 'severity': 'warning', 'blocking': True, 'initial_level': 1},
+        ])
         self.artifacts['resolved_policy'] = self.encoded(policy)
-        self.required.append('gate:7:article:head')
+        new_checks = ['gate:7:article:head', 'gate:7:article:length', 'gate:7:article:hierarchy']
+        self.required.extend(new_checks)
         for envelope in (self.previous, self.fresh):
-            envelope['verdict']['checks'].append({'id': 'gate:7:article:head', 'status': 'passed', 'blocking': True})
-            envelope['verdict']['summary']['checks'] += 1
-            envelope['verdict']['summary']['passed'] += 1
+            envelope['verdict']['checks'].extend(
+                {'id': check, 'status': 'passed', 'blocking': True} for check in new_checks)
+            envelope['verdict']['summary']['checks'] += len(new_checks)
+            envelope['verdict']['summary']['passed'] += len(new_checks)
         self.fixture['after'][0].update(media_type=media, source=source, sha256=digest)
         candidate = overlay(self.fixture['base'], change, self.fixture['after'])
         inputs = dict(self.artifacts, collection=None, external_evidence=None,
