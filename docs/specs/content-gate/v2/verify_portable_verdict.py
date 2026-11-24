@@ -154,12 +154,13 @@ def plain_text_word_count(source):
     return count
 
 
-def verify_plain_word_count_statuses(policy, verdict, after, counts):
-    """Compare observed plain-text counts; structured adapters need other projections."""
+def verify_plain_count_statuses(policy, verdict, after, counts, kind):
+    """Compare checked plain-text counts without inferring rich-text content."""
     checks = {check['id']: check for check in verdict['checks']}
     for gate in policy['gates']:
-        if gate['kind'] != 'word_count':
+        if gate['kind'] != kind:
             continue
+        ignore_whitespace = gate.get('ignore_whitespace', False)
         for item in after:
             if item['media_type'] != 'text/plain':
                 continue
@@ -167,13 +168,28 @@ def verify_plain_word_count_statuses(policy, verdict, after, counts):
             check = checks[f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}']
             if check['status'] not in ('passed', 'failed'):
                 continue
-            if entity not in counts:
-                counts[entity] = plain_text_word_count(item['source'])
-            count = counts[entity]
+            key = (entity, ignore_whitespace)
+            if key not in counts:
+                source = item['source']
+                if kind == 'word_count':
+                    counts[key] = plain_text_word_count(source)
+                elif ignore_whitespace:
+                    counts[key] = sum(not _rust_blank(char) for char in source)
+                else:
+                    counts[key] = len(source)
+            count = counts[key]
             failed = ((gate.get('min') is not None and count < gate['min']) or
                       (gate.get('max') is not None and count > gate['max']))
             if check['status'] != ('failed' if failed else 'passed'):
-                raise VerificationError('plain-text word count status differs from source')
+                raise VerificationError(f'plain-text {kind.replace("_", " ")} status differs from source')
+
+
+def verify_plain_word_count_statuses(policy, verdict, after, counts):
+    verify_plain_count_statuses(policy, verdict, after, counts, 'word_count')
+
+
+def verify_plain_character_count_statuses(policy, verdict, after, counts):
+    verify_plain_count_statuses(policy, verdict, after, counts, 'character_count')
 
 
 def collection_uniqueness_status(projection, field, group):
@@ -369,6 +385,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
                            for entry in change['entries']]}
     verdicts = []
     word_counts = {}
+    character_counts = {}
     for envelope in (previous, fresh):
         if not hmac.compare_digest(envelope['binding_sha256'], current_binding):
             raise VerificationError('candidate input binding differs')
@@ -383,6 +400,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         validate_verdict(verdict)
         coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'], collection_projection)
         verify_plain_word_count_statuses(policy, verdict, after, word_counts)
+        verify_plain_character_count_statuses(policy, verdict, after, character_counts)
         if links is not None:
             verify_link_observation_statuses(links, policy, verdict, change)
         if verdict['validator']['version'] != host_options['engine_version']:
