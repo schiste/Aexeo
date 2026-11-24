@@ -336,6 +336,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For CLI revalidation failures, assert the specific error exit and diagnostic,
   and that any previous output remains unchanged. A nonzero exit alone can be
   an ordinary failed editorial gate rather than a rejected revalidation.
+- When using Codex `exec_command` and `write_stdin` to drive an interactive CLI,
+  allocate a TTY so stdin remains open between events; account for input echo.
+  A process waiting after EOF may require closing its child pipe. Stop only the
+  processes started for the trial before retrying; do not leave them running.
 - For piped child processes, close the writer's owned stdin after sending input
   so a child reading to EOF can proceed; drain output concurrently. Bound test
   waits and terminate the test child on timeout so a pipe regression cannot
