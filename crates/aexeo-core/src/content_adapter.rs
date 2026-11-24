@@ -142,9 +142,9 @@ impl NativeSourceMap {
                     .ok_or_else(|| anyhow::anyhow!("native UTF-16 offset overflow"))?;
             }
             ensure!(
-                span.utf16_start
-                    .checked_add(units)
-                    .is_some_and(|end| end <= 9_007_199_254_740_991),
+                span.utf16_start.checked_add(units).is_some_and(
+                    |end| u64::try_from(end).is_ok_and(|end| end <= 9_007_199_254_740_991)
+                ),
                 "native UTF-16 offset exceeds interoperable integer range"
             );
             previous_end = span.end;
