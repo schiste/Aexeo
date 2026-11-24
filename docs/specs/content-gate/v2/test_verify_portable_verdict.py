@@ -324,6 +324,7 @@ class PortableComparison(unittest.TestCase):
         for gate, metadata in [
             (dict(kind='required_metadata', id='words', severity='warning', blocking=True, fields=['description']), {'title': 'é'}),
             (dict(kind='metadata_length', id='words', severity='warning', blocking=True, field='title', min=2, max=None), {'title': 'é'}),
+            (dict(kind='metadata_age', id='words', severity='warning', blocking=True, field='title', as_of='2024-03-01', max_days=1), {'title': '2024-02-28'}),
         ]:
             with self.subTest(gate=gate):
                 policy = json.loads(self.artifacts['resolved_policy'])
@@ -713,6 +714,9 @@ class PortableComparison(unittest.TestCase):
             ({'kind': 'required_metadata', 'fields': ['title']}, {}, 'failed'),
             ({'kind': 'metadata_length', 'field': 'title', 'min': 2, 'max': 2}, {'title': 'é😀'}, 'passed'),
             ({'kind': 'metadata_length', 'field': 'title', 'min': 3, 'max': None}, {'title': 'é😀'}, 'failed'),
+            ({'kind': 'metadata_age', 'field': 'title', 'as_of': '2024-03-01', 'max_days': 1}, {'title': '2024-02-29'}, 'passed'),
+            ({'kind': 'metadata_age', 'field': 'title', 'as_of': '2024-03-01', 'max_days': 1}, {'title': '2024-02-28'}, 'failed'),
+            ({'kind': 'metadata_age', 'field': 'title', 'as_of': '0001-01-01', 'max_days': 366}, {'title': '0000-01-01'}, 'passed'),
         ]
         for gate, metadata, expected in cases:
             with self.subTest(gate=gate, metadata=metadata):
@@ -737,6 +741,24 @@ class PortableComparison(unittest.TestCase):
                 verify_metadata_statuses(policy, verdict, change)
             verdict['checks'][0]['status'] = 'not_checked'
             verify_metadata_statuses(policy, verdict, change)
+
+    def test_metadata_age_rejects_invalid_dates_and_policy(self):
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        gate = dict(kind='metadata_age', id='words', severity='warning', blocking=False,
+                    field='title', as_of='2024-03-01', max_days=1)
+        policy = {'gates': [gate]}
+        for value in ('2024-02-30', '2024-03-02', '2024-2-01', None):
+            change['entries'][0]['metadata'] = {'title': value} if value is not None else {}
+            verdict['checks'][0]['status'] = 'passed'
+            with self.subTest(value=value), self.assertRaises(VerificationError):
+                verify_metadata_statuses(policy, verdict, change)
+            verdict['checks'][0]['status'] = 'not_checked'
+            verify_metadata_statuses(policy, verdict, change)
+        for changes in ({'as_of': '2023-02-29'}, {'max_days': True}, {'max_days': -1},
+                        {'field': ' '}, {'unknown': 1}):
+            with self.subTest(changes=changes), self.assertRaises(VerificationError):
+                verify_metadata_statuses({'gates': [dict(gate, **changes)]}, verdict, change)
 
     def test_missing_metadata_cannot_be_reported_as_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])

@@ -63,8 +63,8 @@ completeness, or protect the publication boundary. These offline experiments
 do not satisfy the obligations of a production v2-required runner.
 The Python comparator independently checks source-backed `final_newline` outcomes
 for plain text, Markdown and HTML. It and the Rust candidate helper also compare
-checked `required_metadata` and `metadata_length` statuses with the independently
-bound change metadata. An absent metadata object or length field cannot be reported
+checked `required_metadata`, `metadata_length` and `metadata_age` statuses with the independently
+bound change metadata. An absent metadata object, length field, or unavailable, invalid or future review date cannot be reported
 as checked; an explicit empty object can establish that a required field is absent.
 These comparisons do not establish that host-supplied metadata is accurate, current,
 or representative of rendered HTML. They do not establish equivalent support in

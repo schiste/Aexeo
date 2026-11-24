@@ -320,7 +320,11 @@ counts use Unicode scalars and the configured whitespace option. For checked
 it also counts LF/CRLF-separated blocks using the evaluator's whitespace and
 100,000-paragraph limit. It does not rebuild Markdown or HTML projections for
 these checks. Paragraph recomputation is currently specific to the Python
-comparator; do not assume a native runner performs it. Other gate parameters
+comparator; do not assume a native runner performs it. Both the Python comparator
+and the Aexeo candidate helper compare checked `metadata_age` results with the
+bound metadata date and fixed `as_of` policy date, including rejecting checked
+results for missing, malformed or future dates. This calculation does not prove
+the date is authentic, or that the source or article is current. Other gate parameters
 remain unvalidated. It cannot prove the
 evaluator ran the checks correctly or authenticate the
 policy or validator labels. The host must still independently select its required
