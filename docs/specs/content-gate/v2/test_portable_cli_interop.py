@@ -323,7 +323,7 @@ class PortableCliInterop(unittest.TestCase):
                     measured = subprocess.run(verify + ['--telemetry'], env=native_env, capture_output=True, text=True)
                     self.assertEqual(measured.returncode, 0, measured.stdout + measured.stderr)
                     event = json.loads(measured.stderr)
-                    self.assertEqual(event['punctuation_sources_checked'], 1)
+                    self.assertEqual(event['punctuation_source_mark_pairs_checked'], 1)
                     self.assertEqual(event['punctuation_bytes_checked'], len(source.encode('utf-8')))
                     self.assertNotIn(source, measured.stderr)
                 if expected == 'failed':

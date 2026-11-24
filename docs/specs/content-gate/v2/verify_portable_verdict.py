@@ -590,7 +590,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         raise VerificationError('verdicts differ')
     if telemetry_counts is not None:
         telemetry_counts.update(policy_gate_count=coverage_counts[0], policy_check_count=coverage_counts[1],
-                                punctuation_sources_checked=len(punctuation_counts) - ('_work' in punctuation_counts),
+                                punctuation_source_mark_pairs_checked=len(punctuation_counts) - ('_work' in punctuation_counts),
                                 punctuation_bytes_checked=punctuation_counts.get('_work', 0))
     return {'input_binding': 'match', 'fresh_verdict_match': True,
             'required_check_count': len(required_checks), 'publication_authorized': False}
