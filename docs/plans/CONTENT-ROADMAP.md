@@ -1131,3 +1131,10 @@ The experimental incremental CLI offers opt-in source locations for supported
 item findings, with snapshot digests, explicit mapping coverage and aggregate
 telemetry. The host remains responsible for checking revision freshness. This
 does not supply native CMS block locations or authenticate the snapshot.
+
+Additional incremental source-mapping regression coverage exercises heading
+hierarchy, structured lists, invalid link destinations and source-bound link
+observations in Markdown and HTML, including reused reports and rejected stale
+observations. Telemetry distinguishes unavailable whole proposals from
+unavailable individual item mappings. These fixtures do not establish live CMS
+revision freshness or browser-rendered visibility.
