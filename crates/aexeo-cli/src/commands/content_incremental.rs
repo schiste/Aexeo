@@ -893,7 +893,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
         };
         totals.not_checked += usize::from(unchecked);
         let mut row = serde_json::json!({"schema":"aexeo.content-incremental-result/v1-experimental", "proposal_index":index, "result":result});
-        if let Some(snapshot) = &source_snapshot {
+        if let (Some(snapshot), Some(item_preset)) = (&source_snapshot, &item_preset) {
             let mapping_started = std::time::Instant::now();
             let scope = if matches!(batch.mode, Mode::AdaptedMain) {
                 HtmlContentScope::Main
@@ -935,7 +935,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                             .map_err(anyhow::Error::from)
                             .and_then(|report| {
                                 aexeo_core::source_mapping::map_incremental_report(
-                                    item_preset.as_ref().expect("source mapping preset"),
+                                    item_preset,
                                     item,
                                     &report,
                                     scope,
