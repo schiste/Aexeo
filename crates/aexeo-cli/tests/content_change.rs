@@ -44,6 +44,33 @@ fn html_change(source: &str, digest: &str) -> serde_json::Value {
 }
 
 #[test]
+fn host_change_cli_binds_projection_and_withholds_unmapped_locations() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "application/vnd.aexeo.content-adapter+json".into();
+    change["entries"][0]["after"] = serde_json::json!({
+        "inline": r#"{"schema":"aexeo.content-adapter/v1","text":"one two"}"#,
+        "sha256":"8ea06281dfd3181de33d5784de18e9898ccb6ab103bd20e42fd40f92fe59e0f6"
+    });
+    let preset =
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=3\nblocking=true\n";
+    let output = run(dir.path(), &change, preset, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "fail");
+    assert_eq!(verdict["findings"].as_array().unwrap().len(), 1);
+    assert!(verdict["findings"][0].get("location").is_none());
+    change["entries"][0]["after"]["inline"] = "tampered".into();
+    assert_ne!(run(dir.path(), &change, preset, &[]).status.code(), Some(0));
+}
+
+#[test]
 fn change_evidence_cli_evaluates_and_revalidates_without_exposing_sources() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n";
