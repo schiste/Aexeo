@@ -353,6 +353,18 @@ completeness. One run under heavy concurrent compilation took 44.1 seconds
 without and 101.8 seconds with source positions; the machine load prevents
 using these numbers as a controlled benchmark or latency guarantee.
 
+A performance candidate in [PR #982](https://github.com/schiste/Aexeo/pull/982)
+scans the conservative lexical source map before building a DOM projection,
+while retaining source-bound validation. On the same 1,718-page archive, three
+alternating local release runs produced identical complete reports. Median
+graph-analysis time was 44.679 seconds before and 24.008 seconds after (46.3%
+lower); individual times were 50.251, 44.679 and 38.746 seconds before and
+24.008, 23.483 and 24.435 seconds after. The shared machine's load varied, so
+these observations are not a latency guarantee. Two 2,000-page synthetic
+fixtures, with simple and complex HTML, also produced identical reports; their
+subsecond runs were too short for a reliable speed estimate. The archived
+candidate, URL-map and deployment limitations above remain unchanged.
+
 
 Text and Markdown graph summaries count inbound findings present in the rendered
 audit, including findings absent from the graph as not verifiable. The number

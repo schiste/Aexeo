@@ -584,12 +584,62 @@ pub fn html_source_map_with_scope(
     html_source_map_inner(source, projected, scope, false)
 }
 
+// A lexical candidate cannot yield positions until it is validated against the
+// DOM projection from the same source and scope. Keeping both here prevents a
+// caller from validating offsets against an unrelated document.
+pub(crate) struct HtmlSourceMapCandidate<'a> {
+    source: &'a str,
+    scope: HtmlContentScope,
+    output: String,
+    spans: Vec<(usize, usize, usize, bool)>,
+    heading_starts: Vec<usize>,
+    link_starts: Vec<usize>,
+    list_shapes: Option<Vec<(usize, usize, usize)>>,
+}
+
+impl HtmlSourceMapCandidate<'_> {
+    pub(crate) fn validate(self, projected: &str) -> Option<HtmlSourceMap> {
+        // Numeric reference labels may be masked in the DOM projection.
+        // Confirm the projection independently before accepting the mask.
+        let reference_mask_matches = self.output != projected
+            && crate::content_gate::literal_projection_matches(projected, &self.output)
+            && html_content_with_scope("", self.source, self.scope)
+                .is_ok_and(|content| content.input.text.as_deref() == Some(projected));
+        if self.output != projected && !reference_mask_matches {
+            return None;
+        }
+        Some(HtmlSourceMap {
+            spans: self.spans,
+            heading_starts: self.heading_starts,
+            link_starts: self.link_starts,
+            list_shapes: self.list_shapes,
+            source_index: crate::text_index::LineIndex::new(self.source),
+            projected_index: crate::text_index::LineIndex::new(projected),
+        })
+    }
+}
+
+pub(crate) fn html_source_map_candidate(
+    source: &str,
+    scope: HtmlContentScope,
+) -> Option<HtmlSourceMapCandidate<'_>> {
+    scan_html_source_map(source, scope, false)
+}
+
 fn html_source_map_inner(
     source: &str,
     projected: &str,
     scope: HtmlContentScope,
     collect_lists: bool,
 ) -> Option<HtmlSourceMap> {
+    scan_html_source_map(source, scope, collect_lists)?.validate(projected)
+}
+
+fn scan_html_source_map(
+    source: &str,
+    scope: HtmlContentScope,
+    collect_lists: bool,
+) -> Option<HtmlSourceMapCandidate<'_>> {
     use crate::site::markup::{open_tag_end, tag_breaks_text};
     if source.len() > MAX_CONTENT_INPUT_BYTES
         || source.contains(['\0', '\x0b'])
@@ -1076,26 +1126,17 @@ fn html_source_map_inner(
             }
         }
     }
-    // Numeric reference labels are masked in the DOM projection. Verify a
-    // second time before accepting the same-length substitution so recovered
-    // or ambiguous HTML cannot acquire guessed coordinates.
-    let reference_mask_matches = output != projected
-        && crate::content_gate::literal_projection_matches(projected, &output)
-        && html_content_with_scope("", source, scope)
-            .is_ok_and(|content| content.input.text.as_deref() == Some(projected));
-    if !stack.is_empty()
-        || (output != projected && !reference_mask_matches)
-        || (scope == HtmlContentScope::Main && !main_seen)
-    {
+    if !stack.is_empty() || (scope == HtmlContentScope::Main && !main_seen) {
         return None;
     }
-    Some(HtmlSourceMap {
+    Some(HtmlSourceMapCandidate {
+        source,
+        scope,
+        output,
         spans,
         heading_starts,
         link_starts,
         list_shapes: collect_lists.then_some(list_shapes),
-        source_index: crate::text_index::LineIndex::new(source),
-        projected_index: crate::text_index::LineIndex::new(projected),
     })
 }
 
@@ -1414,6 +1455,31 @@ mod tests {
         assert_eq!(inside_list, None);
     }
     use super::*;
+
+    #[test]
+    fn lexical_candidate_requires_matching_dom_projection() {
+        let source = "<main>\n<p>É <a href='/source'>preuve</a>.</p>\n</main>";
+        let scope = HtmlContentScope::Main;
+        let content = html_content_with_scope("x", source, scope).unwrap();
+        let text = content.input.text.as_deref().unwrap();
+        let candidate = html_source_map_candidate(source, scope).unwrap();
+        let mapped = candidate.validate(text).unwrap();
+        let original = html_source_map_with_scope(source, text, scope).unwrap();
+        assert_eq!(
+            mapped.link_positions(source),
+            original.link_positions(source)
+        );
+        assert!(
+            html_source_map_candidate(source, scope)
+                .unwrap()
+                .validate("forged")
+                .is_none()
+        );
+        assert!(
+            html_source_map_candidate("<main><p><a href='/a'>broken</p></main>", scope).is_none()
+        );
+        assert!(html_source_map_candidate("<main><svg></svg></main>", scope).is_none());
+    }
 
     #[test]
     fn visible_http_url_keeps_sentence_measurement_and_source_position() {

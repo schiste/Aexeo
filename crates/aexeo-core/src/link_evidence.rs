@@ -216,12 +216,13 @@ pub fn extract_document_with_source_locations(
         return (links, metadata);
     }
     use crate::html_content_adapter::{
-        HtmlContentScope, html_content_with_scope, html_source_map_with_scope,
+        HtmlContentScope, html_content_with_scope, html_source_map_candidate,
     };
     let map_scope = |scope| {
+        let candidate = html_source_map_candidate(html, scope)?;
         let content = html_content_with_scope("", html, scope).ok()?;
         let text = content.input.text.as_deref()?;
-        let map = html_source_map_with_scope(html, text, scope)?;
+        let map = candidate.validate(text)?;
         let positions = map.link_positions(html)?;
         (positions.len() == content.destinations.len()).then_some((content.destinations, positions))
     };
