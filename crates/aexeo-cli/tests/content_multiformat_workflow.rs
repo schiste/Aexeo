@@ -451,6 +451,30 @@ fn numeric_citations_do_not_merge_sentences_across_markdown_and_html() {
 }
 
 #[test]
+fn paragraph_scoped_citations_keep_sentence_boundaries_across_formats() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/cross-adapter-citations.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example");
+    let preset = dir.path().join("workflow.toml");
+    let scoped_preset = format!(
+        "{}paragraphs_only=true\n",
+        fixture["preset"].as_str().unwrap()
+    );
+    fs::write(&preset, scoped_preset).unwrap();
+    for format in ["html", "markdown"] {
+        fs::write(&draft, fixture[format].as_str().unwrap()).unwrap();
+        let (report, _) = evaluate(&draft, &preset, format);
+        assert_eq!(
+            report["gates"][0]["measurements"]["sentence_count"], fixture["expected_sentences"],
+            "{format}"
+        );
+        assert_eq!(report["gates"][0]["status"], "failed", "{format}");
+        assert_eq!(report["source_mapping"]["mapped"], 2, "{format}");
+    }
+}
+
+#[test]
 fn markdown_footnote_markers_keep_separate_words_for_editorial_checks() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("example.md");
