@@ -987,16 +987,10 @@ pub fn evaluate_collection_with_completeness(
     }
     let items: Vec<_> = documents
         .iter()
-        .map(|document| {
-            let mut metadata = content_metadata(document);
-            for field in &document.unavailable_metadata_fields {
-                metadata.remove(field);
-            }
-            ContentInput {
-                id: document.route.clone(),
-                metadata: Some(metadata),
-                ..Default::default()
-            }
+        .map(|document| ContentInput {
+            id: document.route.clone(),
+            metadata: Some(content_metadata(document)),
+            ..Default::default()
         })
         .collect();
     let root = ContentInput {
@@ -2266,6 +2260,27 @@ field = "title"
         let report = evaluate_collection(&documents, &preset).unwrap();
         assert_eq!(report.gates[0].status, GateStatus::NotChecked);
         assert!(report.gates[0].findings.is_empty());
+    }
+
+    #[test]
+    fn collection_preserves_collisions_when_a_group_is_unavailable() {
+        let documents: Vec<EmdashDocument> = serde_json::from_str(
+            r#"[{"route":"/a","title":"Same","meta":{"locale":"en"}},
+                {"route":"/b","title":"Same","meta":{"locale":"en"}},
+                {"route":"/c","title":"Same","meta":{"locale":"en"},
+                 "unavailable_metadata_fields":["locale"]}]"#,
+        )
+        .unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='title'\ngroup_by='locale'\n",
+        ).unwrap();
+        let report = evaluate_collection(&documents, &preset).unwrap();
+        let gate = &report.gates[0];
+        assert_eq!(gate.status, GateStatus::NotChecked);
+        assert_eq!(gate.measurements["items_missing_group"], 1);
+        assert_eq!(gate.measurements["duplicate_items"], 1);
+        assert_eq!(gate.findings.len(), 1);
+        assert_eq!(gate.findings[0].path, "/b");
     }
 
     #[test]
