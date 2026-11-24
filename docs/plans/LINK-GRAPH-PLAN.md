@@ -316,7 +316,18 @@ unique across that page's graph. Other links stay unlocated. Aggregate opt-in
 telemetry counts mapped observations. This does not locate the original CMS or
 template source. `check`, `crawl` and incremental graph commands also expose
 the same opt-in mode; unchanged incremental pages reuse the mapped evidence.
-Real-site coverage and cost remain to be measured.
+A first real-artifact measurement on 2026-11-24 used the archived Aeptus
+candidate `67acfb31-b5a2-402f-bca7-c9b3947323f7` (archive SHA-256
+`a71adf85c69daaeca9f74bdcdcd9265a07c4fecd69d838764c421f02d5f1c289`)
+and an optimized local build at `45702c6b947a`. Both modes mapped all 1,501
+HTML files and observed 128,223 links; the conservative source map located
+zero links. Graph telemetry reported 8.969 seconds without and 14.227 seconds
+with source positions; total wall times were 10.416 and 15.181 seconds.
+These single runs occurred on a shared machine and are not a benchmark or a
+latency guarantee. The candidate includes a draft, its URLs were inferred and
+it does not establish deployment or completeness. Real pages use elements
+including SVG and interactive components outside the mapper's supported subset;
+broader safe mapping and real-site validation remain open.
 
 
 Text and Markdown graph summaries count inbound findings present in the rendered
