@@ -1440,6 +1440,7 @@ fn verify_host_candidate_projection(
             gate,
             ContentGate::WordCount { .. }
                 | ContentGate::CharacterCount { .. }
+                | ContentGate::ParagraphCount { .. }
                 | ContentGate::RequiredHeadings { .. }
                 | ContentGate::HeadingLength { .. }
                 | ContentGate::HeadingHierarchy { .. }
@@ -1454,6 +1455,7 @@ fn verify_host_candidate_projection(
         .collect();
     let mut plain = Vec::with_capacity(host.len());
     let mut word_counts = std::collections::BTreeMap::new();
+    let mut paragraph_counts = std::collections::BTreeMap::new();
     for item in host {
         let value = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(
             item.source.as_bytes(),
@@ -1464,7 +1466,7 @@ fn verify_host_candidate_projection(
         if object.keys().any(|key| {
             !matches!(
                 key.as_str(),
-                "schema" | "text" | "block_ends" | "headings" | "heading_levels"
+                "schema" | "text" | "block_ends" | "headings" | "heading_levels" | "paragraphs"
             )
         }) || object.get("schema").and_then(|v| v.as_str()) != Some("aexeo.content-adapter/v1")
         {
@@ -1474,6 +1476,20 @@ fn verify_host_candidate_projection(
             .get("text")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("host text is unavailable"))?;
+        if object
+            .get("paragraphs")
+            .is_some_and(|value| !value.is_array())
+        {
+            bail!("invalid host paragraphs");
+        }
+        // Reuse the adapter's UTF-8, ordering, overlap and observation-limit checks.
+        // Avoid a second parse when no paragraph observations were supplied.
+        if object.contains_key("paragraphs") {
+            let adapted = crate::content_adapter::parse(item.entity_id.clone(), &item.source)?;
+            if let Some(paragraphs) = adapted.context.paragraphs {
+                paragraph_counts.insert(item.entity_id.clone(), paragraphs.len());
+            }
+        }
         let headings = object
             .get("headings")
             .map(|value| -> Result<Vec<&str>> {
@@ -1611,7 +1627,14 @@ fn verify_host_candidate_projection(
         projected.source = text.into();
         plain.push(projected);
     }
-    verify_candidate_plain_counts_with_words(verdict, preset, &plain, false, Some(&word_counts))?;
+    verify_candidate_plain_counts_with_words(
+        verdict,
+        preset,
+        &plain,
+        false,
+        Some(&word_counts),
+        Some(&paragraph_counts),
+    )?;
     Ok(true)
 }
 
@@ -1621,7 +1644,14 @@ fn verify_candidate_plain_counts(
     after: &[crate::content_candidate::CandidateItem],
     plain_text_paragraphs: bool,
 ) -> Result<()> {
-    verify_candidate_plain_counts_with_words(verdict, preset, after, plain_text_paragraphs, None)
+    verify_candidate_plain_counts_with_words(
+        verdict,
+        preset,
+        after,
+        plain_text_paragraphs,
+        None,
+        None,
+    )
 }
 
 fn verify_candidate_plain_counts_with_words(
@@ -1630,6 +1660,7 @@ fn verify_candidate_plain_counts_with_words(
     after: &[crate::content_candidate::CandidateItem],
     plain_text_paragraphs: bool,
     word_counts: Option<&std::collections::BTreeMap<String, usize>>,
+    paragraph_counts: Option<&std::collections::BTreeMap<String, usize>>,
 ) -> Result<()> {
     use crate::content_gate::ContentGate;
     if !preset.gates.iter().any(|gate| {
@@ -1680,25 +1711,32 @@ fn verify_candidate_plain_counts_with_words(
                         .count()
                 }),
                 ContentGate::ParagraphCount { .. } => {
-                    if !plain_text_paragraphs {
-                        bail!("candidate evaluator cannot inspect unavailable paragraphs");
-                    }
-                    if paragraphs.is_none() {
-                        let mut count = 0usize;
-                        let mut inside = false;
-                        for line in item.source.split_inclusive('\n') {
-                            let blank = line.trim_end_matches(['\r', '\n']).trim().is_empty();
-                            if !blank && !inside {
-                                count += 1;
-                                if count > crate::plain_text_adapter::MAX_PLAIN_TEXT_PARAGRAPHS {
-                                    bail!("plain-text paragraph count exceeds evaluator limit");
-                                }
-                            }
-                            inside = !blank;
+                    if let Some(counts) = paragraph_counts {
+                        *counts
+                            .get(&item.entity_id)
+                            .ok_or_else(|| anyhow::anyhow!("host paragraphs unavailable"))?
+                    } else {
+                        if !plain_text_paragraphs {
+                            bail!("candidate evaluator cannot inspect unavailable paragraphs");
                         }
-                        paragraphs = Some(count);
+                        if paragraphs.is_none() {
+                            let mut count = 0usize;
+                            let mut inside = false;
+                            for line in item.source.split_inclusive('\n') {
+                                let blank = line.trim_end_matches(['\r', '\n']).trim().is_empty();
+                                if !blank && !inside {
+                                    count += 1;
+                                    if count > crate::plain_text_adapter::MAX_PLAIN_TEXT_PARAGRAPHS
+                                    {
+                                        bail!("plain-text paragraph count exceeds evaluator limit");
+                                    }
+                                }
+                                inside = !blank;
+                            }
+                            paragraphs = Some(count);
+                        }
+                        paragraphs.ok_or_else(|| anyhow::anyhow!("paragraph count unavailable"))?
                     }
-                    paragraphs.ok_or_else(|| anyhow::anyhow!("paragraph count unavailable"))?
                 }
                 _ => bail!("unsupported count gate"),
             };
@@ -9461,6 +9499,67 @@ mod tests {
         )
         .unwrap();
         assert!(verify_host_candidate_projection(&verdict, &unsupported, &[item]).is_err());
+    }
+
+    #[test]
+    fn portable_host_paragraph_count_is_recomputed() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='host-paragraphs'\n[[gates]]\nid='count'\nkind='paragraph_count'\nmin=2\nmax=2\n").unwrap();
+        let source = r#"{"schema":"aexeo.content-adapter/v1","text":"é x","paragraphs":[{"start":0,"end":2},{"start":3,"end":4,"list_item":false}]}"#;
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let verdict = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        let mut item = crate::content_candidate::CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: crate::content_adapter::MEDIA_TYPE.into(),
+            revision: None,
+            sha256: format!("{:x}", Sha256::digest(source.as_bytes())),
+            source: source.into(),
+            links: None,
+        };
+        assert!(
+            verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                .unwrap()
+        );
+        let empty = source.replace(
+            r#"[{"start":0,"end":2},{"start":3,"end":4,"list_item":false}]"#,
+            "[]",
+        );
+        item.source = empty.clone();
+        let mut failed = verdict.clone();
+        failed.checks[0].status = CheckStatus::Failed;
+        assert!(
+            verify_host_candidate_projection(&failed, &preset, std::slice::from_ref(&item))
+                .unwrap()
+        );
+        for altered in [
+            empty,
+            source.replace(r#""end":2"#, r#""end":1"#),
+            source.replace(r#""start":3"#, r#""start":1"#),
+            source.replace(
+                r#""paragraphs":[{"start":0,"end":2},{"start":3,"end":4,"list_item":false}]"#,
+                r#""paragraphs":null"#,
+            ),
+            r#"{"schema":"aexeo.content-adapter/v1","text":"é x"}"#.into(),
+        ] {
+            item.source = altered;
+            assert!(
+                verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                    .is_err()
+            );
+        }
     }
 
     #[test]

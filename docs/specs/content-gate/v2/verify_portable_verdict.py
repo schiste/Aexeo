@@ -410,19 +410,47 @@ def verify_host_candidate_projection(policy, verdict, after):
     if not host:
         return False
     if (not isinstance(policy, dict) or not isinstance(policy.get('gates'), list)
-            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'required_headings', 'heading_length', 'heading_hierarchy'}
+            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'paragraph_count', 'required_headings', 'heading_length', 'heading_hierarchy'}
                    for gate in policy['gates'])):
         raise VerificationError('host adapter portable verification does not support this gate')
     checks = {check['id']: check for check in verdict['checks']}
     plain = []
     word_counts = {}
+    paragraph_counts = {}
     for item in host:
         projection = parse(item['source'].encode('utf-8'))
-        if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings', 'heading_levels'}
+        if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings', 'heading_levels', 'paragraphs'}
                 or projection['schema'] != 'aexeo.content-adapter/v1'
                 or not isinstance(projection['text'], str)):
             raise VerificationError('unsupported portable host projection')
         text(projection['text'])
+        paragraphs = projection.get('paragraphs')
+        if 'paragraphs' in projection:
+            if not isinstance(paragraphs, list) or len(paragraphs) > 100_000:
+                raise VerificationError('invalid host paragraphs')
+            source_bytes = projection['text'].encode('utf-8')
+            previous_end = 0
+            for paragraph in paragraphs:
+                if (not isinstance(paragraph, dict) or not {'start', 'end'} <= set(paragraph)
+                        or set(paragraph) - {'start', 'end', 'list_item'}
+                        or type(paragraph['start']) is not int or type(paragraph['end']) is not int
+                        or paragraph['start'] < previous_end or paragraph['end'] <= paragraph['start']
+                        or paragraph['end'] > len(source_bytes)
+                        or ('list_item' in paragraph and paragraph['list_item'] is not None
+                            and type(paragraph['list_item']) is not bool)):
+                    raise VerificationError('invalid host paragraph range')
+                try:
+                    source_bytes[previous_end:paragraph['start']].decode('utf-8')
+                    source_bytes[paragraph['start']:paragraph['end']].decode('utf-8')
+                except UnicodeDecodeError as exc:
+                    raise VerificationError('invalid host paragraph range') from exc
+                previous_end = paragraph['end']
+            paragraph_counts[(item['entity_id'], False)] = len(paragraphs)
+        for gate in policy['gates']:
+            if gate['kind'] == 'paragraph_count' and paragraphs is None:
+                check_id = f'gate:{len(item["entity_id"].encode("utf-8"))}:{item["entity_id"]}:{gate["id"]}'
+                if checks.get(check_id, {}).get('status') != 'not_checked':
+                    raise VerificationError('host paragraphs unavailable')
         headings = projection.get('headings')
         if 'headings' in projection:
             if (not isinstance(headings, list) or len(headings) > 100_000
@@ -506,6 +534,7 @@ def verify_host_candidate_projection(policy, verdict, after):
         plain.append(dict(item, media_type='text/plain', source=projection['text']))
     verify_plain_word_count_statuses(policy, verdict, plain, word_counts)
     verify_plain_character_count_statuses(policy, verdict, plain, {})
+    verify_plain_paragraph_count_statuses(policy, verdict, plain, paragraph_counts)
     return True
 
 

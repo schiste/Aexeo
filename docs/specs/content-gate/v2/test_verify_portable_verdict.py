@@ -126,6 +126,30 @@ class PortableComparison(unittest.TestCase):
             with self.subTest(maximum=invalid), self.assertRaises(VerificationError):
                 require_policy_coverage(policy, change, False, verdict)
 
+    def test_host_paragraph_counts_and_ranges_are_recomputed(self):
+        policy = {'gates': [{'kind': 'paragraph_count', 'id': 'count', 'min': 2, 'max': 2}]}
+        verdict = {'checks': [{'id': 'gate:1:a:count', 'status': 'passed'}], 'findings': []}
+        projection = {'schema': 'aexeo.content-adapter/v1', 'text': 'é x',
+                      'paragraphs': [{'start': 0, 'end': 2}, {'start': 3, 'end': 4, 'list_item': False}]}
+        item = {'entity_id': 'a', 'media_type': 'application/vnd.aexeo.content-adapter+json',
+                'source': json.dumps(projection)}
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [item]))
+        for paragraphs in ([], None, [{'start': 0, 'end': 1}], [{'start': 0, 'end': 2}, {'start': 1, 'end': 4}],
+                           [{'start': 0, 'end': 5}], [{'start': True, 'end': 2}],
+                           [{'start': 0, 'end': 2, 'other': 1}]):
+            bad = dict(projection, paragraphs=paragraphs)
+            with self.subTest(paragraphs=paragraphs), self.assertRaises(VerificationError):
+                verify_host_candidate_projection(policy, verdict, [dict(item, source=json.dumps(bad))])
+        empty = dict(item, source=json.dumps(dict(projection, paragraphs=[])))
+        verdict['checks'][0]['status'] = 'failed'
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [empty]))
+        verdict['checks'][0]['status'] = 'passed'
+        missing = dict(item, source=json.dumps({'schema': projection['schema'], 'text': projection['text']}))
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_projection(policy, verdict, [missing])
+        verdict['checks'][0]['status'] = 'not_checked'
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [missing]))
+
     def test_host_required_headings_are_recomputed(self):
         policy = {'gates': [{'kind': 'required_headings', 'id': 'head', 'headings': ['Intro', 'Fin']}]}
         verdict = {'checks': [{'id': 'gate:1:a:head', 'status': 'passed'}], 'findings': []}
@@ -158,7 +182,7 @@ class PortableComparison(unittest.TestCase):
 
     def test_bound_host_projection_accepts_only_recomputed_counts(self):
         import hashlib
-        source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1],"headings":["Intro"],"heading_levels":[2]}'
+        source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1],"headings":["Intro"],"heading_levels":[2],"paragraphs":[{"start":0,"end":3}]}'
         digest = hashlib.sha256(source.encode()).hexdigest()
         media = 'application/vnd.aexeo.content-adapter+json'
         change = json.loads(self.artifacts['change'])
@@ -171,9 +195,10 @@ class PortableComparison(unittest.TestCase):
         policy['gates'].extend([
             {'kind': 'heading_length', 'id': 'length', 'severity': 'warning', 'blocking': True, 'max_chars': 5},
             {'kind': 'heading_hierarchy', 'id': 'hierarchy', 'severity': 'warning', 'blocking': True, 'initial_level': 1},
+            {'kind': 'paragraph_count', 'id': 'paragraphs', 'severity': 'warning', 'blocking': True, 'min': 1, 'max': 1},
         ])
         self.artifacts['resolved_policy'] = self.encoded(policy)
-        new_checks = ['gate:7:article:head', 'gate:7:article:length', 'gate:7:article:hierarchy']
+        new_checks = ['gate:7:article:head', 'gate:7:article:length', 'gate:7:article:hierarchy', 'gate:7:article:paragraphs']
         self.required.extend(new_checks)
         for envelope in (self.previous, self.fresh):
             envelope['verdict']['checks'].extend(
