@@ -266,24 +266,35 @@ pub fn extract_document_with_source_locations(
             links[index].column = Some(column);
         }
     }
-    let mut counts = std::collections::HashMap::new();
-    for link in &links {
-        *counts.entry(link.href.clone()).or_insert(0usize) += 1;
-    }
-    if links
-        .iter()
-        .any(|link| link.line.is_none() && counts.get(&link.href) == Some(&1))
-        && let Some(offsets) = positions::unique_anchor_offsets(html)
+    if links.iter().any(|link| link.line.is_none())
+        && let Some((dom, offsets)) = positions::trace_anchor_nodes(html)
     {
-        let index = crate::text_index::LineIndex::new(html);
-        for link in &mut links {
-            if link.line.is_none()
-                && counts.get(&link.href) == Some(&1)
-                && let Some(Some(offset)) = offsets.get(&link.href)
-                && let Some((line, column)) = index.position(html, *offset)
-            {
-                link.line = Some(line);
-                link.column = Some(column);
+        let (traced, traced_metadata) = extract_from_dom(
+            &dom,
+            source_url,
+            site_origin,
+            snapshot_date,
+            Some((html, &offsets)),
+        );
+        // Only use coordinates if the independent DOM produced exactly the same
+        // evidence. Never use token or href order alone to infer node identity.
+        if metadata == traced_metadata && links.len() == traced.len() {
+            let equivalent = links.iter().zip(&traced).all(|(original, candidate)| {
+                let mut original = original.clone();
+                let mut candidate = candidate.clone();
+                original.line = None;
+                original.column = None;
+                candidate.line = None;
+                candidate.column = None;
+                original == candidate
+            });
+            if equivalent {
+                for (original, candidate) in links.iter_mut().zip(traced) {
+                    if original.line.is_none() {
+                        original.line = candidate.line;
+                        original.column = candidate.column;
+                    }
+                }
             }
         }
     }
@@ -330,6 +341,20 @@ pub fn extract_document(
         ..Default::default()
     };
     let dom = parse_document(RcDom::default(), opts).one(html);
+    extract_from_dom(&dom, source_url, site_origin, snapshot_date, None)
+}
+
+fn extract_from_dom(
+    dom: &RcDom,
+    source_url: &str,
+    site_origin: &str,
+    snapshot_date: Option<&str>,
+    offsets: Option<(
+        &str,
+        &std::collections::HashMap<*const markup5ever_rcdom::Node, usize>,
+    )>,
+) -> (Vec<LinkEvidence>, HtmlLinkMetadata) {
+    let source_index = offsets.map(|(source, _)| crate::text_index::LineIndex::new(source));
     let mut base = None;
     let mut metadata = HtmlLinkMetadata::default();
     let mut nodes = vec![dom.document.clone()];
@@ -478,6 +503,11 @@ pub fn extract_document(
             if let Some(href) = href {
                 let resolution = resolver.resolve(&href);
                 let anchor = anchor_label(&node);
+                let position = offsets.and_then(|(source, offsets)| {
+                    offsets
+                        .get(&Rc::as_ptr(&node))
+                        .and_then(|offset| source_index.as_ref()?.position(source, *offset))
+                });
                 links.push(LinkEvidence {
                     source: source_url.to_string(),
                     href,
@@ -492,8 +522,8 @@ pub fn extract_document(
                     hidden_inline_style: Some(scope.hidden_inline_style),
                     collapsed_details: Some(scope.collapsed_details),
                     rel: crawl_rel_tokens(attribute(&node, "rel")),
-                    line: None,
-                    column: None,
+                    line: position.map(|(line, _)| line),
+                    column: position.map(|(_, column)| column),
                     resolution,
                 });
             }
@@ -649,13 +679,22 @@ mod tests {
     }
 
     #[test]
-    fn main_scope_maps_unique_links_without_guessing_repeated_destinations() {
+    fn repeated_destinations_map_to_their_own_nodes() {
         let source = "<!DOCTYPE html><html><head><title>Page</title></head><body><nav><a href='/shared'>nav</a></nav><main><p><a href='/unique'>body</a> <a href='/shared'>same</a></p></main><footer><a href='/footer'>footer</a></footer></body></html>";
         let (links, _) = extract_document_with_source_locations(
             source,
             "https://example.org/",
             "https://example.org",
             None,
+        );
+        let mut without_positions = links.clone();
+        for link in &mut without_positions {
+            link.line = None;
+            link.column = None;
+        }
+        assert_eq!(
+            without_positions,
+            extract_document(source, "https://example.org/", "https://example.org", None).0
         );
         let unique = links.iter().find(|link| link.href == "/unique").unwrap();
         let expected = crate::text_index::LineIndex::new(source)
@@ -665,12 +704,19 @@ mod tests {
             (unique.line, unique.column),
             (Some(expected.0), Some(expected.1))
         );
-        assert!(
-            links
-                .iter()
-                .filter(|link| link.href == "/shared")
-                .all(|link| link.line.is_none())
-        );
+        for (link, tag) in links
+            .iter()
+            .filter(|link| link.href == "/shared")
+            .zip(["<a href='/shared'>nav", "<a href='/shared'>same"])
+        {
+            let expected = crate::text_index::LineIndex::new(source)
+                .position(source, source.find(tag).unwrap())
+                .unwrap();
+            assert_eq!(
+                (link.line, link.column),
+                (Some(expected.0), Some(expected.1))
+            );
+        }
         let footer = links.iter().find(|link| link.href == "/footer").unwrap();
         let expected = crate::site::markup::LineIndex::new(source)
             .line_column(source.find("<a href='/footer'>").unwrap());
@@ -681,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn html5_token_fallback_locates_unique_realistic_links_and_retains_ambiguity() {
+    fn html5_node_tracing_locates_repeated_realistic_links() {
         let source = "<!doctype html><html><head><title>x</title><script>const a = '<a href=\"/fake\">';</script></head><body><main><svg><path d='M0 0'></path></svg><p>é <a href='/unique?x=1&amp;y=2'>one</a><a href='/same'>two</a><a href='/same'>three</a></p></main></body></html>";
         let (links, _) = extract_document_with_source_locations(
             source,
@@ -699,13 +745,41 @@ mod tests {
             (unique.line, unique.column),
             (Some(expected.0), Some(expected.1))
         );
-        assert!(
-            links
-                .iter()
-                .filter(|link| link.href == "/same")
-                .all(|link| link.line.is_none())
-        );
+        for (link, text) in links
+            .iter()
+            .filter(|link| link.href == "/same")
+            .zip(["two", "three"])
+        {
+            let tag = format!("<a href='/same'>{text}");
+            let expected =
+                crate::site::markup::LineIndex::new(source).line_column(source.find(&tag).unwrap());
+            assert_eq!(
+                (link.line, link.column),
+                (Some(expected.0), Some(expected.1))
+            );
+        }
         assert!(!links.iter().any(|link| link.href == "/fake"));
+    }
+
+    #[test]
+    fn ambiguous_token_does_not_steal_repeated_link_position() {
+        let source = "<!doctype html><html><head><title>x</title></head><body><main><p><a title=\"<a href='/fake'\" href='/same'>first</a> é <a href='/same'>second</a></p></main></body></html>";
+        let (links, _) = extract_document_with_source_locations(
+            source,
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(links.len(), 2);
+        assert_eq!((links[0].line, links[0].column), (None, None));
+        let offset = source.find("<a href='/same'>second").unwrap();
+        let expected = crate::text_index::LineIndex::new(source)
+            .position(source, offset)
+            .unwrap();
+        assert_eq!(
+            (links[1].line, links[1].column),
+            (Some(expected.0), Some(expected.1))
+        );
     }
 
     fn routes(html: &str, page_url: &str) -> Vec<String> {
