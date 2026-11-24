@@ -174,6 +174,15 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- Revision audits and unsaved candidate audits reject a current CMS record whose
+  ID or collection differs from the request; a mismatched later read leaves
+  revision and locale status unknown. This prevents mixing host-supplied records
+  but does not authenticate the host, prove freshness or authorize publication.
+  The existing audit log records only the bounded mismatch reason. On 2026-11-24,
+  a read-only Preview sample returned a current `blog_posts` record and five
+  revisions with matching entry and collection identities. This limited sample
+  does not exercise the deployed audit action or establish host authenticity.
+
 - [x] Show retained projected body-block counts independently from capability
   coverage in revision audits and both CMS views. Save and refresh logs aggregate
   incomplete projections without content or identifiers; counts describe adapter

@@ -368,6 +368,33 @@ describe("revision audits", () => {
     expect(evaluate).not.toHaveBeenCalled();
     expect(set).not.toHaveBeenCalled();
   });
+  it.each([{ id: "other" }, { type: "pages" }])("does not audit when the initial current record has a different identity: %s", async (changes) => {
+    const { ctx, current, revision } = host();
+    ctx.content.get.mockResolvedValue({ ...current, ...changes });
+    (revision.data as Record<string, unknown>).intro = "Historical introduction.";
+    const evaluate = vi.fn(async () => report);
+    const set = vi.spyOn(ctx.kv, "set");
+    const input = { collection: "posts", id: "one", revision: "rev1" };
+    const options = { preset: { name: "article", fragmentFieldsByCollection: { posts: { intro: "fragment" } } }, evaluate };
+    expect(await auditRevision(ctx as never, input, options)).toMatchObject({ status: "not_checked", reason: "current_identity_mismatch" });
+    expect(await auditCandidate(ctx as never, { ...input, field: "intro", candidate: "candidate" }, options)).toMatchObject({ status: "not_checked", reason: "current_identity_mismatch" });
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it.each([{ id: "other" }, { type: "pages" }])("treats a different later record as unknown freshness: %s", async (changes) => {
+    const { ctx, current } = host();
+    const wrong = { ...current, ...changes };
+    ctx.content.get.mockResolvedValueOnce(current).mockResolvedValueOnce(wrong);
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, evaluate: async () => report });
+    expect(result).toMatchObject({ status: "evaluated", revision_status: "unknown", locale_status: "unknown" });
+    if (result.status !== "evaluated") throw new Error("expected report");
+    ctx.content.get.mockResolvedValueOnce(wrong);
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision_status: "unknown", locale_status: "unknown" });
+    ctx.content.get.mockResolvedValueOnce(current);
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision_status: "published", locale_status: "unchanged" });
+  });
+
   it("retains the report with unknown freshness if the later host read fails", async () => {
     const { ctx, current } = host();
     ctx.content.get.mockResolvedValueOnce(current).mockRejectedValueOnce(new Error("private host error"));
@@ -461,6 +488,17 @@ describe("revision audits", () => {
     await plugin.routes["audit-revision"]!.handler({ content: {}, kv: {}, log: { info }, input: { collection: "posts", id: "one", revision: "rev1", field: "private-field" } });
     expect(info).toHaveBeenCalledWith("aexeo.revision_audit", expect.objectContaining({ status: "not_checked", scope: "fragment", duration_ms: expect.any(Number), gates: 0 }));
     expect(JSON.stringify(info.mock.calls)).not.toContain("private-field");
+  });
+  it("logs an identity mismatch without the records or identifiers", async () => {
+    const { ctx, current } = host();
+    ctx.content.get.mockResolvedValue({ ...current, id: "private-other" });
+    const info = vi.fn();
+    const plugin = createPlugin({ revisionAudits: true }) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    const result = await plugin.routes["audit-revision"]!.handler({ ...ctx, log: { info }, input: { collection: "posts", id: "one", revision: "rev1" } });
+    expect(result).toEqual({ status: "not_checked", reason: "current_identity_mismatch" });
+    expect(info).toHaveBeenCalledWith("aexeo.revision_audit", expect.objectContaining({ status: "not_checked", reason: "current_identity_mismatch", gates: 0 }));
+    expect(JSON.stringify(info.mock.calls)).not.toContain("private-other");
+    expect(JSON.stringify(info.mock.calls)).not.toContain("rev1");
   });
   it("records a bounded read failure without logging host errors or identifiers", async () => {
     const { ctx } = host();
