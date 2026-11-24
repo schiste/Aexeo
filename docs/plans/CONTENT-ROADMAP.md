@@ -702,8 +702,10 @@ registry before considering the release delivered.
   resolved-policy gate's item or collection check and the configured blocking
   flag. Matching bindings and a narrow host-required check list cannot hide an
   omitted advisory or blocking gate. The Python comparator also validates resolved
-  word, character, paragraph and metadata-length count gate parameters. Other
-  gate parameters still require independent validation. The Python comparator
+  word, character, paragraph and metadata-length count gate parameters, plus
+  the resolved forms and parameters of required-heading, heading-length and
+  heading-hierarchy gates. Other gate parameters still require independent
+  validation. The Python comparator
   also rejects checked collection uniqueness results for incomplete snapshots
   or unavailable required metadata, and independently recomputes checked
   uniqueness outcomes within bounded work and evaluator limits. This does not
