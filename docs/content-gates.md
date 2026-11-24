@@ -2067,7 +2067,10 @@ establish provenance or freshness. Collection-only checks have no item source
 mapping. Existing findings and verdicts are unchanged. This optional operation
 reprojects candidate content and costs additional time and memory. With
 `--telemetry`, aggregate mapping coverage and elapsed time are emitted to stderr
-without source text or paths.
+without source text or paths. `source_mapping_unavailable` sums unavailable
+item mappings and whole proposals whose item reports or candidate could not be
+mapped; separate `source_mapping_unavailable_items` and
+`source_mapping_unavailable_proposals` counters distinguish those cases.
 
 For referenced file states, explicitly authorize an absolute `--content-root`;
 its value must match the change's `content_root`. For URI states, also supply

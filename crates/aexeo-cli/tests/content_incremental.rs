@@ -80,7 +80,11 @@ fn incomplete_baseline_and_stale_proposal_fail_closed() {
     let results = lines(&output);
     assert_eq!(results[0]["result"]["status"], "evaluated");
     assert_eq!(results[1]["result"]["status"], "not_checked");
-    let mapped = run(&input, &["--source-locations"]);
+    let mapped = run(&input, &["--source-locations", "--telemetry"]);
+    let telemetry: Value = serde_json::from_slice(&mapped.stderr).unwrap();
+    assert_eq!(telemetry["source_mapping_unavailable"], 1);
+    assert_eq!(telemetry["source_mapping_unavailable_proposals"], 1);
+    assert_eq!(telemetry["source_mapping_unavailable_items"], 0);
     let mapped_results = lines(&mapped);
     assert_eq!(mapped_results[1]["source_mapping"]["status"], "unavailable");
     assert_eq!(mapped_results[1]["source_mapping"]["items"], json!({}));
@@ -872,6 +876,29 @@ fn exported_link_templates_round_trip_and_fail_closed() {
         }
     }
     assert_eq!(run(&input, &[]).status.code(), Some(0));
+    let mut broken = input.clone();
+    broken["base_link_observations"]["b"]["observations"][0] = json!("not_found");
+    for proposal in broken["proposals"].as_array_mut().unwrap() {
+        for id in ["a", "b"] {
+            proposal["link_observations"][id]["observations"][0] = json!("not_found");
+        }
+    }
+    let mapped = run(&broken, &["--source-locations", "--telemetry"]);
+    assert_eq!(mapped.status.code(), Some(0));
+    for row in lines(&mapped) {
+        for id in ["a", "b"] {
+            let coverage = &row["source_mapping"]["items"][id]["coverage"];
+            assert_eq!(coverage["eligible"], 1);
+            assert_eq!(coverage["mapped"], 1);
+            assert_eq!(coverage["locations"][0]["line"], 1);
+            assert_eq!(coverage["locations"][0]["column"], 1);
+        }
+    }
+    assert!(!String::from_utf8_lossy(&mapped.stderr).contains("example.org"));
+    broken["proposals"][0]["link_observations"]["a"]["source_sha256"] = json!("0".repeat(64));
+    let stale = run(&broken, &["--source-locations"]);
+    assert_eq!(lines(&stale)[0]["result"]["status"], "not_checked");
+    assert_eq!(lines(&stale)[0]["source_mapping"]["status"], "unavailable");
     assert!(
         !run(&input, &["--export-link-observations"])
             .status
@@ -1655,5 +1682,63 @@ fn opt_in_source_locations_follow_candidate_and_reused_snapshots() {
         }
         assert!(!String::from_utf8_lossy(&output.stderr).contains(source));
         assert!(lines(&run(&input, &[]))[0].get("source_mapping").is_none());
+    }
+}
+
+#[test]
+fn incremental_source_locations_cover_structural_and_link_findings() {
+    for (media, source, digest, expected_lines) in [
+        (
+            "text/markdown",
+            "# Start\n\n### Skipped\n\n- one\n- two\n- three\n\n[bad](http://example.org)\n",
+            "60e6024214e686b99596e25b5de681fe6d4ce3115ff4a27407dddd7264445fa0",
+            [3, 5, 9],
+        ),
+        (
+            "text/html",
+            "<h1>Start</h1>\n<h3>Skipped</h3>\n<ul><li>one</li><li>two</li><li>three</li></ul>\n<p><a href=\"http://example.org\">bad</a></p>",
+            "43611346da58f9a50e2a0ee13bb47808cca22e38e6950103118bb6fb0a615287",
+            [2, 3, 4],
+        ),
+    ] {
+        let mut input = batch();
+        input["mode"] = json!("adapted");
+        input["preset"] = json!("structural");
+        input["preset_sources"] = json!({"structural":"version=1\nname='structural'\n[[gates]]\nid='heads'\nkind='heading_hierarchy'\nblocking=false\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=false\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=false\n"});
+        let update = |item: &mut Value| {
+            item["media_type"] = json!(media);
+            item["source"] = json!(source);
+            item["sha256"] = json!(digest);
+        };
+        update(&mut input["snapshot"]["items"][0]);
+        for proposal in input["proposals"].as_array_mut().unwrap() {
+            update(&mut proposal["after"][0]);
+            proposal["change"]["entries"][0]["media_type"] = json!(media);
+            proposal["change"]["entries"][0]["after"] = json!({"inline":source,"sha256":digest});
+        }
+        let output = run(&input, &["--source-locations"]);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for row in lines(&output) {
+            for id in ["a", "b"] {
+                let coverage = &row["source_mapping"]["items"][id]["coverage"];
+                assert_eq!(coverage["eligible"], 3, "{media}: {coverage}");
+                assert_eq!(coverage["mapped"], 3, "{media}: {coverage}");
+                for (gate, line) in ["heads", "lists", "links"].iter().zip(expected_lines) {
+                    let location = coverage["locations"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|x| x["gate_id"] == *gate)
+                        .unwrap();
+                    assert_eq!(location["line"], line, "{media}: {location}");
+                    assert_eq!(location["finding_index"], 0);
+                }
+            }
+        }
     }
 }
