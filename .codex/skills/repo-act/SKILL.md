@@ -30,6 +30,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   commands run by the broker and may be unset in the interactive shell. Check that
   a variable is nonempty before using it as an output directory, and quote paths
   with spaces.
+- Python discovery and interop tests can invoke Cargo in subprocesses. Inspect
+  the selected tests and pass absolute `TMPDIR` and `CARGO_TARGET_DIR` in the
+  parent environment, even when the command itself is Python. Run a single
+  skipped test by its fully qualified name when the rest need not be repeated.
 - Give concurrent Cargo validations separate absolute `CARGO_TARGET_DIR` paths,
   including a broker merged-tree gate and direct worktree tests. Shared targets
   can leave a doctest looking for an artifact replaced by the other build;
