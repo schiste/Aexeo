@@ -373,25 +373,52 @@ def collection_uniqueness_status(projection, field, group):
     return 'failed' if duplicate else 'passed'
 
 
-def verify_host_candidate_counts(policy, verdict, after):
+def verify_host_candidate_projection(policy, verdict, after):
     """Recompute a deliberately narrow host profile; reject all other observations."""
     media = 'application/vnd.aexeo.content-adapter+json'
     host = [item for item in after if item['media_type'] == media]
     if not host:
         return False
     if (not isinstance(policy, dict) or not isinstance(policy.get('gates'), list)
-            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count'}
+            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'required_headings'}
                    for gate in policy['gates'])):
-        raise VerificationError('host adapter portable verification only supports count gates')
+        raise VerificationError('host adapter portable verification does not support this gate')
+    checks = {check['id']: check for check in verdict['checks']}
     plain = []
     word_counts = {}
     for item in host:
         projection = parse(item['source'].encode('utf-8'))
-        if (not isinstance(projection, dict) or set(projection) not in ({'schema', 'text'}, {'schema', 'text', 'block_ends'})
+        if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings'}
                 or projection['schema'] != 'aexeo.content-adapter/v1'
                 or not isinstance(projection['text'], str)):
             raise VerificationError('unsupported portable host projection')
         text(projection['text'])
+        headings = projection.get('headings')
+        if 'headings' in projection:
+            if (not isinstance(headings, list) or len(headings) > 100_000
+                    or any(not isinstance(heading, str) for heading in headings)):
+                raise VerificationError('invalid host headings')
+            for heading in headings:
+                text(heading)
+            headings = set(headings)
+        for gate in policy['gates']:
+            if gate['kind'] != 'required_headings':
+                continue
+            required = gate.get('headings')
+            if not isinstance(required, list) or any(not isinstance(heading, str) for heading in required):
+                raise VerificationError('invalid required headings')
+            entity = item['entity_id']
+            check_id = f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}'
+            check = checks.get(check_id)
+            if check is None:
+                raise VerificationError('resolved policy check is missing')
+            if check['status'] == 'not_checked':
+                continue
+            if headings is None:
+                raise VerificationError('host headings unavailable')
+            expected = 'passed' if all(heading in headings for heading in required) else 'failed'
+            if check['status'] != expected:
+                raise VerificationError('host heading status differs from observations')
         source = projection['text'].encode('utf-8')
         ends = projection.get('block_ends', [])
         if not isinstance(ends, list) or len(ends) > 100_000:
@@ -619,7 +646,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (links is not None) or source_bound != (sources is not None):
             raise VerificationError('external evidence does not match the verdict profile')
         validate_verdict(verdict)
-        host_verified = verify_host_candidate_counts(policy, verdict, after)
+        host_verified = verify_host_candidate_projection(policy, verdict, after)
         coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'], collection_projection, host_verified)
         verify_plain_word_count_statuses(policy, verdict, after, word_counts)
         verify_plain_character_count_statuses(policy, verdict, after, character_counts)
