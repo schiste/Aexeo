@@ -225,7 +225,9 @@ def verify_metadata_statuses(policy, verdict, change):
             continue
         if gate['kind'] == 'required_metadata':
             fields = gate.get('fields')
-            if not isinstance(fields, list) or any(not isinstance(field, str) or not field.strip() for field in fields):
+            if (set(gate) != {'kind', 'id', 'severity', 'blocking', 'fields'}
+                    or gate['severity'] not in ('warning', 'error') or not isinstance(fields, list)
+                    or not fields or any(not isinstance(field, str) or _rust_blank(field) for field in fields)):
                 raise VerificationError('invalid required metadata fields')
         for entry in change['entries']:
             if entry.get('after') is None:

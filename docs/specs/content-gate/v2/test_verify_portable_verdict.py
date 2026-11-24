@@ -716,7 +716,7 @@ class PortableComparison(unittest.TestCase):
         ]
         for gate, metadata, expected in cases:
             with self.subTest(gate=gate, metadata=metadata):
-                policy = {'gates': [dict(gate, id='words')]}
+                policy = {'gates': [dict(gate, id='words', severity='warning', blocking=True)]}
                 change['entries'][0]['metadata'] = metadata
                 verdict['checks'][0]['status'] = expected
                 verify_metadata_statuses(policy, verdict, change)
@@ -724,6 +724,10 @@ class PortableComparison(unittest.TestCase):
                 with self.assertRaises(VerificationError):
                     verify_metadata_statuses(policy, verdict, change)
                 verdict['checks'][0]['status'] = 'not_checked'
+                verify_metadata_statuses(policy, verdict, change)
+        for fields in ([], [''], [' \u00a0'], [42]):
+            policy = {'gates': [dict(kind='required_metadata', id='words', severity='warning', blocking=True, fields=fields)]}
+            with self.assertRaises(VerificationError):
                 verify_metadata_statuses(policy, verdict, change)
         policy = {'gates': [{'kind': 'metadata_length', 'id': 'words', 'field': 'title', 'min': 1, 'max': None}]}
         for metadata in (None, {}):
