@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, plain_text_word_count, verify_plain_word_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import compare, plain_text_word_count, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -226,6 +226,42 @@ class PortableComparison(unittest.TestCase):
         after[0]['media_type'] = 'text/markdown'
         check['status'] = 'failed'
         verify_plain_word_count_statuses(policy, verdict, after, {})
+
+    def test_plain_character_count_handles_unicode_whitespace_and_unavailable(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        gate = policy['gates'][0]
+        gate.update(kind='character_count', ignore_whitespace=True, min=3, max=3)
+        verdict = self.previous['verdict']
+        check = verdict['checks'][0]
+        after = self.fixture['after']
+        after[0]['source'] = 'é\u00a0a\x1cb'
+        check['status'] = 'failed'  # NBSP is skipped, ASCII 0x1c is not.
+        verify_plain_character_count_statuses(policy, verdict, after, {})
+        gate['max'] = 4
+        check['status'] = 'passed'
+        verify_plain_character_count_statuses(policy, verdict, after, {})
+        gate['ignore_whitespace'] = False
+        check['status'] = 'failed'
+        verify_plain_character_count_statuses(policy, verdict, after, {})
+        check['status'] = 'not_checked'
+        verify_plain_character_count_statuses(policy, verdict, after, {})
+        after[0]['media_type'] = 'text/markdown'
+        check['status'] = 'passed'
+        verify_plain_character_count_statuses(policy, verdict, after, {})
+
+    def test_rebound_plain_character_count_cannot_claim_a_false_pass(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'][0].update(kind='character_count', min=4, ignore_whitespace=False)
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'character count status differs'):
+            self.check()
 
     def test_rebound_plain_text_word_count_cannot_claim_a_false_pass(self):
         # A matching binding and two matching verdicts are insufficient if

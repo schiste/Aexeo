@@ -312,12 +312,13 @@ unavailable. For a checked uniqueness result, it also recomputes duplicates
 from the bound values and grouping, respecting the evaluator limits. It caps
 aggregate comparison work and rejects inputs above that bound. This is not
 proof that the supplied collection is authentic or exhaustive. For `word_count`
-checks on `text/plain`, it recomputes the word count from the independently
-verified after-projection and rejects checked statuses inconsistent with the
-configured bounds; unavailable checks remain unavailable. It does not rebuild
-Markdown or HTML projections for this check. This additional word-count
-recomputation is specific to the Python comparator; a native runner must not be
-assumed to perform it. Other gate parameters remain unvalidated. It cannot prove the
+and `character_count` checks on `text/plain`, it recomputes counts from the
+independently verified after-projection and rejects checked statuses inconsistent
+with the configured bounds; unavailable checks remain unavailable. Character
+counts use Unicode scalars and the configured whitespace option. It does not
+rebuild Markdown or HTML projections for these checks. This recomputation is
+specific to the Python comparator; a native runner must not be assumed to
+perform it. Other gate parameters remain unvalidated. It cannot prove the
 evaluator ran the checks correctly or authenticate the
 policy or validator labels. The host must still independently select its required
 checks and enforce completeness, freshness and the publication boundary. It still cannot
