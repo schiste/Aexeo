@@ -382,6 +382,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/readability.toml").into(),
         ),
         (
+            "readability-paragraphs".into(),
+            include_str!("../presets/readability-paragraphs.toml").into(),
+        ),
+        (
             "glossary-readable".into(),
             include_str!("../presets/glossary-readable.toml").into(),
         ),
@@ -780,6 +784,29 @@ mod tests {
             assert_eq!(report.gates[0].status, expected);
             assert!(!report.gates[0].blocking);
         }
+    }
+
+    #[test]
+    fn paragraph_readability_composes_as_a_single_advisory_gate() {
+        let mut sources = builtin_content_presets();
+        sources.insert("article-paragraphs".into(), "version=1\nname='Article paragraphs'\nextends=['article-readable','readability-paragraphs']\n".into());
+        let preset = resolve_content_preset("article-paragraphs", &sources).unwrap();
+        let gates: Vec<_> = preset
+            .gates
+            .iter()
+            .filter(|gate| gate.id() == "editorial.sentence_length")
+            .collect();
+        assert_eq!(gates.len(), 1);
+        assert!(matches!(
+            gates[0],
+            ContentGate::SentenceLength {
+                max_words: 30,
+                paragraphs_only: true,
+                require_latin_word_boundaries: true,
+                blocking: false,
+                ..
+            }
+        ));
     }
 
     #[test]

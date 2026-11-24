@@ -1139,6 +1139,11 @@ when unavailable the gate is `not_checked`, while an observed empty paragraph
 collection is assessed as empty. Markdown and EmDash provide paragraph positions
 when their projections are complete; plain text needs explicit paragraph mode.
 The default is `false`, preserving existing presets and text-wide behavior.
+The opt-in `readability-paragraphs` preset provides the same advisory 30-word
+starter with `paragraphs_only = true`. Compose it after `article-readable` or
+`glossary-readable` to replace their sentence-length gate while retaining their
+other gates: `extends = ["article-readable", "readability-paragraphs"]`. This
+checks paragraph length only; it does not assess headings or overall quality.
 
 Exceeding counts cover all measured items, including findings omitted by the output limit. When the required input is unavailable the count is absent, rather than zero. Opt-in CLI telemetry includes only aggregate `length_checks.measured_gates` and `length_checks.exceedances`, with no content or gate IDs. Exceedances count gate-item pairs, so an item checked by two gates can count twice; unavailable gates are excluded.
 

@@ -1000,6 +1000,68 @@ fn readable_article_preset_composes_advisory_sentence_length() {
 }
 
 #[test]
+fn paragraph_readability_excludes_headings_and_requires_paragraphs() {
+    let run = |format: &str, content: &str, preset: &str| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                "-",
+                "--input-format",
+                format,
+                "--preset",
+                preset,
+                "--format",
+                "json",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        report["gates"][0].clone()
+    };
+    let heading = "word ".repeat(31);
+    for (format, source) in [
+        ("markdown", format!("# {heading}\n\nShort paragraph.")),
+        ("html", format!("<h1>{heading}</h1><p>Short paragraph.</p>")),
+    ] {
+        let scoped = run(format, &source, "readability-paragraphs");
+        assert_eq!(scoped["status"], "passed", "{format}");
+        assert_eq!(scoped["measurements"]["sentence_count"], 1);
+        assert_eq!(
+            run(format, &source, "readability")["status"],
+            "failed",
+            "{format}"
+        );
+    }
+    let long = format!("# Short\n\n{}.", "word ".repeat(31));
+    assert_eq!(
+        run("markdown", &long, "readability-paragraphs")["status"],
+        "failed"
+    );
+    assert_eq!(
+        run("text", "Short paragraph.", "readability-paragraphs")["status"],
+        "not_checked"
+    );
+    assert_eq!(
+        run(
+            "paragraph-text",
+            "Short paragraph.",
+            "readability-paragraphs"
+        )["status"],
+        "passed"
+    );
+}
+
+#[test]
 fn sentence_length_rejects_zero_limit_and_empty_delimiters() {
     for settings in ["max_words=0", "max_words=10\ndelimiters='' "] {
         let source = format!(
