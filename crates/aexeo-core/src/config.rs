@@ -199,6 +199,9 @@ pub struct RoutePolicyOverride {
     pub pattern: String,
     #[serde(default)]
     pub allow_canonical_noindex: bool,
+    /// Permit a missing canonical only when the route has an observed general noindex directive.
+    #[serde(default)]
+    pub allow_missing_canonical_noindex: bool,
     #[serde(default)]
     pub allow_nofollow: bool,
 }

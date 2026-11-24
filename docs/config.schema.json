@@ -169,6 +169,9 @@
               "allow_canonical_noindex": {
                 "type": "boolean"
               },
+              "allow_missing_canonical_noindex": {
+                "type": "boolean"
+              },
               "allow_nofollow": {
                 "type": "boolean"
               },

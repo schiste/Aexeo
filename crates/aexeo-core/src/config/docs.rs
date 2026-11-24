@@ -208,7 +208,7 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
         ConfigFieldDoc {
             key: "route_policy_overrides",
             default_value: "(none)",
-            description: "Per-route robots policy overrides such as allowing canonical+noindex or nofollow.",
+            description: "Per-route robots policy overrides, including an opt-in missing-canonical exemption when general noindex is observed.",
         },
         ConfigFieldDoc {
             key: "min_inbound_links",
@@ -463,6 +463,7 @@ fn route_policy_override_schema() -> Value {
         "properties": {
             "pattern": { "type": "string" },
             "allow_canonical_noindex": { "type": "boolean" },
+            "allow_missing_canonical_noindex": { "type": "boolean" },
             "allow_nofollow": { "type": "boolean" }
         }
     })
