@@ -206,6 +206,84 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertIn('policy check is missing', native_bad.stdout)
                 self.assertFalse(json.loads(native_bad.stdout)['publication_authorized'])
 
+    @unittest.skipUnless(os.environ.get('AETHYME_CLI_BIN'), 'native comparator not supplied')
+    def test_real_collection_verdicts_match_both_comparators(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        binary = os.environ.get('AEXEO_CLI_BIN')
+        executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+        cases = [
+            ('unique', {'slug': 'other', 'lang': 'en'}, 'passed'),
+            ('duplicate', {'slug': 'article', 'lang': 'en'}, 'failed'),
+            ('different_group', {'slug': 'article', 'lang': 'fr'}, 'passed'),
+            ('missing_group', {'slug': 'article'}, 'not_checked'),
+        ]
+        for name, other_metadata, expected in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='aexeo-v2-collection-') as directory:
+                root = Path(directory)
+                base = json.loads(json.dumps(fixture['base']))
+                other = dict(fixture['after'][0], entity_id='other', public_path='/other')
+                base['items'] = [other]
+                change = json.loads(fixture['artifacts']['change'])
+                change['entries'][0]['metadata'] = {'slug': 'article', 'lang': 'en'}
+                collection = {'change_id': change['change_id'], 'complete': True, 'items': [
+                    {'id': 'article', 'text': None, 'metadata': {'slug': 'article', 'lang': 'en'}},
+                    {'id': 'other', 'text': None, 'metadata': other_metadata},
+                ]}
+                for filename, value in [('base', base), ('after', fixture['after']),
+                                        ('change', change), ('collection', collection)]:
+                    (root / filename).write_text(json.dumps(value), encoding='utf-8')
+                (root / 'preset').write_text(
+                    "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n"
+                    "[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n"
+                    "group_by='lang'\nblocking=false\n", encoding='utf-8')
+                common = executable + ['content-change', '--preset', 'test', '--preset-source',
+                    'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build',
+                    '--collection-snapshot', str(root / 'collection')]
+                env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+                bundle_run = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+                self.assertEqual(bundle_run.returncode, 0, bundle_run.stderr)
+                bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+                for artifact in ('change', 'resolved_policy', 'host_options', 'evaluator', 'collection'):
+                    (root / artifact).write_text(bundle['artifacts'][artifact], encoding='utf-8')
+                run = subprocess.run(common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                    '--candidate-after', str(root / 'after'), '--draft-portable-verdict'], cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'previous')), capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                portable = json.loads((root / 'previous').read_text(encoding='utf-8'))
+                check = next(c for c in portable['verdict']['checks'] if c['id'] == 'collection:0::unique')
+                self.assertEqual(check['status'], expected)
+                (root / 'fresh').write_text(json.dumps(portable), encoding='utf-8')
+                verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+                for artifact in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator', 'collection'):
+                    verify += ['--' + artifact.replace('_', '-'), str(root / artifact)]
+                verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
+                           '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+                manifest = {artifact: str(root / artifact) for artifact in
+                    ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'collection')}
+                manifest.update(evaluator_identity=str(root / 'evaluator'), validator_name='aexeo',
+                    validator_version='0.0.24', required_checks=['gate:7:article:words'],
+                    fresh_exit_code=0, fresh_timed_out=False)
+                (root / 'manifest').write_text(json.dumps(manifest), encoding='utf-8')
+                native_env = dict(os.environ)
+                native_env.pop('AETHYME_GATE_WORKER_ID', None)
+                native = [os.environ['AETHYME_CLI_BIN'], 'content-gate', 'compare-v2', str(root / 'manifest')]
+                for command in (verify, native):
+                    result = subprocess.run(command, env=native_env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+                if expected in ('failed', 'not_checked'):
+                    check['status'] = 'passed'
+                    check.pop('reason', None)
+                    portable['verdict']['summary'][expected] -= 1
+                    portable['verdict']['summary']['passed'] += 1
+                    for artifact in ('previous', 'fresh'):
+                        (root / artifact).write_text(json.dumps(portable), encoding='utf-8')
+                    for command in (verify, native):
+                        result = subprocess.run(command, env=native_env, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+
     def test_unavailable_pacing_cannot_be_forged_across_comparators(self):
         self._check_unavailable_advisory_gate(
             "id='pacing'\nkind='editorial_pacing'\nsource='composition'\n"
