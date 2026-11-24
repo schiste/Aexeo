@@ -243,6 +243,13 @@ class PortableCliInterop(unittest.TestCase):
             ('bare_cr', 'one\r', None, None, 'failed', False),
         ])
 
+    def test_real_metadata_age_verdicts_match_python_comparator(self):
+        # Native parity requires an independently updated Aethyme runner.
+        self._check_real_plain_count_verdicts('metadata_age', [
+            ('on_limit', '2024-02-29', 1, None, 'passed', False),
+            ('stale', '2024-02-28', 1, None, 'failed', False),
+        ])
+
     def _check_real_plain_count_verdicts(self, kind, cases):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         binary = os.environ.get('AEXEO_CLI_BIN')
@@ -252,6 +259,9 @@ class PortableCliInterop(unittest.TestCase):
                 root = Path(directory)
                 after = json.loads(json.dumps(fixture['after']))
                 change = json.loads(fixture['artifacts']['change'])
+                if kind == 'metadata_age':
+                    change['entries'][0]['metadata'] = {'reviewed': source}
+                    source = 'An article.\n'
                 digest = hashlib.sha256(source.encode()).hexdigest()
                 after[0].update(source=source, sha256=digest)
                 change['entries'][0]['after'].update(inline=source, sha256=digest)
@@ -259,7 +269,9 @@ class PortableCliInterop(unittest.TestCase):
                     (root / filename).write_text(json.dumps(value), encoding='utf-8')
                 (root / 'preset').write_text(
                     f"version=1\nname='test'\n[[gates]]\nid='count'\nkind='{kind}'\n"
-                    + ("blocking=false\n" if kind == "final_newline" else f"min={minimum}\nmax={maximum}\nblocking=false\n")
+                    + ("blocking=false\n" if kind == "final_newline" else
+                       f"field='reviewed'\nas_of='2024-03-01'\nmax_days={minimum}\nblocking=false\n" if kind == 'metadata_age' else
+                       f"min={minimum}\nmax={maximum}\nblocking=false\n")
                     + (f"ignore_whitespace={str(ignore_whitespace).lower()}\n" if kind == 'character_count' else '')
                     + "[[gates]]\nid='always'\nkind='word_count'\nmin=1\n", encoding='utf-8')
                 common = executable + ['content-change', '--preset', 'test', '--preset-source',
@@ -294,7 +306,7 @@ class PortableCliInterop(unittest.TestCase):
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
                 native_binary = os.environ.get('AETHYME_CLI_BIN')
-                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary and kind != 'final_newline' else None
+                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary and kind not in ('final_newline', 'metadata_age') else None
                 for command in filter(None, (verify, native)):
                     result = subprocess.run(command, env=native_env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
