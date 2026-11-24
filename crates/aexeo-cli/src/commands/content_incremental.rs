@@ -665,6 +665,16 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     let mut sources = builtin_content_presets();
     sources.extend(batch.preset_sources);
     let preset = resolve_content_preset(&batch.preset, &sources)?;
+    let source_snapshot = args
+        .get_flag("source-locations")
+        .then(|| batch.snapshot.clone());
+    let item_preset = source_snapshot.as_ref().map(|_| {
+        let mut item_preset = preset.clone();
+        item_preset
+            .gates
+            .retain(|gate| !matches!(gate, ContentGate::UniqueCollectionMetadata { .. }));
+        item_preset
+    });
     let baseline = prepare_baseline(
         batch.snapshot,
         batch.base_metadata,
@@ -677,6 +687,10 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     );
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     let mut totals = Totals::default();
+    let mut mapping_eligible = 0usize;
+    let mut mapping_mapped = 0usize;
+    let mut mapping_unavailable = 0usize;
+    let mut mapping_duration_ms = 0u128;
     for (index, proposal) in batch.proposals.iter().enumerate() {
         let (result, unchecked) = match &baseline {
             Err(error) => (
@@ -878,17 +892,92 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
             }
         };
         totals.not_checked += usize::from(unchecked);
-        serde_json::to_writer(
-            &mut stdout,
-            &serde_json::json!({"schema":"aexeo.content-incremental-result/v1-experimental", "proposal_index":index, "result":result}),
-        )?;
+        let mut row = serde_json::json!({"schema":"aexeo.content-incremental-result/v1-experimental", "proposal_index":index, "result":result});
+        if let (Some(snapshot), Some(item_preset)) = (&source_snapshot, &item_preset) {
+            let mapping_started = std::time::Instant::now();
+            let scope = if matches!(batch.mode, Mode::AdaptedMain) {
+                HtmlContentScope::Main
+            } else {
+                HtmlContentScope::Document
+            };
+            let reports = if row["result"]["status"] == "composed" {
+                &row["result"]["items"]["reports"]
+            } else {
+                &row["result"]["reports"]
+            };
+            let mut mapping = serde_json::Map::new();
+            let mut mapping_status = if row["result"]["status"] == "collection" {
+                "not_applicable"
+            } else {
+                "unavailable"
+            };
+            if let Some(reports) = reports.as_object() {
+                match aexeo_core::content_candidate::overlay_candidate(
+                    snapshot,
+                    &proposal.change,
+                    &proposal.after,
+                ) {
+                    Ok(overlay) => {
+                        mapping_status = "available";
+                        for item in &overlay.candidate.items {
+                            let Some(value) = reports.get(&item.entity_id) else {
+                                mapping_status = "partial";
+                                mapping_unavailable += 1;
+                                mapping.insert(
+                                    item.entity_id.clone(),
+                                    serde_json::json!({"status":"unavailable"}),
+                                );
+                                continue;
+                            };
+                            let mapped = serde_json::from_value::<
+                                aexeo_core::content_gate::ContentReport,
+                            >(value.clone())
+                            .map_err(anyhow::Error::from)
+                            .and_then(|report| {
+                                aexeo_core::source_mapping::map_incremental_report(
+                                    item_preset,
+                                    item,
+                                    &report,
+                                    scope,
+                                    proposal
+                                        .link_observations
+                                        .as_ref()
+                                        .and_then(|m| m.get(&item.entity_id)),
+                                )
+                            });
+                            mapping.insert(
+                                item.entity_id.clone(),
+                                match mapped {
+                                    Ok(value) => {
+                                        mapping_eligible += value.eligible;
+                                        mapping_mapped += value.mapped;
+                                        serde_json::json!({"status":"available", "coverage":value})
+                                    }
+                                    Err(_) => {
+                                        mapping_status = "partial";
+                                        mapping_unavailable += 1;
+                                        serde_json::json!({"status":"unavailable"})
+                                    }
+                                },
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        mapping_unavailable += 1;
+                    }
+                }
+            }
+            row["source_mapping"] = serde_json::json!({"status":mapping_status,"items":mapping});
+            mapping_duration_ms += mapping_started.elapsed().as_millis();
+        }
+        serde_json::to_writer(&mut stdout, &row)?;
         writeln!(stdout)?;
     }
     stdout.flush()?;
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "allow_partial_results":batch.allow_partial_results, "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "base_link_unavailable_count":base_link_unavailable_count, "candidate_link_unavailable_count":candidate_link_unavailable_count, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some()})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "allow_partial_results":batch.allow_partial_results, "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "base_link_unavailable_count":base_link_unavailable_count, "candidate_link_unavailable_count":candidate_link_unavailable_count, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some(), "source_mapping_enabled":source_snapshot.is_some(), "source_mapping_eligible":mapping_eligible, "source_mapping_mapped":mapping_mapped, "source_mapping_unavailable":mapping_unavailable, "source_mapping_duration_ms":mapping_duration_ms})
         );
     }
     Ok(if totals.not_checked != 0 {

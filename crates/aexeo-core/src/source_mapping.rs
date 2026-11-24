@@ -186,3 +186,209 @@ pub fn link_finding_indices(
         _ => None,
     }
 }
+
+/// A location in the exact source snapshot supplied to the mapper.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IncrementalSourceLocation {
+    pub gate_id: String,
+    pub finding_index: usize,
+    pub line: usize,
+    pub column: usize,
+}
+
+/// Source mapping coverage. A digest identifies the supplied snapshot but does
+/// not authenticate it. Unmappable findings are counted and never guessed.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IncrementalSourceMapping {
+    pub source_sha256: String,
+    pub eligible: usize,
+    pub mapped: usize,
+    pub unmapped: usize,
+    pub locations: Vec<IncrementalSourceLocation>,
+}
+
+/// Map a report against its unchanged candidate source. The caller must supply
+/// the same resolved item preset, source and link observations used to evaluate
+/// the report; report IDs and observation bindings are checked here, but they
+/// cannot prove that a caller-supplied report was produced from these bytes.
+pub fn map_incremental_report(
+    preset: &crate::content_gate::ContentPreset,
+    item: &crate::content_candidate::CandidateItem,
+    report: &crate::content_gate::ContentReport,
+    scope: crate::html_content_adapter::HtmlContentScope,
+    observations: Option<&crate::content_gate_verdict::LinkObservationSnapshot>,
+) -> anyhow::Result<IncrementalSourceMapping> {
+    use crate::content_gate::ContentGate;
+    use crate::html_content_adapter as html;
+    use crate::markdown_adapter as markdown;
+    use anyhow::{Context, bail};
+    use sha2::{Digest, Sha256};
+    if format!("{:x}", Sha256::digest(item.source.as_bytes())) != item.sha256 {
+        bail!("source digest differs from candidate item");
+    }
+    if report.input_id != item.entity_id
+        || report.preset != preset.name
+        || report.gates.len() != preset.gates.len()
+        || preset
+            .gates
+            .iter()
+            .zip(&report.gates)
+            .any(|(gate, result)| gate.id() != result.gate_id)
+    {
+        bail!("report does not match the item or resolved preset");
+    }
+    let eligible = eligible_findings(preset, report);
+    let mut output = IncrementalSourceMapping {
+        source_sha256: item.sha256.clone(),
+        eligible,
+        mapped: 0,
+        unmapped: eligible,
+        locations: Vec::new(),
+    };
+    if eligible == 0 {
+        return Ok(output);
+    }
+    let mut markdown_map = None;
+    let mut html_map = None;
+    let mut plain_index = None;
+    let mut destinations = None;
+    let mut levels = None;
+    let mut lists = None;
+    let input = match item.media_type.as_str() {
+        "text/plain" => {
+            plain_index = Some(crate::text_index::LineIndex::new(&item.source));
+            ContentInput {
+                id: item.entity_id.clone(),
+                text: Some(item.source.clone()),
+                source_text: Some(item.source.clone()),
+                ..Default::default()
+            }
+        }
+        "text/markdown" => {
+            let adapted = markdown::markdown_project(
+                &item.entity_id,
+                &item.source,
+                markdown::MarkdownProjectionOptions {
+                    source_map: true,
+                    link_destinations: true,
+                    structured_lists: true,
+                },
+            )
+            .context("cannot project Markdown source")?;
+            levels = adapted.source_map.heading_levels().map(<[u8]>::to_vec);
+            lists = adapted.structured_lists;
+            destinations = adapted.destinations;
+            markdown_map = Some(adapted.source_map);
+            adapted.input
+        }
+        "text/html" => {
+            let project = if preset
+                .gates
+                .iter()
+                .any(|g| matches!(g, ContentGate::LiteralMarkdownLinks { .. }))
+            {
+                html::html_content_with_literal_markdown_projection
+            } else {
+                html::html_content_with_literal_projection
+            };
+            let (adapted, headings, _, _) = project(&item.entity_id, &item.source, scope)
+                .map_err(|reason| anyhow::anyhow!(reason))?;
+            levels = Some(headings);
+            destinations = Some(adapted.destinations);
+            if let Some(text) = adapted.input.text.as_deref() {
+                lists = html::html_structured_lists(&item.source, text, scope);
+                html_map = html::html_source_map_with_scope(&item.source, text, scope);
+            }
+            adapted.input
+        }
+        _ => bail!("unsupported source media type"),
+    };
+    let observed = observations.and_then(|snapshot| {
+        (snapshot.version == 1
+            && snapshot.source_sha256 == item.sha256
+            && destinations.as_ref() == Some(&snapshot.destinations)
+            && snapshot.destinations.len() == snapshot.observations.len())
+        .then_some(snapshot.observations.as_slice())
+    });
+    for (gate, result) in preset.gates.iter().zip(&report.gates) {
+        let hierarchy = if let (ContentGate::HeadingHierarchy { initial_level, .. }, Some(levels)) =
+            (gate, levels.as_deref())
+        {
+            markdown_map
+                .as_ref()
+                .and_then(|m| {
+                    markdown::hierarchy_source_positions(
+                        m,
+                        &item.source,
+                        levels,
+                        *initial_level,
+                        result,
+                    )
+                })
+                .or_else(|| {
+                    html_map.as_ref().and_then(|m| {
+                        html::hierarchy_source_positions(
+                            m,
+                            &item.source,
+                            levels,
+                            *initial_level,
+                            result,
+                        )
+                    })
+                })
+        } else {
+            None
+        };
+        let positions = hierarchy
+            .or_else(|| markdown::list_source_positions(lists.as_deref()?, gate, result))
+            .or_else(|| {
+                markdown_map.as_ref().and_then(|m| {
+                    markdown::gate_source_positions(
+                        m,
+                        &item.source,
+                        &input,
+                        gate,
+                        result,
+                        destinations.as_deref(),
+                        observed,
+                    )
+                })
+            })
+            .or_else(|| {
+                html_map.as_ref().and_then(|m| {
+                    html::gate_source_positions_with_links(
+                        m,
+                        &item.source,
+                        &input,
+                        gate,
+                        result,
+                        destinations.as_deref(),
+                        observed,
+                    )
+                })
+            })
+            .or_else(|| {
+                crate::plain_text_adapter::gate_source_positions(
+                    plain_index.as_ref()?,
+                    &item.source,
+                    gate,
+                    result,
+                )
+            });
+        if let Some(positions) = positions {
+            for (finding_index, position) in positions.into_iter().enumerate() {
+                if let Some((line, column)) = position {
+                    output.locations.push(IncrementalSourceLocation {
+                        gate_id: result.gate_id.clone(),
+                        finding_index,
+                        line,
+                        column,
+                    });
+                }
+            }
+        }
+    }
+    output.mapped = output.locations.len();
+    output.unmapped = eligible.saturating_sub(output.mapped);
+    Ok(output)
+}
