@@ -4,6 +4,10 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.6]
+
+- Ship the opt-in `readability-paragraphs` preset. Its advisory sentence-length check assesses observed paragraphs rather than headings; unavailable paragraph observations remain not checked. Compose it with other presets when additional checks are needed.
+
 ## [0.9.5]
 
 - Map collection-specific title fields in configured CMS saves, refreshes and revision audits. Reports distinguish an observed empty title from an unavailable title; hosts must configure fields to match their renderer.

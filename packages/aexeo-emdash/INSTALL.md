@@ -23,6 +23,15 @@ aexeoPlugin({
 })
 ```
 
+## Paragraph-focused readability
+
+Select `readability-paragraphs` when you want an advisory sentence-length
+check on observed prose paragraphs without counting headings. It contains one
+check; a passing report is not a complete editorial or SEO assessment. An
+adapter that cannot supply paragraph observations reports the check as
+`not_checked`. Choose it in `contentPreset.name` or compose it with other
+presets in a project-specific preset.
+
 ## Language-specific content presets
 
 The configured plugin can select different presets for languages within the same
