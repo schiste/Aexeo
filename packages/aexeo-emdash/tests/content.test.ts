@@ -38,6 +38,26 @@ describe("portable content API", () => {
     expect(JSON.stringify(onTelemetry.mock.calls[0]?.[0])).not.toContain("example.org");
   });
 
+  it("only reports not-applicable coverage when every measured gate supplies it", async () => {
+    const gate: ContentGateResult = { gate_id: "external", status: "passed", blocking: false,
+      scope: "document", required_capability: "link_reachability", findings: [], reason: null,
+      measurements: { checked_destinations: 1, not_found_destinations: 0, unchecked_destinations: 0, not_applicable_destinations: 2 } };
+    const older: ContentGateResult = { ...gate, measurements: { checked_destinations: 1, not_found_destinations: 0, unchecked_destinations: 0 } };
+    const onTelemetry = vi.fn();
+    const document = { route: "/private", title: "Private", body: [] };
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [gate, gate] }));
+    await evaluateContent(document, "custom", {}, undefined, onTelemetry);
+    expect(onTelemetry.mock.calls[0]?.[0].link_reachability).toEqual({ checked: 2, not_found: 0, unchecked: 0, not_applicable: 4 });
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [gate, older] }));
+    await evaluateContent(document, "custom", {}, undefined, onTelemetry);
+    expect(onTelemetry.mock.calls[1]?.[0].link_reachability).toEqual({ checked: 2, not_found: 0, unchecked: 0 });
+    const incomplete: ContentGateResult = { ...gate, measurements: { not_applicable_destinations: 5 } };
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [gate, incomplete] }));
+    await evaluateContent(document, "custom", {}, undefined, onTelemetry);
+    expect(onTelemetry.mock.calls[2]?.[0].link_reachability).toEqual({ checked: 1, not_found: 0, unchecked: 0 });
+    expect(JSON.stringify(onTelemetry.mock.calls)).not.toContain("private");
+  });
+
   it("types classified paragraphs and aggregates only measured prose coverage", async () => {
     const gate: ContentGateResult = { gate_id: "private-gate", status: "failed", blocking: false,
       scope: "document", required_capability: "classified_paragraphs", findings: [], reason: null,
