@@ -47,13 +47,23 @@ class PortableComparison(unittest.TestCase):
             verify_host_candidate_counts(policy, forged, after)
         invalid_sources = (
             '{"schema":"aexeo.content-adapter/v1","text":null}',
-            '{"schema":"aexeo.content-adapter/v1","text":"one two","block_ends":[3]}',
+            '{"schema":"aexeo.content-adapter/v1","text":"one two","block_ends":[999]}',
             '{"schema":"aexeo.content-adapter/v1","text":"one","text":"two"}',
             '{"schema":"aexeo.content-adapter/v2","text":"one two"}',
         )
         for invalid in invalid_sources:
             with self.subTest(source=invalid), self.assertRaises(VerificationError):
                 verify_host_candidate_counts(policy, verdict, [dict(after[0], source=invalid)])
+        bounded = dict(after[0], source='{"schema":"aexeo.content-adapter/v1","text":"éx","block_ends":[2]}')
+        self.assertTrue(verify_host_candidate_counts(policy, verdict, [bounded]))
+        mixed_policy = {'gates': policy['gates'] + [{'kind': 'character_count', 'id': 'chars', 'max': 2}]}
+        mixed_verdict = copy.deepcopy(verdict)
+        mixed_verdict['checks'].append({'id': 'gate:1:a:chars', 'status': 'passed'})
+        self.assertTrue(verify_host_candidate_counts(mixed_policy, mixed_verdict, [bounded]))
+        for ends in ('[1]', '[2,2]', '[true]', 'null'):
+            invalid = dict(bounded, source=bounded['source'].replace('[2]', ends))
+            with self.subTest(ends=ends), self.assertRaises(VerificationError):
+                verify_host_candidate_counts(policy, verdict, [invalid])
         unsafe_policy = {'gates': [{'kind': 'link_count', 'id': 'links'}]}
         with self.assertRaises(VerificationError):
             verify_host_candidate_counts(unsafe_policy, verdict, after)
@@ -65,7 +75,7 @@ class PortableComparison(unittest.TestCase):
 
     def test_bound_host_projection_accepts_only_recomputed_counts(self):
         import hashlib
-        source = '{"schema":"aexeo.content-adapter/v1","text":"abc"}'
+        source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1]}'
         digest = hashlib.sha256(source.encode()).hexdigest()
         media = 'application/vnd.aexeo.content-adapter+json'
         change = json.loads(self.artifacts['change'])

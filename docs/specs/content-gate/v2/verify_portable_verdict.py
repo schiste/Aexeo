@@ -384,19 +384,39 @@ def verify_host_candidate_counts(policy, verdict, after):
                    for gate in policy['gates'])):
         raise VerificationError('host adapter portable verification only supports count gates')
     plain = []
+    word_counts = {}
     for item in host:
         projection = parse(item['source'].encode('utf-8'))
-        if (not isinstance(projection, dict) or set(projection) != {'schema', 'text'}
+        if (not isinstance(projection, dict) or set(projection) not in ({'schema', 'text'}, {'schema', 'text', 'block_ends'})
                 or projection['schema'] != 'aexeo.content-adapter/v1'
                 or not isinstance(projection['text'], str)):
             raise VerificationError('unsupported portable host projection')
         text(projection['text'])
+        source = projection['text'].encode('utf-8')
+        ends = projection.get('block_ends', [])
+        if not isinstance(ends, list) or len(ends) > 100_000:
+            raise VerificationError('invalid block boundaries')
+        start = 0
+        count = 0
+        for index, end in enumerate(ends):
+            if type(end) is not int or end < 0 or end > len(source) or (index and end <= start):
+                raise VerificationError('invalid block boundaries')
+            try:
+                count += plain_text_word_count(source[start:end].decode('utf-8'))
+            except UnicodeDecodeError as exc:
+                raise VerificationError('invalid block boundaries') from exc
+            start = end
+        try:
+            count += plain_text_word_count(source[start:].decode('utf-8'))
+        except UnicodeDecodeError as exc:
+            raise VerificationError('invalid block boundaries') from exc
+        word_counts[(item['entity_id'], False)] = count
         if any((finding.get('entity_id') is None or finding.get('entity_id') == item['entity_id'])
                and finding.get('location') is not None
                for finding in verdict.get('findings', [])):
             raise VerificationError('host finding cannot claim a source position')
         plain.append(dict(item, media_type='text/plain', source=projection['text']))
-    verify_plain_word_count_statuses(policy, verdict, plain, {})
+    verify_plain_word_count_statuses(policy, verdict, plain, word_counts)
     verify_plain_character_count_statuses(policy, verdict, plain, {})
     return True
 
