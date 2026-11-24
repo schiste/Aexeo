@@ -1,6 +1,6 @@
 # Aexeo–Aethyme publication integration
 
-Status snapshot: 23 November 2026. This is an active integration plan, not a
+Status snapshot: 24 November 2026. This is an active integration plan, not a
 claim that the publication design is complete. The v1 runner contract remains
 in force: `0` means pass, `1` means fail, `2` means not checked or invalid
 input, and other codes indicate errors. The runner must cross-check the
@@ -29,6 +29,26 @@ unavailable check may become a pass.
   path-based baselines and advisory comparisons remain distinct.
 
 ## Aexeo delivery and limits
+
+- [Aethyme #1982](https://github.com/schiste/Aethyme/pull/1982) independently
+  verifies checked plain-text character counts. [Aexeo #941](https://github.com/schiste/Aexeo/pull/941)
+  exercises word and character outcomes with real Aexeo and Aethyme CLIs,
+  including forged passing outcomes and Unicode whitespace.
+- [Aexeo #942](https://github.com/schiste/Aexeo/pull/942) extends the shared
+  Markdown, HTML and EmDash/WASM fixture with required terms, Unicode matching,
+  observed empty content and unobserved content.
+- [Aexeo #943](https://github.com/schiste/Aexeo/pull/943) independently
+  recomputes checked plain-text paragraph counts in the Python draft comparator
+  when the host declares the plain-paragraph projection. Counts above 100,000
+  are rejected; unavailable checks and rich formats do not become checked.
+  The native counterpart, [Aethyme #1985](https://github.com/schiste/Aethyme/pull/1985),
+  and its real-CLI cross-check, [Aexeo #944](https://github.com/schiste/Aexeo/pull/944),
+  are pending delivery. Real CLI tests pass with those candidate changes, but
+  an open PR is not a released or deployed feature.
+
+These comparisons establish neither source authenticity, freshness, inventory
+completeness nor an atomic publication boundary. The portable protocol remains
+experimental and cannot itself authorize publication.
 
 Candidate inventory evaluation also bounds the combined UTF-8 bytes of item
 identities, routes, media types, revisions, digests and link destinations to
