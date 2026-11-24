@@ -1258,17 +1258,24 @@ pub fn build_link_report_with_source_locations(
 ) -> anyhow::Result<LinkReport> {
     build_link_report_with(
         input,
-        |page, origin, date| {
-            if source_locations {
-                crate::link_evidence::extract_document_with_source_locations(
-                    &page.html, &page.url, origin, date,
-                )
-            } else {
-                extract_document(&page.html, &page.url, origin, date)
-            }
-        },
+        |page, origin, date| extract_report_page(page, origin, date, source_locations),
         count_links,
     )
+}
+
+fn extract_report_page(
+    page: &RenderedPage,
+    origin: &str,
+    date: Option<&str>,
+    source_locations: bool,
+) -> (Vec<LinkEvidence>, HtmlLinkMetadata) {
+    if source_locations {
+        crate::link_evidence::extract_document_with_source_locations(
+            &page.html, &page.url, origin, date,
+        )
+    } else {
+        extract_document(&page.html, &page.url, origin, date)
+    }
 }
 
 fn build_link_report_with(
@@ -1721,6 +1728,7 @@ fn build_link_report_with(
 /// and the source index for repeated candidate reviews; it is not serializable.
 /// The host remains responsible for the provenance and completeness of inputs.
 pub struct LinkReportBaseline {
+    source_locations: bool,
     origin: String,
     snapshot_date: Option<String>,
     pages: std::collections::BTreeMap<String, CachedLinkPage>,
@@ -1747,6 +1755,14 @@ impl LinkReportBaseline {
     /// Parse and index the base. Duplicate and empty source URLs are refused
     /// because a source-keyed index cannot distinguish their observations.
     pub fn prepare(input: &LinkReportInput) -> anyhow::Result<Self> {
+        Self::prepare_with_source_locations(input, false)
+    }
+
+    /// Keep the location mode fixed for cached and changed pages alike.
+    pub fn prepare_with_source_locations(
+        input: &LinkReportInput,
+        source_locations: bool,
+    ) -> anyhow::Result<Self> {
         anyhow::ensure!(input.version == 1, "unsupported link report input version");
         let origin = report_origin(input).to_owned();
         let mut pages = std::collections::BTreeMap::new();
@@ -1756,11 +1772,11 @@ impl LinkReportBaseline {
                 !page.url.is_empty() && !pages.contains_key(&page.url),
                 "empty or duplicate page URL"
             );
-            let (links, metadata) = extract_document(
-                &page.html,
-                &page.url,
+            let (links, metadata) = extract_report_page(
+                page,
                 &origin,
                 input.snapshot_date.as_deref(),
+                source_locations,
             );
             ordered.extend(links.iter().cloned());
             pages.insert(
@@ -1780,6 +1796,7 @@ impl LinkReportBaseline {
         )
         .map_err(anyhow::Error::msg)?;
         Ok(Self {
+            source_locations,
             origin,
             snapshot_date: input.snapshot_date.clone(),
             pages,
@@ -1813,11 +1830,11 @@ impl LinkReportBaseline {
                     reused += 1;
                     (cached.links.clone(), cached.metadata.clone())
                 }
-                None => extract_document(
-                    &page.html,
-                    &page.url,
+                None => extract_report_page(
+                    page,
                     origin,
                     input.snapshot_date.as_deref(),
+                    self.source_locations,
                 ),
             };
             pages.insert(

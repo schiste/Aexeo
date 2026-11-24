@@ -97,8 +97,11 @@ pub fn command_link_graph_incremental(matches: &ArgMatches) -> Result<i32> {
         serde_json::from_value(value).user_context("invalid link graph input JSON")
     }
     let base = read_input(required_arg(matches, "base")?)?;
-    let baseline =
-        LinkReportBaseline::prepare(&base).user_context("invalid link report baseline")?;
+    let baseline = LinkReportBaseline::prepare_with_source_locations(
+        &base,
+        matches.get_flag("source-locations"),
+    )
+    .user_context("invalid link report baseline")?;
     let stdout = io::stdout();
     let mut writer = io::BufWriter::new(stdout.lock());
     for path in matches

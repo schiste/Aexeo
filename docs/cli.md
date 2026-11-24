@@ -218,7 +218,7 @@ Review candidate rendered sites against an in-memory link report baseline
 ```text
 Review candidate rendered sites against an in-memory link report baseline
 
-Usage: link-graph-incremental --base <base> <candidates>...
+Usage: link-graph-incremental [OPTIONS] --base <base> <candidates>...
 
 Arguments:
   <candidates>...
@@ -227,6 +227,9 @@ Arguments:
 Options:
       --base <base>
           Baseline link graph input JSON
+
+      --source-locations
+          Map link positions in the supplied HTML when unambiguous (additional parsing)
 
   -h, --help
           Print help
@@ -627,6 +630,9 @@ Options:
       --link-graph-context <link-graph-context>
           Optional inventory and identity context JSON
 
+      --link-graph-source-locations
+          Map link positions in the observed HTML when unambiguous (additional parsing)
+
       --link-graph-compact
           Write compact link graph JSON without omitting evidence
 
@@ -702,6 +708,9 @@ Options:
 
       --link-graph-summary
           Include an observational link graph coverage summary in the crawl output
+
+      --link-graph-source-locations
+          Map link positions in the observed HTML when unambiguous (additional parsing)
 
       --link-graph-compact
           Write compact link graph JSON without omitting evidence
