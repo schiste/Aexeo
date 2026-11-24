@@ -161,6 +161,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
                 &graph,
                 started,
                 submatches.get_flag("link-graph-compact"),
+                submatches.get_flag("link-graph-source-locations"),
             );
         }
         graph_summary = Some(super::link_graph::link_graph_summary(&graph));

@@ -1600,6 +1600,37 @@ fn optional_graph_locations_work_for_json_and_audit_and_emit_aggregate_coverage(
 }
 
 #[test]
+fn graph_telemetry_distinguishes_unrequested_and_unmapped_positions() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("input.json");
+    let html = "<!doctype html><html><head><title>x</title></head><body><nav><a href='/same'>nav</a></nav><main><a href='/unique'>one</a><a href='/same'>two</a></main></body></html>";
+    let data = serde_json::json!({"version":1,"identity":{"origin":"https://example.org","release":"r","surface":"s","snapshot":"t"},"snapshot_date":null,"crawl_complete":false,"pages":[{"url":"https://example.org/a","html":html}],"inventory":null});
+    fs::write(&input, serde_json::to_vec(&data).unwrap()).unwrap();
+    for requested in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"));
+        command.args(["link-graph", "--telemetry"]).arg(&input);
+        if requested {
+            command.arg("--source-locations");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(event["source_locations_requested"], requested);
+        if requested {
+            assert_eq!(event["source_location_link_count"], 1);
+            assert_eq!(event["source_location_unmapped_link_count"], 2);
+        } else {
+            assert_eq!(event["source_location_link_count"], 0);
+            assert!(event["source_location_unmapped_link_count"].is_null());
+        }
+    }
+}
+
+#[test]
 fn static_check_can_emit_graph_source_locations() {
     let temp = tempfile::tempdir().unwrap();
     let site = temp.path().join("site");
@@ -1639,4 +1670,6 @@ fn static_check_can_emit_graph_source_locations() {
         .find(|event| event["event"] == "link_graph_analysis")
         .unwrap();
     assert_eq!(event["source_location_link_count"], 1);
+    assert_eq!(event["source_locations_requested"], true);
+    assert_eq!(event["source_location_unmapped_link_count"], 0);
 }

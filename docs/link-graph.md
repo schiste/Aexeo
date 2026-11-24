@@ -172,7 +172,10 @@ both the page's link graph and source tokens, when its opening tag has a single
 unambiguous source candidate. HTML parsing errors and duplicate or ambiguous
 candidates withhold this fallback. Ambiguous or unsupported links remain null. This option adds processing time and does not
 change link counts or coverage conclusions. Opt-in telemetry includes the
-aggregate `source_location_link_count`, without source paths or link content.
+aggregate `source_location_link_count`, whether locations were requested, and
+`source_location_unmapped_link_count`. The unmapped count is null when locations
+were not requested; otherwise it counts links without both coordinates. This
+telemetry contains no source paths or link content.
 For `check` and `crawl`, use `--link-graph-source-locations` together with
 `--link-graph-output`. `link-graph-incremental --source-locations` preserves
 the selected mode across cached and re-extracted pages. These options are

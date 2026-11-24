@@ -516,6 +516,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 &graph,
                 started,
                 submatches.get_flag("link-graph-compact"),
+                submatches.get_flag("link-graph-source-locations"),
             );
         }
     }

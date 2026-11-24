@@ -71,7 +71,12 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
         report.audit_sha256 = None;
     }
     if matches.get_flag("telemetry") {
-        emit_link_graph_telemetry(&report, started, matches.get_flag("compact"));
+        emit_link_graph_telemetry(
+            &report,
+            started,
+            matches.get_flag("compact"),
+            matches.get_flag("source-locations"),
+        );
     }
     let stdout = io::stdout();
     let writer = io::BufWriter::new(stdout.lock());
@@ -196,7 +201,12 @@ pub(super) fn link_graph_summary(graph: &LinkReport) -> serde_json::Value {
     })
 }
 
-pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, compact: bool) {
+pub(super) fn emit_link_graph_telemetry(
+    report: &LinkReport,
+    started: Instant,
+    compact: bool,
+    source_locations_requested: bool,
+) {
     let observed = report
         .links
         .destinations
@@ -256,6 +266,9 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, c
         "page_count": report.pages.len(),
         "link_count": observed,
         "source_location_link_count": counts.source_locations,
+        "source_locations_requested": source_locations_requested,
+        "source_location_unmapped_link_count": source_locations_requested
+            .then_some(observed - counts.source_locations),
         "conditional_link_count": counts.conditional,
         "unclassified_markup_link_count": counts.unclassified,
         "hidden_attribute_link_count": counts.hidden,

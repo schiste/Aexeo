@@ -1541,4 +1541,6 @@ fn crawl_can_map_graph_locations_in_observed_html() {
         .find(|event| event["event"] == "link_graph_analysis")
         .unwrap();
     assert_eq!(event["source_location_link_count"], 1);
+    assert_eq!(event["source_locations_requested"], true);
+    assert_eq!(event["source_location_unmapped_link_count"], 0);
 }
