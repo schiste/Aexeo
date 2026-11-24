@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aexeo-cli"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "aexeo-contracts",
  "aexeo-core",
@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "aexeo-contracts"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "iri-string",
  "serde",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "aexeo-core"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "aexeo-contracts",
  "anyhow",
@@ -56,7 +56,7 @@ dependencies = [
 
 [[package]]
 name = "aexeo-emdash-bridge"
-version = "0.0.24"
+version = "0.0.25"
 dependencies = [
  "aexeo-contracts",
  "aexeo-core",
@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "0.0.24"
+version = "0.0.25"
 
 [[package]]
 name = "tendril"

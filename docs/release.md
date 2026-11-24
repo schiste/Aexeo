@@ -83,6 +83,15 @@ retain earlier verdicts as historical evidence. Rebuild the EmDash WASM bridge
 from the release commit. The optional syntax adapter is a separate release asset;
 the CLI and npm package do not include its Python files or language models.
 
+### Upgrading from 0.0.24 to 0.0.25
+
+Regenerate offline input and observed-link bound verdicts with the new engine;
+retain earlier verdicts as historical evidence. The CLI release includes changes
+merged since v0.0.24, including editorial gates, publication integration and
+link-graph handling. The portable v2 protocol remains experimental, and a
+successful editorial audit does not grant publication authorization. The npm
+package has a separate version and must be rebuilt and released independently.
+
 ## CLI Release Artifacts
 
 Package release assets:
