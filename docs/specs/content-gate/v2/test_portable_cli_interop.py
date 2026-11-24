@@ -1076,10 +1076,29 @@ class PortableCliInterop(unittest.TestCase):
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            native = os.environ.get('AETHYME_CLI_BIN')
+            if native:
+                manifest = {name: str(root / name) for name in
+                            ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
+                manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
+                    validator_name='aexeo', validator_version=ENGINE_VERSION,
+                    required_checks=['gate:7:article:paragraphs', 'gate:7:article:pwords',
+                                     'gate:7:article:pchars'], fresh_exit_code=0, fresh_timed_out=False)
+                (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
+                native_env = dict(os.environ)
+                native_env.pop('AETHYME_GATE_WORKER_ID', None)
+                native_command = [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')]
+                result = subprocess.run(native_command, env=native_env, capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertFalse(json.loads(result.stdout)['publication_authorized'])
             fixture['after'][0]['source'] = source.replace('"end":4', '"end":3')
             (root / 'after').write_text(json.dumps(fixture['after']), encoding='utf-8')
             rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(rejected.returncode, 2, rejected.stderr)
+            if native:
+                rejected = subprocess.run(native_command, env=native_env, capture_output=True, text=True, check=False)
+                self.assertEqual(rejected.returncode, 2, rejected.stderr + rejected.stdout)
+                self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
 
     def test_html_main_scope_with_real_cli_and_independent_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
