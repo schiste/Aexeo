@@ -1045,7 +1045,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('base', 'after'):
                 (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
             (root / 'change').write_text(json.dumps(change), encoding='utf-8')
-            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=2\nmax=2\n", encoding='utf-8')
+            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=2\nmax=2\n[[gates]]\nid='pwords'\nkind='paragraph_length'\nmax_words=1\n[[gates]]\nid='pchars'\nkind='paragraph_character_length'\nmax_chars=1\n", encoding='utf-8')
             binary = os.environ.get('AEXEO_CLI_BIN')
             executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
             common = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
@@ -1069,7 +1069,9 @@ class PortableCliInterop(unittest.TestCase):
             verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
-            verify += ['--require-check', 'gate:7:article:paragraphs', '--validator-name', 'aexeo',
+            verify += ['--require-check', 'gate:7:article:paragraphs',
+                       '--require-check', 'gate:7:article:pwords', '--require-check', 'gate:7:article:pchars',
+                       '--validator-name', 'aexeo',
                        '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)

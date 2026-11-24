@@ -1441,6 +1441,8 @@ fn verify_host_candidate_projection(
             ContentGate::WordCount { .. }
                 | ContentGate::CharacterCount { .. }
                 | ContentGate::ParagraphCount { .. }
+                | ContentGate::ParagraphLength { .. }
+                | ContentGate::ParagraphCharacterLength { .. }
                 | ContentGate::RequiredHeadings { .. }
                 | ContentGate::HeadingLength { .. }
                 | ContentGate::HeadingHierarchy { .. }
@@ -1456,6 +1458,14 @@ fn verify_host_candidate_projection(
     let mut plain = Vec::with_capacity(host.len());
     let mut word_counts = std::collections::BTreeMap::new();
     let mut paragraph_counts = std::collections::BTreeMap::new();
+    let needs_paragraph_words = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::ParagraphLength { .. }));
+    let needs_paragraph_chars = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::ParagraphCharacterLength { .. }));
     for item in host {
         let value = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(
             item.source.as_bytes(),
@@ -1484,10 +1494,51 @@ fn verify_host_candidate_projection(
         }
         // Reuse the adapter's UTF-8, ordering, overlap and observation-limit checks.
         // Avoid a second parse when no paragraph observations were supplied.
+        let mut paragraph_lengths = None;
         if object.contains_key("paragraphs") {
             let adapted = crate::content_adapter::parse(item.entity_id.clone(), &item.source)?;
             if let Some(paragraphs) = adapted.context.paragraphs {
                 paragraph_counts.insert(item.entity_id.clone(), paragraphs.len());
+                if needs_paragraph_words || needs_paragraph_chars {
+                    let mut longest_words = 0;
+                    let mut longest_chars = 0;
+                    for paragraph in &paragraphs {
+                        if needs_paragraph_words {
+                            longest_words =
+                                longest_words.max(paragraph.text.split_whitespace().count());
+                        }
+                        if needs_paragraph_chars {
+                            longest_chars = longest_chars.max(paragraph.text.chars().count());
+                        }
+                    }
+                    paragraph_lengths = Some((longest_words, longest_chars));
+                }
+            }
+        }
+        for gate in &preset.gates {
+            let (id, limit, chars) = match gate {
+                ContentGate::ParagraphLength { id, max_words, .. } => (id, max_words, false),
+                ContentGate::ParagraphCharacterLength { id, max_chars, .. } => {
+                    (id, max_chars, true)
+                }
+                _ => continue,
+            };
+            let check_id = format!("gate:{}:{}:{}", item.entity_id.len(), item.entity_id, id);
+            let check = checks
+                .get(check_id.as_str())
+                .ok_or_else(|| anyhow::anyhow!("resolved policy check is missing"))?;
+            if check.status == CheckStatus::NotChecked {
+                continue;
+            }
+            let (longest_words, longest_chars) =
+                paragraph_lengths.ok_or_else(|| anyhow::anyhow!("host paragraphs unavailable"))?;
+            let expected = if (if chars { longest_chars } else { longest_words }) > *limit {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            };
+            if check.status != expected {
+                bail!("host paragraph length status differs from observations");
             }
         }
         let headings = object
@@ -9552,6 +9603,55 @@ mod tests {
                 r#""paragraphs":[{"start":0,"end":2},{"start":3,"end":4,"list_item":false}]"#,
                 r#""paragraphs":null"#,
             ),
+            r#"{"schema":"aexeo.content-adapter/v1","text":"é x"}"#.into(),
+        ] {
+            item.source = altered;
+            assert!(
+                verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn portable_host_paragraph_lengths_are_recomputed() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='paragraphs'\n[[gates]]\nid='words'\nkind='paragraph_length'\nmax_words=2\n[[gates]]\nid='chars'\nkind='paragraph_character_length'\nmax_chars=3\n").unwrap();
+        let source = r#"{"schema":"aexeo.content-adapter/v1","text":"é x","paragraphs":[{"start":0,"end":4}]}"#;
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let verdict = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        let mut item = crate::content_candidate::CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: crate::content_adapter::MEDIA_TYPE.into(),
+            revision: None,
+            sha256: format!("{:x}", Sha256::digest(source.as_bytes())),
+            source: source.into(),
+            links: None,
+        };
+        assert!(
+            verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                .unwrap()
+        );
+        for altered in [
+            source
+                .replace("é x", "é xx")
+                .replace(r#""end":4"#, r#""end":5"#),
+            source
+                .replace("é x", "é x y")
+                .replace(r#""end":4"#, r#""end":6"#),
             r#"{"schema":"aexeo.content-adapter/v1","text":"é x"}"#.into(),
         ] {
             item.source = altered;
