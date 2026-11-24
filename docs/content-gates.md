@@ -472,8 +472,16 @@ leave coverage incomplete.
 A 404/410 response is a finding to review, not proof of permanent failure. If
 some checks are inconclusive, findings for observed responses are retained and
 the gate is `not_checked`. Markdown source locations point to link occurrences.
-The optional local telemetry event contains counts and elapsed time, not URLs;
-external servers necessarily receive requested URLs. Other hosts may supply
+The gate report includes the number of supplied destinations and observations
+when each is available. When their counts match, it also reports checked,
+not-found, unchecked and not-applicable destination counts. A mismatched
+observation count remains `not_checked` and does not assign category counts;
+a missing count is not reported as zero. A host-supplied `not_applicable`
+classification is an observation, not proof that the destination is valid.
+The optional local telemetry event contains counts and elapsed time, not URLs.
+EmDash includes a `not_applicable` aggregate only when every reachability gate
+in the report supplies the full measurements; older or incomplete measurements
+leave it absent. External servers necessarily receive requested URLs. Other hosts may supply
 observations through the core context, bound by the host to the same immutable
 snapshot and destination order. Aexeo does not authenticate those observations.
 

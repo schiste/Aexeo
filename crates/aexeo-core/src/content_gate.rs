@@ -2985,12 +2985,19 @@ impl ContentPreset {
                     }
                 },
                 ContentGate::LinkReachability { .. } => {
+                    if let Some(values) = destinations {
+                        measurements.insert("destination_count".into(), values.len());
+                    }
+                    if let Some(observations) = capabilities.link_reachability {
+                        measurements.insert("observation_count".into(), observations.len());
+                    }
                     match (destinations, capabilities.link_reachability) {
                         (Some(values), Some(observations))
                             if values.len() == observations.len() =>
                         {
                             let mut unchecked = 0usize;
                             let mut not_found = 0usize;
+                            let mut not_applicable = 0usize;
                             let mut checked = 0usize;
                             for (index, observation) in observations.iter().enumerate() {
                                 match observation {
@@ -3008,12 +3015,16 @@ impl ContentPreset {
                                         );
                                     }
                                     LinkReachabilityObservation::NotChecked => unchecked += 1,
-                                    LinkReachabilityObservation::NotApplicable => {}
+                                    LinkReachabilityObservation::NotApplicable => {
+                                        not_applicable += 1
+                                    }
                                 }
                             }
                             measurements.insert("checked_destinations".into(), checked);
                             measurements.insert("not_found_destinations".into(), not_found);
                             measurements.insert("unchecked_destinations".into(), unchecked);
+                            measurements
+                                .insert("not_applicable_destinations".into(), not_applicable);
                             if unchecked > 0 {
                                 reason = Some("some link destinations could not be checked; findings cover only observed responses".into());
                             }
@@ -8603,12 +8614,26 @@ terms = ["bad"]
         let unavailable = evaluate(None);
         assert_eq!(unavailable.status, GateStatus::NotChecked);
         assert!(unavailable.findings.is_empty());
+        assert_eq!(unavailable.measurements["destination_count"], 3);
+        assert!(!unavailable.measurements.contains_key("observation_count"));
         let mismatched = evaluate(Some(&[Reachable]));
         assert_eq!(mismatched.status, GateStatus::NotChecked);
+        assert_eq!(mismatched.measurements["destination_count"], 3);
+        assert_eq!(mismatched.measurements["observation_count"], 1);
+        assert!(
+            !mismatched
+                .measurements
+                .contains_key("not_applicable_destinations")
+        );
         let partial = evaluate(Some(&[NotFound, NotChecked, NotApplicable]));
         assert_eq!(partial.status, GateStatus::NotChecked);
         assert_eq!(partial.findings.len(), 1);
+        assert_eq!(partial.measurements["checked_destinations"], 1);
+        assert_eq!(partial.measurements["not_found_destinations"], 1);
         assert_eq!(partial.measurements["unchecked_destinations"], 1);
+        assert_eq!(partial.measurements["destination_count"], 3);
+        assert_eq!(partial.measurements["observation_count"], 3);
+        assert_eq!(partial.measurements["not_applicable_destinations"], 1);
         assert!(partial.findings[0].message.contains("#1"));
         let complete = evaluate(Some(&[NotFound, Reachable, NotApplicable]));
         assert_eq!(complete.status, GateStatus::Failed);

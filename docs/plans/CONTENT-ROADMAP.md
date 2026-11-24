@@ -563,6 +563,11 @@ registry before considering the release delivered.
   The batch CLI exports unverified observation templates for base and candidate
   inventories, with aggregate telemetry. This does not perform network checks or
   authenticate their eventual results.
+  [PR #932](https://github.com/schiste/Aexeo/pull/932) adds destination and
+  observation totals and, for aligned results, a count of links classified as
+  not applicable. Opt-in EmDash telemetry aggregates that count only when all
+  reachability gates provide the complete measurements. These are host-supplied
+  classifications, not proof that a link is valid or reachable.
   Content-change hosts can also bind per-entry snapshots and revalidate their
   complete input fingerprint; omitted entries remain unchecked. EmDash observers
   receive route and locale context, and unchecked assessments distinguish a failed

@@ -51,7 +51,7 @@ export interface ContentEvaluationTelemetry {
   source_locations_unmapped?: number;
   /** Aggregate destination occurrences; omitted when the gate did not measure them. */
   link_destinations?: { checked: number; invalid: number };
-  link_reachability?: { checked: number; not_found: number; unchecked: number };
+  link_reachability?: { checked: number; not_found: number; unchecked: number; not_applicable?: number };
   /** Aggregate counts, omitted when no prose-variance gate was measured. */
   prose_variance?: { measured_gates: number; list_paragraphs_excluded: number; windows_checked: number };
   /** List observations are summed per gate; measured counts are absent if no gate measured them. */
@@ -233,7 +233,19 @@ export async function evaluateContent(
     if (listReview !== undefined) event.list_review = listReview;
     const proseVariance = addProseVarianceMeasurements(report.gates);
     if (proseVariance !== undefined) event.prose_variance = proseVariance;
+    let notApplicableTotal = 0;
+    let notApplicableComplete = true;
     for (const gate of report.gates) {
+      if (gate.required_capability === "link_reachability") {
+        const measurements = gate.measurements;
+        const count = measurements?.not_applicable_destinations;
+        if (count === undefined || measurements?.checked_destinations === undefined ||
+            measurements.not_found_destinations === undefined || measurements.unchecked_destinations === undefined) {
+          notApplicableComplete = false;
+        } else {
+          notApplicableTotal += count;
+        }
+      }
       if (gate.required_capability === "link_reachability" && gate.measurements) {
         const { checked_destinations, not_found_destinations, unchecked_destinations } = gate.measurements;
         if (checked_destinations !== undefined && not_found_destinations !== undefined && unchecked_destinations !== undefined) {
@@ -250,6 +262,9 @@ export async function evaluateContent(
         event.link_destinations.checked += checked;
         event.link_destinations.invalid += invalid;
       }
+    }
+    if (event.link_reachability && notApplicableComplete) {
+      event.link_reachability.not_applicable = notApplicableTotal;
     }
     emitTelemetry(onTelemetry, event);
   }
