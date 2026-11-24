@@ -1365,6 +1365,48 @@ fn verify_candidate_policy_coverage_with_evidence(
     Ok(())
 }
 
+// Independently compare checked source-backed outcomes after candidate bytes have
+// been verified. Unavailable checks stay unavailable; this does not authenticate
+// the host-provided snapshot or establish publication freshness.
+fn verify_candidate_final_newlines(
+    verdict: &Verdict,
+    preset: &ContentPreset,
+    after: &[crate::content_candidate::CandidateItem],
+) -> Result<()> {
+    if !preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, crate::content_gate::ContentGate::FinalNewline { .. }))
+    {
+        return Ok(());
+    }
+    let checks: std::collections::BTreeMap<_, _> = verdict
+        .checks
+        .iter()
+        .map(|check| (check.id.as_str(), check))
+        .collect();
+    for gate in &preset.gates {
+        let crate::content_gate::ContentGate::FinalNewline { id, .. } = gate else {
+            continue;
+        };
+        for item in after {
+            let check_id = format!("gate:{}:{}:{}", item.entity_id.len(), item.entity_id, id);
+            let check = checks
+                .get(check_id.as_str())
+                .ok_or_else(|| anyhow::anyhow!("resolved policy check is missing"))?;
+            let expected = if item.source.is_empty() || item.source.ends_with('\n') {
+                CheckStatus::Passed
+            } else {
+                CheckStatus::Failed
+            };
+            if check.status != CheckStatus::NotChecked && check.status != expected {
+                bail!("final newline status differs from source");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reconstruct the candidate and decision artifacts before verifying an experimental
 /// passing verdict and independently supplied content streams. The caller must
 /// independently obtain the context, evidence and streams, and establish their
@@ -1471,6 +1513,7 @@ pub fn verify_draft_passing_candidate_with_content<
         sources,
         context.decision.plain_text_paragraphs,
     )?;
+    verify_candidate_final_newlines(&envelope.verdict, context.decision.preset, context.after)?;
     if let Some(snapshots) = snapshots {
         verify_candidate_link_destinations(
             snapshots,
@@ -4238,6 +4281,132 @@ mod tests {
             .unwrap()
             .id = "gate:3:été:words".into();
         assert!(verify_candidate_policy_coverage(&verdict, &change, &policy, true, false).is_err());
+    }
+
+    #[test]
+    fn candidate_final_newline_checks_source_for_each_supported_format() {
+        use crate::content_candidate::CandidateItem;
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='words'\nkind='final_newline'\n",
+        )
+        .unwrap();
+        let mut verdict = evaluate(&change(), 1).unwrap();
+        for media in ["text/plain", "text/markdown", "text/html"] {
+            for (source, expected) in [
+                ("", CheckStatus::Passed),
+                ("é\n", CheckStatus::Passed),
+                ("é\r\n", CheckStatus::Passed),
+                ("é", CheckStatus::Failed),
+                ("é\r", CheckStatus::Failed),
+                ("é\u{2028}", CheckStatus::Failed),
+            ] {
+                let after = vec![CandidateItem {
+                    entity_id: "article".into(),
+                    public_path: "/article".into(),
+                    media_type: media.into(),
+                    revision: None,
+                    sha256: String::new(),
+                    source: source.into(),
+                    links: None,
+                }];
+                verdict.checks[0].status = expected;
+                assert!(verify_candidate_final_newlines(&verdict, &preset, &after).is_ok());
+                verdict.checks[0].status = if expected == CheckStatus::Passed {
+                    CheckStatus::Failed
+                } else {
+                    CheckStatus::Passed
+                };
+                assert!(verify_candidate_final_newlines(&verdict, &preset, &after).is_err());
+                verdict.checks[0].status = CheckStatus::NotChecked;
+                assert!(verify_candidate_final_newlines(&verdict, &preset, &after).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn candidate_verifier_rejects_forged_final_newline_pass() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate_sources::{ContentPhase, IndependentContent};
+        struct Bytes;
+        impl IndependentContent for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, _: ContentPhase) -> io::Result<Self::Reader> {
+                Ok(Cursor::new(b"abc".to_vec()))
+            }
+        }
+        let change = change();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='newline'\nkind='final_newline'\nblocking=false\n").unwrap();
+        let decision = OfflineDecisionContext {
+            change: &change,
+            preset: &preset,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: change.base.clone(),
+            complete: true,
+            items: vec![],
+        };
+        let after = vec![CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        }];
+        let context = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let mut portable = evaluate_draft_portable_candidate_verdict(
+            &context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        let check = portable
+            .verdict
+            .checks
+            .iter_mut()
+            .find(|c| c.id == "gate:7:article:newline")
+            .unwrap();
+        assert_eq!(check.status, CheckStatus::Failed);
+        check.status = CheckStatus::Passed;
+        portable.verdict.summary.failed -= 1;
+        portable.verdict.summary.passed += 1;
+        portable.verdict.findings.clear();
+        let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+            validator_name: "aexeo",
+            validator_version: env!("CARGO_PKG_VERSION"),
+            required_checks: &["gate:7:article:words"],
+            exit_code: 0,
+            timed_out: false,
+        };
+        let err = verify_draft_passing_candidate_with_content(
+            &portable,
+            &context,
+            HtmlContentScope::Document,
+            None,
+            &requirements,
+            &mut Bytes,
+            1024,
+            1024,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("final newline status differs"),
+            "{err}"
+        );
     }
 
     #[test]
