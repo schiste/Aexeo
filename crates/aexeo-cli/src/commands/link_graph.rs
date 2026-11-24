@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use aexeo_core::error::UserContext;
 use aexeo_core::link_report::{
-    AuditLinkContext, LinkReport, LinkReportBaseline, LinkReportInput, build_link_report,
-    build_link_report_from_audit_with_static_urls,
+    AuditLinkContext, LinkReport, LinkReportBaseline, LinkReportInput,
+    build_link_report_from_audit_with_source_locations, build_link_report_with_source_locations,
 };
 use anyhow::Result;
 use clap::ArgMatches;
@@ -51,17 +51,19 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
             .get_one::<String>("static-url-map")
             .map(|path| read_static_url_map(path))
             .transpose()?;
-        build_link_report_from_audit_with_static_urls(
+        build_link_report_from_audit_with_source_locations(
             &artifact,
             context.as_ref(),
             static_urls.as_ref(),
+            matches.get_flag("source-locations"),
         )
         .user_context("invalid audit link graph input")?
     } else {
         let data = fs::read(path).user_context(format!("cannot read link graph input: {path}"))?;
         let input: LinkReportInput =
             serde_json::from_slice(&data).user_context("invalid link graph input JSON")?;
-        build_link_report(&input).user_context("invalid link graph input")?
+        build_link_report_with_source_locations(&input, matches.get_flag("source-locations"))
+            .user_context("invalid link graph input")?
     };
     // The static-site adapter uses an internal synthetic audit which is not
     // persisted and must not be presented as a reusable audit binding.
@@ -214,6 +216,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, c
         collapsed_unobserved: usize,
         anchor_with_label: usize,
         anchor_empty: usize,
+        source_locations: usize,
     }
     let counts = report
         .links
@@ -225,6 +228,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, c
         .chain(&report.links.unsupported)
         .chain(&report.links.indeterminate)
         .fold(Counts::default(), |mut counts, link| {
+            counts.source_locations += usize::from(link.line.is_some() && link.column.is_some());
             counts.conditional += usize::from(link.conditional_markup == Some(true));
             counts.unclassified += usize::from(link.conditional_markup.is_none());
             counts.hidden += usize::from(link.hidden_attribute == Some(true));
@@ -248,6 +252,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant, c
         "elapsed_us": started.elapsed().as_micros(),
         "page_count": report.pages.len(),
         "link_count": observed,
+        "source_location_link_count": counts.source_locations,
         "conditional_link_count": counts.conditional,
         "unclassified_markup_link_count": counts.unclassified,
         "hidden_attribute_link_count": counts.hidden,

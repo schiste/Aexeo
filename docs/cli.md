@@ -198,6 +198,9 @@ Options:
       --static-url-map <static-url-map>
           JSON map of static relative paths to public URLs
 
+      --source-locations
+          Map links to positions in the supplied HTML where unambiguous (additional parsing)
+
       --compact
           Emit compact JSON instead of pretty-printed JSON
 
