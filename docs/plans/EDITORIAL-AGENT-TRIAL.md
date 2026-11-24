@@ -200,6 +200,27 @@ the initial file is unchanged and that opt-in telemetry omits its text. The
 client is scripted; these tests do not claim an autonomous model trial or
 independent editorial evaluation.
 
+## Interactive agent retry-budget trial, 2026-11-24
+
+The assistant ran the real `content-revise` JSON Lines session on the existing
+synthetic Markdown handover with `bounded.toml` and a budget of three proposals.
+It inspected each gate report and submitted three source-bound patches to the
+headings flagged by that report; it did not change the input file. The numbers
+of over-limit sentences were 16, 15, 14 and 13 across four evaluations. The
+session returned `budget_exhausted`, retained a failed gate and exited with code
+1 after exactly three proposals. This demonstrates the CLI limit with an active
+agent, not autonomous production behavior, semantic preservation or independent
+human review. No model provider or CMS was involved.
+
+The trial also exposes a limitation: the intentionally strict sentence rule
+counts Markdown headings, so all three patches shortened headings while leaving
+the substantive paragraphs unchanged. Fewer findings do not demonstrate better
+prose; review the configured scope and do not optimize blindly for the count.
+A CLI integration regression now also exercises a nonzero budget through three
+interactive submissions for text, paragraph text, Markdown and scoped HTML;
+that separate scripted test verifies the stop, last report, exit code and
+unchanged input file. It is not an autonomous writing evaluation.
+
 ## End-to-end revision timing
 
 `scripts/bench-content-revision.js` measures a fresh CLI process evaluating a
