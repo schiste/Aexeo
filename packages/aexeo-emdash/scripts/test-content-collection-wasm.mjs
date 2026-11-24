@@ -749,6 +749,15 @@ const sharedCitations = JSON.parse(await readFile(new URL("../../../crates/aexeo
 const sharedCitationReport = await evaluateContent(sharedCitations.document, "workflow", { workflow: sharedCitations.preset });
 assert.equal(sharedCitationReport.gates[0].measurements.sentence_count, sharedCitations.expected_sentences);
 console.log("WASM numeric citations match shared Markdown and HTML sentence boundaries");
+// Paragraph-scoped gates use the same citation projection and source coordinates.
+const scopedCitationPreset = `${sharedCitations.preset}paragraphs_only=true\n`;
+const scopedCitationReport = await evaluateContent(sharedCitations.document, "workflow", { workflow: scopedCitationPreset });
+assert.equal(scopedCitationReport.gates[0].measurements.sentence_count, sharedCitations.expected_sentences);
+assert.equal(scopedCitationReport.gates[0].status, "failed");
+assert.equal(scopedCitationReport.source_locations.length, 2);
+assert.equal(scopedCitationReport.source_locations[1].span_index, 2);
+assert.equal(scopedCitationReport.source_locations[1].utf16_offset, 1);
+
 
 // Shared with the CLI: URL punctuation must not create extra sentences.
 const sharedUrls = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-urls.json", import.meta.url), "utf8"));
