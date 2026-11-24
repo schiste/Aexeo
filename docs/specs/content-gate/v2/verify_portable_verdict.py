@@ -217,6 +217,25 @@ def verify_plain_paragraph_count_statuses(policy, verdict, after, counts):
     verify_plain_count_statuses(policy, verdict, after, counts, 'paragraph_count')
 
 
+def verify_final_newline_statuses(policy, verdict, after):
+    """Check source-backed statuses without interpreting projected content."""
+    checks = {check['id']: check for check in verdict['checks']}
+    for gate in policy['gates']:
+        if gate['kind'] != 'final_newline':
+            continue
+        for item in after:
+            if item['media_type'] not in ('text/plain', 'text/markdown', 'text/html'):
+                continue
+            entity = item['entity_id']
+            check = checks[f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}']
+            if check['status'] not in ('passed', 'failed'):
+                continue
+            source = item['source']
+            expected = 'passed' if not source or source.endswith('\n') else 'failed'
+            if check['status'] != expected:
+                raise VerificationError('final newline status differs from source')
+
+
 def collection_uniqueness_status(projection, field, group):
     """Recompute the observable status, without asserting snapshot completeness."""
     if not projection['complete']:
@@ -270,6 +289,9 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 or kind not in _ITEM_GATE_KINDS | {'unique_collection_metadata'}):
             raise VerificationError('unsupported resolved gate')
         validate_count_gate(gate)
+        if kind == 'final_newline' and (set(gate) != {'kind', 'id', 'severity', 'blocking'}
+                                        or gate['severity'] not in ('warning', 'error')):
+            raise VerificationError('invalid resolved final newline gate')
         ids.add(gate_id)
         collection_gate = kind == 'unique_collection_metadata' and has_collection
         expected_count += 1 if collection_gate else len(entries)
@@ -428,6 +450,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         verify_plain_word_count_statuses(policy, verdict, after, word_counts)
         verify_plain_character_count_statuses(policy, verdict, after, character_counts)
         verify_plain_paragraph_count_statuses(policy, verdict, after, paragraph_counts)
+        verify_final_newline_statuses(policy, verdict, after)
         if links is not None:
             verify_link_observation_statuses(links, policy, verdict, change)
         if verdict['validator']['version'] != host_options['engine_version']:
