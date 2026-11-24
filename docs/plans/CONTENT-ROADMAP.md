@@ -138,8 +138,12 @@ publishing 0.9.5 and host-side validation remain open.
     mapping retained all 18 Portable Text blocks from 20 input blocks; the French
     article retained all 27 input blocks. Both projections supplied text,
     matched their configured title and description fallbacks, and passed the
-    three `article-editorial` gates. This exercised the local package API,
-    not the hosted save hook, historical revisions, rendered HTML or MCP.
+    three `article-editorial` gates. Separately, the published configured
+    route evaluated one real historical English snapshot locally with in-memory
+    storage; it reported the snapshot as stale, complete body coverage, observed
+    title and description sources, and all three gates passed. These exercises
+    do not validate the hosted save or audit hooks, rendered HTML, MCP
+    permissions, source freshness, or historical locale.
     The configuration treats the component as UI rather than article prose;
     this sample does not establish completeness for other components or fields.
 - [ ] Validate the host's historical metadata and component mappings, citations,
