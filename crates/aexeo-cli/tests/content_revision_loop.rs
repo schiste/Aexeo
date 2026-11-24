@@ -190,6 +190,53 @@ fn loop_stops_on_cycle_exhaustion_and_decline() {
     assert_eq!(declined.finish(), 1);
 }
 #[test]
+fn interactive_agent_cannot_exceed_nonzero_budget_across_formats() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("policy.toml");
+    fs::write(&policy, preset(10)).unwrap();
+    let source = format!("test={}", policy.display());
+    for (format, drafts, extra) in [
+        ("text", ["one", "two", "three", "four"], vec![]),
+        ("paragraph-text", ["one", "two", "three", "four"], vec![]),
+        ("markdown", ["# one", "# two", "# three", "# four"], vec![]),
+        (
+            "html",
+            [
+                "<main><p>one</p></main>",
+                "<main><p>two</p></main>",
+                "<main><p>three</p></main>",
+                "<main><p>four</p></main>",
+            ],
+            vec!["--html-scope", "main"],
+        ),
+    ] {
+        let draft = dir.path().join(format!("budget-{format}"));
+        fs::write(&draft, drafts[0]).unwrap();
+        let mut args = vec!["--max-revisions", "3"];
+        args.extend(extra);
+        let mut session = start(draft.to_str().unwrap(), &source, format, &args);
+        for (index, candidate) in drafts.iter().enumerate().skip(1) {
+            let request = session.read();
+            assert_eq!(
+                request["event"], "proposal_requested",
+                "{format}: {request}"
+            );
+            assert_eq!(request["proposal"], index, "{format}: {request}");
+            assert_eq!(request["report"]["gates"][0]["status"], "failed");
+            session.send(json!({"action":"submit", "candidate":candidate}));
+        }
+        let done = session.read();
+        assert_eq!(done["event"], "complete", "{format}: {done}");
+        assert_eq!(done["stop"], "budget_exhausted", "{format}: {done}");
+        assert_eq!(done["evaluations"], 4);
+        assert_eq!(done["proposals"], 3);
+        assert_eq!(done["report"]["gates"][0]["status"], "failed");
+        assert_eq!(session.finish(), 1);
+        assert_eq!(fs::read_to_string(draft).unwrap(), drafts[0]);
+    }
+}
+
+#[test]
 fn unavailable_gate_stops_without_proposals() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("draft");
