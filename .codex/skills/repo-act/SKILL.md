@@ -27,6 +27,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   commands run by the broker and may be unset in the interactive shell. Check that
   a variable is nonempty before using it as an output directory, and quote paths
   with spaces.
+- For the content-gate v2 Python tests, create a virtual environment in the
+  session scratch directory and install the pinned
+  `docs/specs/content-gate/v2/requirements-test.txt` before running the suite.
+  A missing `jsonschema` causes schema-validation failures rather than testing
+  the comparator; use the virtual environment's Python for subprocess tests too.
 - In a reused worktree, check required local executables (such as
   `node_modules/.bin/tsc`) even when broker preparation is not configured.
   Cleanup can leave a partial `node_modules` directory, so its presence alone
