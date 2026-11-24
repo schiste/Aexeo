@@ -30,6 +30,13 @@ unavailable check may become a pass.
 
 ## Aexeo delivery and limits
 
+The Rust draft candidate verifier also independently recomputes checked word,
+character and paragraph count statuses from bound plain-text sources. Paragraph
+counts require the host's explicit plain-text paragraph option and respect the
+producer's limit; rich formats and unavailable checks remain outside this
+comparison. This does not establish provenance, freshness or publication
+atomicity. The Aethyme native runner still needs its own compatible checks.
+
 - [Aexeo #953](https://github.com/schiste/Aexeo/pull/953) independently
   checks final-newline verdicts against bound plain-text, Markdown and HTML
   sources in the experimental Python comparator. The candidate Rust verifier
