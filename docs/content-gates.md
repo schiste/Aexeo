@@ -2183,10 +2183,10 @@ of field names and nonnegative array indices and an optional zero-based
 `native_source_mapping` coverage. Optional `heading_paths`, `link_paths` and
 `list_paths` arrays in the same map provide paths in exactly the corresponding
 observation order; `null` means that an observation has no known native path.
-Their lengths must match the observed headings, destinations and lists. Headings
-and link destinations can be supplied independently when `text` is null; native
-structural paths are allowed then only with an empty `spans` array. Prose,
-paragraphs and list observations remain unavailable without text. For
+Their lengths must match the observed headings, destinations and lists. Headings,
+link destinations and list observations can be supplied independently when `text`
+is null; structural paths and source-text anchors are allowed with empty
+`spans` arrays. Prose and paragraph observations remain unavailable without text. For
 structural findings, the path identifies the host-supplied anchor and the
 reported UTF-16 offset is zero. A gap or unsupported finding remains unmapped. The CLI checks bounds, Unicode boundaries and path shape; it cannot
 establish that host-supplied paths identify the original native snapshot or

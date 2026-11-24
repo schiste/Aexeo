@@ -121,7 +121,7 @@ fn malformed_projection_is_rejected_without_fixing_input() {
     for source in [
         r#"{"schema":"aexeo.content-adapter/v1","text":"é","paragraphs":[{"start":1,"end":2}]}"#,
         r#"{"schema":"aexeo.content-adapter/v1","text":"abc","text":"different"}"#,
-        r#"{"schema":"aexeo.content-adapter/v1","text":null,"lists":[]}"#,
+        r#"{"schema":"aexeo.content-adapter/v1","text":null,"paragraphs":[]}"#,
         r#"{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[2,1]}"#,
         r#"{"schema":"aexeo.content-adapter/v1","text":"abc","headings":["one"],"heading_levels":[7]}"#,
     ] {
@@ -819,6 +819,65 @@ fn native_paths_map_structures_and_reject_misaligned_anchors() {
     }
     projection["native_source_map"]["heading_paths"] = json!([["ok"], null]);
     projection.as_object_mut().unwrap().remove("headings");
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
+}
+
+#[test]
+fn list_observations_and_locations_work_without_prose() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\nblocking=false\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=false\n").unwrap();
+    let file = dir.path().join("projection.json");
+    let mut projection = json!({
+        "schema":"aexeo.content-adapter/v1", "text":null,
+        "lists":[{"item_count":3,"depth":1}],
+        "native_source_map":{"spans":[],"list_paths":[["data","body",0]]},
+        "source_map":{"source_text":"- A","spans":[],"list_anchors":[{"source_start":0,"text":"- A"}]}
+    });
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let output = run(&file, &preset, &["--telemetry"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(report["gates"][1]["status"], "failed");
+    assert_eq!(
+        report["native_source_locations"][0]["path"],
+        json!(["data", "body", 0])
+    );
+    assert_eq!(report["source_locations"][0]["line"], 1);
+    assert_eq!(report["source_locations"][0]["column"], 1);
+    let telemetry = String::from_utf8_lossy(&output.stderr);
+    assert!(telemetry.contains("\"lists\":1"));
+    assert!(!telemetry.contains("- A"));
+    assert!(!telemetry.contains("body"));
+
+    projection["lists"] = json!([]);
+    projection["native_source_map"]["list_paths"] = json!([]);
+    projection["source_map"]["list_anchors"] = json!([]);
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&run(&file, &preset, &[]).stdout).unwrap();
+    assert_eq!(report["gates"][1]["status"], "passed");
+
+    projection.as_object_mut().unwrap().remove("lists");
+    projection
+        .as_object_mut()
+        .unwrap()
+        .remove("native_source_map");
+    projection.as_object_mut().unwrap().remove("source_map");
+    fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&run(&file, &preset, &[]).stdout).unwrap();
+    assert_eq!(report["gates"][1]["status"], "not_checked");
+
+    projection["lists"] = json!([{"item_count":3,"depth":1}]);
+    projection["source_map"] = json!({"source_text":"x","spans":[{"projected_start":0,"projected_end":1,"source_start":0}]});
     fs::write(&file, serde_json::to_vec(&projection).unwrap()).unwrap();
     assert_eq!(run(&file, &preset, &[]).status.code(), Some(2));
 }
