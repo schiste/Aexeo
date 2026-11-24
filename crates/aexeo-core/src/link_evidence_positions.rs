@@ -156,8 +156,9 @@ impl TokenSink for NodeTokenSink<'_> {
         sink.recording.set(false);
         if let Some(offset) = position {
             let mut created = sink.created.borrow_mut();
-            if created.len() == 1 {
-                let node = created.pop().expect("one recorded node");
+            if created.len() == 1
+                && let Some(node) = created.pop()
+            {
                 let matches_token = matches!(&node.data, markup5ever_rcdom::NodeData::Element { attrs, .. } if attributes.as_ref().is_some_and(|expected| *attrs.borrow() == *expected));
                 if matches_token {
                     sink.offsets
