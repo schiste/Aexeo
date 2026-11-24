@@ -8,6 +8,7 @@ pub mod config;
 pub mod content_candidate;
 pub mod content_candidate_profile;
 pub mod content_extensions;
+pub mod content_adapter;
 pub mod content_gate;
 pub mod content_gate_sources;
 pub mod content_gate_verdict;
