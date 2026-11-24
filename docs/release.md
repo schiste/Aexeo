@@ -92,6 +92,15 @@ link-graph handling. The portable v2 protocol remains experimental, and a
 successful editorial audit does not grant publication authorization. The npm
 package has a separate version and must be rebuilt and released independently.
 
+### Upgrading from 0.0.25 to 0.0.26
+
+Regenerate offline input and observed-link bound verdicts with the new engine;
+retain earlier verdicts as historical evidence. This CLI version includes
+incremental source mapping, its coverage telemetry, link landmark handling and
+independent final-newline checks. Mapping identifies the supplied snapshot; it
+does not establish source freshness or authorize publication. The experimental
+portable protocol and npm package remain separate from the CLI release.
+
 ## CLI Release Artifacts
 
 Package release assets:
