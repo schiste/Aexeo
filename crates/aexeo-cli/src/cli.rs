@@ -71,6 +71,7 @@ pub fn build_cli() -> Command {
             Command::new("link-graph-incremental")
                 .about("Review candidate rendered sites against an in-memory link report baseline")
                 .arg(Arg::new("base").long("base").required(true).num_args(1).help("Baseline link graph input JSON"))
+                .arg(Arg::new("source-locations").long("source-locations").action(ArgAction::SetTrue).help("Map link positions in the supplied HTML when unambiguous (additional parsing)"))
                 .arg(Arg::new("candidates").required(true).num_args(1..).help("Candidate link graph input JSON files; each is compared independently against the baseline")),
         )
         .subcommand(
@@ -191,6 +192,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("link-graph-site-origin").long("link-graph-site-origin").num_args(1).requires("link-graph-output").help("Public origin of the static site"))
                 .arg(Arg::new("link-graph-url-map").long("link-graph-url-map").num_args(1).requires("link-graph-output").help("JSON map of build-relative paths to public URLs"))
                 .arg(Arg::new("link-graph-context").long("link-graph-context").num_args(1).requires("link-graph-output").help("Optional inventory and identity context JSON"))
+                .arg(Arg::new("link-graph-source-locations").long("link-graph-source-locations").requires("link-graph-output").action(ArgAction::SetTrue).help("Map link positions in the observed HTML when unambiguous (additional parsing)"))
                 .arg(Arg::new("link-graph-compact").long("link-graph-compact").action(ArgAction::SetTrue).requires("link-graph-output").help("Write compact link graph JSON without omitting evidence"))
                 .arg(Arg::new("link-graph-telemetry").long("link-graph-telemetry").action(ArgAction::SetTrue).requires("link-graph-output").help("Emit aggregate link graph timing and counts to stderr"))
                 .arg(Arg::new("path").default_value("."))
@@ -261,6 +263,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("link-graph-output").long("link-graph-output").num_args(1).help("Write an observational link graph report to this JSON file"))
                 .arg(Arg::new("link-graph-context").long("link-graph-context").requires("link-graph-output").num_args(1).help("Compare the link graph report with this audit link context file instead of the --seed-file inventory"))
                 .arg(Arg::new("link-graph-summary").long("link-graph-summary").requires("link-graph-output").action(ArgAction::SetTrue).help("Include an observational link graph coverage summary in the crawl output"))
+                .arg(Arg::new("link-graph-source-locations").long("link-graph-source-locations").requires("link-graph-output").action(ArgAction::SetTrue).help("Map link positions in the observed HTML when unambiguous (additional parsing)"))
                 .arg(Arg::new("link-graph-compact").long("link-graph-compact").action(ArgAction::SetTrue).requires("link-graph-output").help("Write compact link graph JSON without omitting evidence"))
                 .arg(Arg::new("link-graph-telemetry").long("link-graph-telemetry").requires("link-graph-output").action(ArgAction::SetTrue).help("Emit aggregate link graph timing and counts to stderr"))
                 .arg(Arg::new("checkpoint").long("checkpoint").num_args(1))

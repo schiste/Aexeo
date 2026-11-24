@@ -1598,3 +1598,45 @@ fn optional_graph_locations_work_for_json_and_audit_and_emit_aggregate_coverage(
         assert!(!telemetry_text.contains("example.org"));
     }
 }
+
+#[test]
+fn static_check_can_emit_graph_source_locations() {
+    let temp = tempfile::tempdir().unwrap();
+    let site = temp.path().join("site");
+    fs::create_dir(&site).unwrap();
+    fs::write(
+        site.join("index.html"),
+        "<main>\n<p>É <a href='/b'>link</a></p>\n</main>",
+    )
+    .unwrap();
+    let map = temp.path().join("map.json");
+    fs::write(&map, r#"{"index.html":"https://example.org/"}"#).unwrap();
+    let graph = temp.path().join("graph.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("check")
+        .arg(&site)
+        .arg("--link-graph-output")
+        .arg(&graph)
+        .args([
+            "--link-graph-site-origin",
+            "https://example.org",
+            "--link-graph-url-map",
+        ])
+        .arg(&map)
+        .args(["--link-graph-source-locations", "--link-graph-telemetry"])
+        .output()
+        .unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&graph).expect("graph output")).unwrap();
+    let link = &report["links"]["destinations"][0]["evidence"][0];
+    assert_eq!(
+        (link["line"].as_u64(), link["column"].as_u64()),
+        (Some(2), Some(6))
+    );
+    let event = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["event"] == "link_graph_analysis")
+        .unwrap();
+    assert_eq!(event["source_location_link_count"], 1);
+}

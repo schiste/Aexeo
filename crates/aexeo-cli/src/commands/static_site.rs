@@ -137,11 +137,13 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
             &site,
             Some(required_arg(submatches, "link-graph-site-origin")?),
         ));
-        let mut graph = aexeo_core::link_report::build_link_report_from_audit_with_static_urls(
-            &artifact,
-            context.as_ref(),
-            Some(&urls),
-        )?;
+        let mut graph =
+            aexeo_core::link_report::build_link_report_from_audit_with_source_locations(
+                &artifact,
+                context.as_ref(),
+                Some(&urls),
+                submatches.get_flag("link-graph-source-locations"),
+            )?;
         if !graph.suppressed_legacy_findings.is_empty() {
             aexeo_core::link_findings::remove_suppressed_findings(&mut findings, &graph);
             aexeo_core::link_findings::remove_suppressed_findings(&mut artifact.findings, &graph);

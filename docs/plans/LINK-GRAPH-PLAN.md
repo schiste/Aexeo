@@ -314,8 +314,9 @@ conservative map verifies its projection and ordered links; if the full page
 cannot be mapped, a separately verified `main` may locate links whose href is
 unique across that page's graph. Other links stay unlocated. Aggregate opt-in
 telemetry counts mapped observations. This does not locate the original CMS or
-template source and is not yet exposed by `check`, `crawl` or incremental graph
-commands. Real-site coverage and cost remain to be measured.
+template source. `check`, `crawl` and incremental graph commands also expose
+the same opt-in mode; unchanged incremental pages reuse the mapped evidence.
+Real-site coverage and cost remain to be measured.
 
 
 Text and Markdown graph summaries count inbound findings present in the rendered

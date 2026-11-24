@@ -170,7 +170,11 @@ occur exactly once in the graph for that page. Ambiguous or unsupported links
 remain null. This option adds processing time and does not
 change link counts or coverage conclusions. Opt-in telemetry includes the
 aggregate `source_location_link_count`, without source paths or link content.
-Other graph-producing commands do not yet provide this option.
+For `check` and `crawl`, use `--link-graph-source-locations` together with
+`--link-graph-output`. `link-graph-incremental --source-locations` preserves
+the selected mode across cached and re-extracted pages. These options are
+opt-in; the source locations identify the evaluated HTML snapshot rather than
+the original CMS record or template.
 
 Links in `template`, `noscript`, and a `dialog` without the boolean `open`
 attribute remain in discovery and evidence but have

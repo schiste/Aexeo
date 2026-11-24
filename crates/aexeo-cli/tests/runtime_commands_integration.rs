@@ -1497,3 +1497,48 @@ fn nested_sitemaps_obey_robots_txt() {
         "{requests:?}"
     );
 }
+
+#[test]
+fn crawl_can_map_graph_locations_in_observed_html() {
+    let server = RecordingHost::start(|path| {
+        let body = if path == "/" {
+            "<main>\n<p>É <a href='/b'>link</a></p>\n</main>"
+        } else {
+            "<main>target</main>"
+        };
+        http_response("200 OK", "", "text/html", body)
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let graph = temp.path().join("graph.json");
+    let base = format!("http://127.0.0.1:{}", server.port);
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .arg("crawl")
+        .arg(base)
+        .args([
+            "--engine",
+            "http",
+            "--max-pages",
+            "2",
+            "--progress",
+            "off",
+            "--link-graph-output",
+        ])
+        .arg(&graph)
+        .args(["--link-graph-source-locations", "--link-graph-telemetry"])
+        .output()
+        .unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&graph).expect("graph output")).unwrap();
+    let link = &report["links"]["destinations"][0]["evidence"][0];
+    assert_eq!(
+        (link["line"].as_u64(), link["column"].as_u64()),
+        (Some(2), Some(6))
+    );
+    let event = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["event"] == "link_graph_analysis")
+        .unwrap();
+    assert_eq!(event["source_location_link_count"], 1);
+}

@@ -90,3 +90,54 @@ fn ambiguous_json_is_rejected() {
     assert_eq!(lines.lines().count(), 1);
     assert!(serde_json::from_str::<serde_json::Value>(lines.trim()).is_ok());
 }
+
+#[test]
+fn locations_are_reused_and_recomputed_like_full_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let changed = dir.path().join("changed.json");
+    let input = fixture();
+    fs::write(&base, serde_json::to_vec(&input).unwrap()).unwrap();
+    let mut candidate = input.clone();
+    candidate["pages"][0]["html"] = "<main>\n<p>É <a href='/b'>B</a></p>\n</main>".into();
+    fs::write(&changed, serde_json::to_vec(&candidate).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["link-graph-incremental", "--source-locations", "--base"])
+        .arg(&base)
+        .arg(&base)
+        .arg(&changed)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["pages_reused"], 2);
+    assert_eq!(rows[1]["pages_reused"], 1);
+    assert_eq!(rows[1]["pages_extracted"], 1);
+    for (row, path) in rows.iter().zip([&base, &changed]) {
+        let full = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .arg("link-graph")
+            .arg(path)
+            .arg("--source-locations")
+            .output()
+            .unwrap();
+        assert!(full.status.success());
+        assert_eq!(
+            row["report"],
+            serde_json::from_slice::<serde_json::Value>(&full.stdout).unwrap()
+        );
+    }
+    let link = &rows[1]["report"]["links"]["destinations"][0]["evidence"][0];
+    assert_eq!(
+        (link["line"].as_u64(), link["column"].as_u64()),
+        (Some(2), Some(6))
+    );
+}
