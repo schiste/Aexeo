@@ -30,6 +30,14 @@ editorial quality, factual accuracy, or detector outcomes.
   content preset nor revision audits. The connected Preview MCP exposed no
   Aexeo audit action. Branch configuration does not establish the deployed
   version or its permissions; both require independent host verification.
+  Update, 2026-11-24: npm serves `@aeptus/aexeo-emdash` 0.9.5; the tested
+  archive was installed on Preview with article and glossary presets and
+  revision-audit capabilities in [website PR #653](https://github.com/Aeptus/website-and-content/pull/653).
+  The deployed plugin reported MCP tools disabled and no stored consent; the
+  currently connected Preview MCP still exposes no Aexeo audit action. This
+  does not verify structured-snapshot storage, historical revision permissions
+  or equivalence with rendered content. See `CONTENT-ROADMAP.md` for the
+  read-only local record and revision experiments and their limitations.
 
 Profiles are selected explicitly. A custom profile can be exported as a gate preset and composed with other presets,
 so generation and validation share the same profile.
