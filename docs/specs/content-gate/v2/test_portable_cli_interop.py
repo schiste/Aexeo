@@ -224,16 +224,15 @@ class PortableCliInterop(unittest.TestCase):
             ('ignore_spaces_false_pass', 'é\u00a0a\u0085b', 5, 5, 'failed', True),
         ])
 
-    def test_real_plain_paragraph_count_verdicts_match_python_comparator(self):
-        # The native host does not yet independently recompute paragraphs.
+    def test_real_plain_paragraph_count_verdicts_match_both_comparators(self):
         self._check_real_plain_count_verdicts('paragraph_count', [
             ('minimum_pass', 'one\n\ntwo', 2, 3, 'passed', False),
             ('minimum_fail', 'one\ntwo', 2, 3, 'failed', False),
             ('maximum_fail', 'one\n\ntwo\n\nthree', 1, 2, 'failed', False),
             ('crlf_unicode_blank', 'é\r\n\u00a0\r\nnext', 2, 2, 'passed', False),
-        ], compare_native=False)
+        ])
 
-    def _check_real_plain_count_verdicts(self, kind, cases, compare_native=True):
+    def _check_real_plain_count_verdicts(self, kind, cases):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         binary = os.environ.get('AEXEO_CLI_BIN')
         executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
@@ -283,7 +282,7 @@ class PortableCliInterop(unittest.TestCase):
                 (root / 'manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
-                native_binary = os.environ.get('AETHYME_CLI_BIN') if compare_native else None
+                native_binary = os.environ.get('AETHYME_CLI_BIN')
                 native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary else None
                 for command in filter(None, (verify, native)):
                     result = subprocess.run(command, env=native_env, capture_output=True, text=True)
