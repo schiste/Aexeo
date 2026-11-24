@@ -113,8 +113,7 @@ fn resolve(
             }
         }
         stack.push(name.to_owned());
-        let mut gates: Vec<ContentGate> = Vec::new();
-        let mut origins: Vec<GateOrigin> = Vec::new();
+        let mut composed = GateAccumulator::default();
         let mut height = 1;
         for parent in &spec.extends {
             let (resolved, parent_height) = visit(parent, sources, stack, memo, with_origins)?;
@@ -126,18 +125,13 @@ fn resolve(
                 } else {
                     None
                 };
-                merge_gate(&mut gates, &mut origins, gate, origin);
+                composed.merge(gate, origin);
             }
         }
         stack.pop();
         for id in &spec.disable {
-            let index = gates
-                .iter()
-                .position(|gate| gate.id() == id)
-                .with_context(|| format!("cannot disable unknown inherited gate {id} in {name}"))?;
-            gates.remove(index);
-            if with_origins {
-                origins.remove(index);
+            if !composed.disable(id) {
+                bail!("cannot disable unknown inherited gate {id} in {name}");
             }
         }
         for gate in spec.gates {
@@ -145,8 +139,9 @@ fn resolve(
                 gate_id: gate.id().to_owned(),
                 source: name.to_owned(),
             });
-            merge_gate(&mut gates, &mut origins, gate, origin);
+            composed.merge(gate, origin);
         }
+        let (gates, origins) = composed.into_parts();
         let preset = ContentPreset {
             version: spec.version,
             name: spec.name,
@@ -178,22 +173,44 @@ fn resolve(
     Ok(resolved)
 }
 
-fn merge_gate(
-    gates: &mut Vec<ContentGate>,
-    origins: &mut Vec<GateOrigin>,
-    gate: ContentGate,
-    origin: Option<GateOrigin>,
-) {
-    if let Some(index) = gates.iter().position(|item| item.id() == gate.id()) {
-        gates[index] = gate;
-        if let Some(origin) = origin {
-            origins[index] = origin;
+/// Preserve first-insertion order while indexing overrides and disables by ID.
+/// Removed slots remain vacant until resolution is complete, so reintroducing a
+/// disabled gate appends it just as it would after removal from a vector.
+#[derive(Default)]
+struct GateAccumulator {
+    positions: BTreeMap<String, usize>,
+    entries: Vec<Option<(ContentGate, Option<GateOrigin>)>>,
+}
+
+impl GateAccumulator {
+    fn merge(&mut self, gate: ContentGate, origin: Option<GateOrigin>) {
+        if let Some(&index) = self.positions.get(gate.id()) {
+            self.entries[index] = Some((gate, origin));
+        } else {
+            self.positions
+                .insert(gate.id().to_owned(), self.entries.len());
+            self.entries.push(Some((gate, origin)));
         }
-    } else {
-        gates.push(gate);
-        if let Some(origin) = origin {
-            origins.push(origin);
+    }
+
+    fn disable(&mut self, id: &str) -> bool {
+        let Some(index) = self.positions.remove(id) else {
+            return false;
+        };
+        self.entries[index] = None;
+        true
+    }
+
+    fn into_parts(self) -> (Vec<ContentGate>, Vec<GateOrigin>) {
+        let mut gates = Vec::with_capacity(self.positions.len());
+        let mut origins = Vec::new();
+        for (gate, origin) in self.entries.into_iter().flatten() {
+            gates.push(gate);
+            if let Some(origin) = origin {
+                origins.push(origin);
+            }
         }
+        (gates, origins)
     }
 }
 
@@ -418,6 +435,34 @@ mod tests {
             ]
         );
         assert!(explain_content_preset("missing", &sources).is_err());
+    }
+
+    #[test]
+    fn reintroduced_gates_append_after_disables_and_keep_winning_origins() {
+        let sources = BTreeMap::from([
+            ("base".into(), "version=1\nname='base'\n[[gates]]\nid='a'\nkind='word_count'\nmin=1\n[[gates]]\nid='b'\nkind='word_count'\nmin=1\n[[gates]]\nid='c'\nkind='word_count'\nmin=1\n".into()),
+            ("root".into(), "version=1\nname='root'\nextends=['base']\ndisable=['a', 'c']\n[[gates]]\nid='a'\nkind='word_count'\nmin=2\n[[gates]]\nid='b'\nkind='word_count'\nmin=3\n[[gates]]\nid='c'\nkind='word_count'\nmin=4\n".into()),
+        ]);
+        let explained = explain_content_preset("root", &sources).unwrap();
+        let ids: Vec<_> = explained
+            .preset
+            .gates
+            .iter()
+            .map(|gate| gate.id())
+            .collect();
+        assert_eq!(ids, ["b", "a", "c"]);
+        assert_eq!(
+            explained
+                .gate_origins
+                .iter()
+                .map(|origin| origin.source.as_str())
+                .collect::<Vec<_>>(),
+            ["root", "root", "root"]
+        );
+        assert_eq!(
+            serde_json::to_value(&explained.preset).unwrap(),
+            serde_json::to_value(resolve_content_preset("root", &sources).unwrap()).unwrap()
+        );
     }
 
     #[test]
