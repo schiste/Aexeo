@@ -69,6 +69,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   To check build provenance, rebuild the same Git tree in a second worktree
   with a clean output directory and compare archive hashes. A match on one
   machine with shared tooling or caches is not independent attestation.
+- When verifying a downloaded CI artifact, check whether the download flattened
+  paths referenced by its checksum file. Compare the recorded digest with the
+  actual corresponding file; a missing-file error is not a successful check.
+  Verify the final public release separately from its CI artifact.
 - Before a guarded PR merge, fetch the full live `headRefOid` directly from
   `gh pr view --json headRefOid` and pass that exact value to
   `--match-head-commit`; never reconstruct a full SHA from an abbreviated log.
