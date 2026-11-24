@@ -2893,7 +2893,7 @@ mod tests {
         change.entries = vec![update];
         let IncrementalEvaluation::Evaluated {
             reports, evaluated, ..
-        } = baseline.evaluate(&change, &[next.clone()])
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
         else {
             panic!("host snapshot should be evaluated");
         };
