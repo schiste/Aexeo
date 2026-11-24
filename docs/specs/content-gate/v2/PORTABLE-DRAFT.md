@@ -308,7 +308,11 @@ and metadata-length count gates, it also validates the resolved field shapes,
 severity, count bounds and gate-specific options. For collection uniqueness
 checks, it also rejects a checked status when the
 bound collection is incomplete or its required field or grouping value is
-unavailable. Other gate parameters remain unvalidated. It cannot prove the
+unavailable. For a checked uniqueness result, it also recomputes duplicates
+from the bound values and grouping, respecting the evaluator limits. It caps
+aggregate comparison work and rejects inputs above that bound. This is not
+proof that the supplied collection is authentic or exhaustive. Other gate
+parameters remain unvalidated. It cannot prove the
 evaluator ran the checks correctly or authenticate the
 policy or validator labels. The host must still independently select its required
 checks and enforce completeness, freshness and the publication boundary. It still cannot

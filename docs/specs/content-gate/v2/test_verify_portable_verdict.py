@@ -341,6 +341,97 @@ class PortableComparison(unittest.TestCase):
             verdict['checks'][0]['status'] = 'not_checked'
             require_policy_coverage(policy, change, True, verdict, collection_projection=projection)
 
+    def test_collection_uniqueness_must_match_observed_values_and_limits(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'] = [{'id': 'unique', 'kind': 'unique_collection_metadata',
+                            'field': 'slug', 'severity': 'warning', 'blocking': True}]
+        gate = policy['gates'][0]
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        check = verdict['checks'][0]
+        check['id'] = 'collection:0::unique'
+        def projection(values):
+            return {'complete': True, 'items': [
+                {'id': str(index), 'metadata': metadata}
+                for index, metadata in enumerate(values)]}
+        cases = [
+            (None, [{'slug': 'same'}, {'slug': 'same'}], 'failed'),
+            (None, [{'slug': 'same'}, {'slug': 'other'}], 'passed'),
+            (None, [{'slug': 'same'}, {'slug': ' same '}], 'passed'),
+            (None, [{'slug': '\x1c'}, {'slug': '\x1c'}], 'failed'),
+            ('lang', [{'slug': 'same', 'lang': 'en'}, {'slug': 'same', 'lang': 'fr'}], 'passed'),
+            ('lang', [{'slug': 'same', 'lang': 'en'}, {'slug': 'same', 'lang': 'en'}], 'failed'),
+            (None, [], 'passed'),
+        ]
+        for group, values, expected in cases:
+            if group is None:
+                gate.pop('group_by', None)
+            else:
+                gate['group_by'] = group
+            for actual in ('passed', 'failed', 'not_checked'):
+                check['status'] = actual
+                with self.subTest(values=values, group=group, actual=actual):
+                    if actual in (expected, 'not_checked'):
+                        require_policy_coverage(policy, change, True, verdict, collection_projection=projection(values))
+                    else:
+                        with self.assertRaises(VerificationError):
+                            require_policy_coverage(policy, change, True, verdict, collection_projection=projection(values))
+        gate.pop('group_by', None)
+        for values in ([{'slug': 'x' * 16385}], [{'slug': 'é' * 8193}],
+                       [{'slug': str(i)} for i in range(10001)],
+                       [{'slug': f'{i:04}' + 'x' * 16380} for i in range(257)]):
+            check['status'] = 'passed'
+            with self.assertRaises(VerificationError):
+                require_policy_coverage(policy, change, True, verdict, collection_projection=projection(values))
+            check['status'] = 'not_checked'
+            require_policy_coverage(policy, change, True, verdict, collection_projection=projection(values))
+
+    def test_rebound_collection_cannot_hide_duplicate_metadata(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'] = [{'id': 'unique', 'kind': 'unique_collection_metadata',
+                            'field': 'slug', 'severity': 'warning', 'blocking': True}]
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        change['entries'][0]['metadata'] = {'slug': 'same'}
+        self.artifacts['change'] = self.encoded(change)
+        base = copy.deepcopy(self.fixture['base'])
+        existing = copy.deepcopy(self.fixture['after'][0])
+        existing.update(entity_id='other', public_path='/other')
+        base['items'].append(existing)
+        self.artifacts['collection'] = self.encoded({
+            'change_id': change['change_id'], 'complete': True,
+            'items': [{'id': 'article', 'metadata': {'slug': 'same'}},
+                      {'id': 'other', 'metadata': {'slug': 'same'}}],
+        })
+        candidate = overlay(base, change, self.fixture['after'])
+        inputs = dict(self.artifacts, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        for envelope in (self.previous, self.fresh):
+            envelope['binding_sha256'] = binding(inputs)
+            envelope['verdict']['checks'][0]['id'] = 'collection:0::unique'
+        with self.assertRaisesRegex(VerificationError, 'uniqueness status'):
+            compare(self.encoded(self.previous), self.encoded(self.fresh),
+                    self.encoded(base), self.encoded(self.fixture['after']),
+                    self.artifacts, ['collection:0::unique'], self.identity, 0, False)
+
+    def test_collection_comparison_work_is_bounded_and_shared(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        gate = {'id': 'one', 'kind': 'unique_collection_metadata', 'field': 'slug',
+                'severity': 'warning', 'blocking': True}
+        policy['gates'] = [gate, dict(gate, id='two')]
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'] = [{'id': f'collection:0::{name}', 'blocking': True, 'status': 'passed'}
+                             for name in ('one', 'two')]
+        projection = {'complete': True, 'items': [{'id': 'article', 'metadata': {'slug': 'a', 'lang': 'en'}}]}
+        with patch('verify_portable_verdict._COLLECTION_MAX_COMPARISON_ITEMS', 1):
+            require_policy_coverage(policy, change, True, verdict, collection_projection=projection)
+            policy['gates'][1]['field'] = 'lang'
+            with self.assertRaisesRegex(VerificationError, 'work limit'):
+                require_policy_coverage(policy, change, True, verdict, collection_projection=projection)
+
     def test_rebound_collection_cannot_claim_incomplete_metadata_passed(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         policy['gates'] = [{'id': 'unique', 'kind': 'unique_collection_metadata',

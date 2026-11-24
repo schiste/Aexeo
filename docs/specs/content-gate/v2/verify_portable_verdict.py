@@ -126,6 +126,49 @@ def validate_count_gate(gate):
         raise VerificationError('invalid counting gate metadata field')
 
 
+
+# Bounds mirror the currently supported Aexeo collection evaluator; the
+# independent comparator also caps aggregate work across distinct gates.
+_COLLECTION_MAX_KEYS = 10_000
+_COLLECTION_MAX_KEY_BYTES = 4 * 1024 * 1024
+_COLLECTION_MAX_VALUE_BYTES = 16 * 1024
+_COLLECTION_MAX_COMPARISON_ITEMS = 1_000_000
+
+
+def _rust_blank(value):
+    # Python additionally treats ASCII file/group/record/unit separators as
+    # whitespace; Rust's str::trim does not.
+    return not value or all(ch.isspace() and ch not in '\x1c\x1d\x1e\x1f' for ch in value)
+
+
+def collection_uniqueness_status(projection, field, group):
+    """Recompute the observable status, without asserting snapshot completeness."""
+    if not projection['complete']:
+        return 'not_checked'
+    seen, key_bytes, duplicate = set(), 0, False
+    for item in projection['items']:
+        metadata = item.get('metadata') or {}
+        value = metadata.get(field)
+        category = metadata.get(group) if group is not None else None
+        if not isinstance(value, str) or _rust_blank(value):
+            return 'not_checked'
+        if group is not None and (not isinstance(category, str) or _rust_blank(category)):
+            return 'not_checked'
+        value_size = len(value.encode('utf-8'))
+        category_size = len(category.encode('utf-8')) if category is not None else 0
+        if value_size > _COLLECTION_MAX_VALUE_BYTES or category_size > _COLLECTION_MAX_VALUE_BYTES:
+            return 'not_checked'
+        key = (category, value)
+        if key in seen:
+            duplicate = True
+        else:
+            key_bytes += value_size + category_size
+            if len(seen) >= _COLLECTION_MAX_KEYS or key_bytes > _COLLECTION_MAX_KEY_BYTES:
+                return 'not_checked'
+            seen.add(key)
+    return 'failed' if duplicate else 'passed'
+
+
 def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None, plain_text_paragraphs=False, collection_projection=None):
     """Reject a verdict omitting a configured gate instance or its blocking flag."""
     if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
@@ -164,6 +207,8 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
     if needs_items and any(entry.get('after') is not None and entry['media_type'] not in
                            {'text/plain', 'text/markdown', 'text/html'} for entry in change['entries']):
         raise VerificationError('item media type is not supported by this evaluator')
+    collection_cache = {}
+    collection_work = 0
     for gate in policy['gates']:
         gate_id, kind, blocking = gate['id'], gate['kind'], gate['blocking']
         if kind == 'unique_collection_metadata' and has_collection:
@@ -181,15 +226,20 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 if (not isinstance(field, str) or not field.strip()
                         or group is not None and (not isinstance(group, str) or not group.strip())):
                     raise VerificationError('invalid collection metadata fields')
-                def missing_metadata(item):
-                    metadata = item.get('metadata') or {}
-                    return any(not isinstance(value, str) or not value.strip()
-                               for key in (field, group) if key is not None
-                               for value in (metadata.get(key),))
-                if (check.get('status') != 'not_checked'
-                        and (not collection_projection['complete']
-                             or any(map(missing_metadata, collection_projection['items'])))):
-                    raise VerificationError('collection gate cannot assess incomplete observations')
+                status = check.get('status')
+                if status != 'not_checked':
+                    cache_key = (field, group)
+                    if cache_key not in collection_cache:
+                        collection_work += len(collection_projection['items'])
+                        if collection_work > _COLLECTION_MAX_COMPARISON_ITEMS:
+                            raise VerificationError('collection comparison work limit exceeded')
+                        collection_cache[cache_key] = collection_uniqueness_status(
+                            collection_projection, field, group)
+                    actual = collection_cache[cache_key]
+                    if actual == 'not_checked':
+                        raise VerificationError('collection gate cannot assess incomplete observations')
+                    if status in ('passed', 'failed') and status != actual:
+                        raise VerificationError('collection uniqueness status differs from observations')
             if kind in {'custom', 'site_group', 'site_audit'} and check.get('status') != 'not_checked':
                 raise VerificationError('candidate evaluator cannot execute site or custom gates')
             if (kind == 'literal_markdown_links' and item_media.get(entity) != 'text/html'
