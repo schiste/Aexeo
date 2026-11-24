@@ -670,7 +670,9 @@ registry before considering the release delivered.
   flag. Matching bindings and a narrow host-required check list cannot hide an
   omitted advisory or blocking gate. The Python comparator also validates resolved
   word, character, paragraph and metadata-length count gate parameters. Other
-  gate parameters still require independent validation; this does not
+  gate parameters still require independent validation. The Python comparator
+  also rejects checked collection uniqueness results for incomplete snapshots
+  or unavailable required metadata. This does not
   authenticate the evaluator, establish freshness or authorize publication;
   Aethyme's native comparator adopted the check in
   [PR #1939](https://github.com/schiste/Aethyme/pull/1939). On 2026-11-22,
