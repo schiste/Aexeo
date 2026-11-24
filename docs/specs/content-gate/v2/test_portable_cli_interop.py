@@ -207,17 +207,29 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertFalse(json.loads(native_bad.stdout)['publication_authorized'])
 
     def test_real_plain_word_count_verdicts_match_both_comparators(self):
+        self._check_real_plain_count_verdicts('word_count', [
+            ('minimum_pass', 'one two', 2, 3, 'passed', False),
+            ('minimum_fail', 'one', 2, 3, 'failed', False),
+            ('maximum_fail', 'one two three four', 2, 3, 'failed', False),
+            ('unicode_spaces', 'é\u00a0word\u0085next', 3, 3, 'passed', False),
+        ])
+
+    def test_real_plain_character_count_verdicts_match_both_comparators(self):
+        self._check_real_plain_count_verdicts('character_count', [
+            ('minimum_pass', 'é a', 3, 3, 'passed', False),
+            ('minimum_fail', 'é a', 4, 6, 'failed', False),
+            ('maximum_fail', 'é a', 1, 2, 'failed', False),
+            ('ignore_unicode_spaces', 'é\u00a0a\u0085b', 3, 3, 'passed', True),
+            ('count_unicode_spaces', 'é\u00a0a\u0085b', 5, 5, 'passed', False),
+            ('ignore_spaces_false_pass', 'é\u00a0a\u0085b', 5, 5, 'failed', True),
+        ])
+
+    def _check_real_plain_count_verdicts(self, kind, cases):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         binary = os.environ.get('AEXEO_CLI_BIN')
         executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
-        cases = [
-            ('minimum_pass', 'one two', 2, 3, 'passed'),
-            ('minimum_fail', 'one', 2, 3, 'failed'),
-            ('maximum_fail', 'one two three four', 2, 3, 'failed'),
-            ('unicode_spaces', 'é\u00a0word\u0085next', 3, 3, 'passed'),
-        ]
-        for name, source, minimum, maximum, expected in cases:
-            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='aexeo-v2-words-') as directory:
+        for name, source, minimum, maximum, expected, ignore_whitespace in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='aexeo-v2-count-') as directory:
                 root = Path(directory)
                 after = json.loads(json.dumps(fixture['after']))
                 change = json.loads(fixture['artifacts']['change'])
@@ -227,9 +239,10 @@ class PortableCliInterop(unittest.TestCase):
                 for filename, value in [('base', fixture['base']), ('after', after), ('change', change)]:
                     (root / filename).write_text(json.dumps(value), encoding='utf-8')
                 (root / 'preset').write_text(
-                    "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\n"
+                    f"version=1\nname='test'\n[[gates]]\nid='count'\nkind='{kind}'\n"
                     f"min={minimum}\nmax={maximum}\nblocking=false\n"
-                    "[[gates]]\nid='always'\nkind='word_count'\nmin=1\n", encoding='utf-8')
+                    + (f"ignore_whitespace={str(ignore_whitespace).lower()}\n" if kind == 'character_count' else '')
+                    + "[[gates]]\nid='always'\nkind='word_count'\nmin=1\n", encoding='utf-8')
                 common = executable + ['content-change', '--preset', 'test', '--preset-source',
                     'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build']
                 env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
@@ -244,7 +257,7 @@ class PortableCliInterop(unittest.TestCase):
                     env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'previous')), capture_output=True, text=True)
                 self.assertEqual(run.returncode, 0, run.stderr)
                 portable = json.loads((root / 'previous').read_text(encoding='utf-8'))
-                check = next(c for c in portable['verdict']['checks'] if c['id'] == 'gate:7:article:words')
+                check = next(c for c in portable['verdict']['checks'] if c['id'] == 'gate:7:article:count')
                 self.assertEqual(check['status'], expected)
                 (root / 'fresh').write_text(json.dumps(portable), encoding='utf-8')
                 artifacts = ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')
