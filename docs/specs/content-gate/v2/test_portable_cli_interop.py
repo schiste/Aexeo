@@ -234,6 +234,15 @@ class PortableCliInterop(unittest.TestCase):
             ('crlf_unicode_blank', 'é\r\n\u00a0\r\nnext', 2, 2, 'passed', False),
         ])
 
+    def test_real_final_newline_verdicts_match_python_comparator(self):
+        # The native comparator needs independent implementation before parity can be asserted.
+        self._check_real_plain_count_verdicts('final_newline', [
+            ('lf', 'one\n', None, None, 'passed', False),
+            ('crlf', 'one\r\n', None, None, 'passed', False),
+            ('missing', 'one', None, None, 'failed', False),
+            ('bare_cr', 'one\r', None, None, 'failed', False),
+        ])
+
     def _check_real_plain_count_verdicts(self, kind, cases):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         binary = os.environ.get('AEXEO_CLI_BIN')
@@ -250,7 +259,7 @@ class PortableCliInterop(unittest.TestCase):
                     (root / filename).write_text(json.dumps(value), encoding='utf-8')
                 (root / 'preset').write_text(
                     f"version=1\nname='test'\n[[gates]]\nid='count'\nkind='{kind}'\n"
-                    f"min={minimum}\nmax={maximum}\nblocking=false\n"
+                    + ("blocking=false\n" if kind == "final_newline" else f"min={minimum}\nmax={maximum}\nblocking=false\n")
                     + (f"ignore_whitespace={str(ignore_whitespace).lower()}\n" if kind == 'character_count' else '')
                     + "[[gates]]\nid='always'\nkind='word_count'\nmin=1\n", encoding='utf-8')
                 common = executable + ['content-change', '--preset', 'test', '--preset-source',
@@ -285,7 +294,7 @@ class PortableCliInterop(unittest.TestCase):
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
                 native_binary = os.environ.get('AETHYME_CLI_BIN')
-                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary else None
+                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary and kind != 'final_newline' else None
                 for command in filter(None, (verify, native)):
                     result = subprocess.run(command, env=native_env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

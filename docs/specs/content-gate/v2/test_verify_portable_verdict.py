@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -276,6 +276,49 @@ class PortableComparison(unittest.TestCase):
         after[0]['media_type'] = 'text/markdown'
         check['status'] = 'passed'
         verify_plain_character_count_statuses(policy, verdict, after, {})
+
+    def test_final_newline_source_and_status_cases(self):
+        gate = dict(kind='final_newline', id='words', severity='warning', blocking=True)
+        policy = {'gates': [gate]}
+        check = {'id': 'gate:2:é:words', 'status': 'passed'}
+        verdict = {'checks': [check]}
+        for media_type in ('text/plain', 'text/markdown', 'text/html'):
+            for source, expected in (('', 'passed'), ('é\n', 'passed'), ('é\r\n', 'passed'),
+                                     ('é', 'failed'), ('é\r', 'failed'), ('é\u2028', 'failed')):
+                with self.subTest(media_type=media_type, source=source):
+                    after = [{'entity_id': 'é', 'media_type': media_type, 'source': source}]
+                    check['status'] = expected
+                    verify_final_newline_statuses(policy, verdict, after)
+                    check['status'] = 'failed' if expected == 'passed' else 'passed'
+                    with self.assertRaisesRegex(VerificationError, 'final newline status differs'):
+                        verify_final_newline_statuses(policy, verdict, after)
+                    check['status'] = 'not_checked'
+                    verify_final_newline_statuses(policy, verdict, after)
+
+    def test_final_newline_policy_shape_is_validated(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        gate = dict(kind='final_newline', id='words', severity='warning', blocking=True)
+        policy['gates'] = [gate]
+        self.assertEqual(require_policy_coverage(policy, change, False, self.previous['verdict']), (1, 1))
+        for invalid in ({'severity': 'critical'}, {'unexpected': True}):
+            policy['gates'] = [dict(gate, **invalid)]
+            with self.assertRaises(VerificationError):
+                require_policy_coverage(policy, change, False, self.previous['verdict'])
+
+    def test_rebound_final_newline_cannot_claim_a_false_pass(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'][0] = dict(kind='final_newline', id='words', severity='warning', blocking=True)
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'final newline status differs'):
+            self.check()
 
     def test_rebound_plain_character_count_cannot_claim_a_false_pass(self):
         policy = json.loads(self.artifacts['resolved_policy'])
