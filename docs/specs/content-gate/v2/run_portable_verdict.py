@@ -143,14 +143,19 @@ def run_process(command, env, timeout):
 
 
 def run(paths, command, timeout, required_checks, expected_validator, content_files=None,
-        executable_sha256=None):
+        executable_sha256=None, bind_executable_identity=False):
     """Observe one direct process and compare independently supplied inputs."""
     if (not command or any(not isinstance(arg, str) or not arg for arg in command)
             or not math.isfinite(timeout) or not 0 < timeout <= 300):
         raise VerificationError('invalid evaluator command or timeout')
+    if bind_executable_identity and executable_sha256 is None:
+        raise VerificationError('binding executable identity requires an executable pin')
     executable_identity = (verify_executable(command[0], executable_sha256)
                            if executable_sha256 is not None else None)
     inputs = read_inputs(paths)
+    if (bind_executable_identity and not hmac.compare_digest(
+            inputs['evaluator'], ('sha256:' + executable_sha256).encode('ascii'))):
+        raise VerificationError('evaluator identity does not match executable pin')
     map_bytes = read_stable(content_files) if content_files is not None else None
     content_bytes = read_mapped_content(content_files) if content_files is not None else None
     if content_files is not None and map_bytes != read_stable(content_files):
@@ -192,6 +197,8 @@ def main():
     parser.add_argument('--validator-version', required=True)
     parser.add_argument('--timeout-seconds', type=float, required=True)
     parser.add_argument('--executable-sha256', help='optional host-pinned SHA-256 of the absolute evaluator executable')
+    parser.add_argument('--bind-executable-identity', action='store_true',
+                        help='require the bound evaluator identity to equal sha256:<executable pin>')
     parser.add_argument('--telemetry', action='store_true')
     parser.add_argument('command', nargs=argparse.REMAINDER,
                         help='trusted evaluator command after --')
@@ -203,7 +210,8 @@ def main():
     started = time.perf_counter()
     try:
         result = run(paths, command, args.timeout_seconds, args.require_check,
-                     (args.validator_name, args.validator_version), args.content_files, args.executable_sha256)
+                     (args.validator_name, args.validator_version), args.content_files, args.executable_sha256,
+                     args.bind_executable_identity)
     except (VerificationError, OSError, ValueError, TypeError, KeyError) as error:
         print(json.dumps({'matched': False, 'publication_authorized': False}))
         print(str(error), file=sys.stderr)
@@ -218,6 +226,7 @@ def main():
                  'collection_supplied': args.collection is not None,
                  'content_files_supplied': args.content_files is not None,
                  'executable_pin_supplied': args.executable_sha256 is not None,
+                 'executable_identity_binding_requested': args.bind_executable_identity,
                  'process_group_cleanup_required': True,
                  'external_evidence_supplied': args.external_evidence is not None}
         print(json.dumps(event, separators=(',', ':')), file=sys.stderr)

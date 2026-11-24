@@ -65,6 +65,59 @@ class PortableCliInterop(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0, rejected.stdout + rejected.stderr)
             self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
 
+    def test_bound_executable_identity_with_real_aexeo_cli(self):
+        binary = os.environ.get('AEXEO_CLI_BIN')
+        if binary is None:
+            subprocess.run(['cargo', 'build', '--locked', '--quiet', '-p', 'aexeo-cli'],
+                           cwd=ROOT, check=True)
+            target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
+            if not target.is_absolute():
+                target = ROOT / target
+            binary = target / 'debug' / ('aexeo-cli.exe' if os.name == 'nt' else 'aexeo-cli')
+        binary = Path(binary).resolve(strict=True)
+        pin = hashlib.sha256(binary.read_bytes()).hexdigest()
+        identity = 'sha256:' + pin
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-pinned-executable-') as directory:
+            root = Path(directory)
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(fixture['artifacts']['change'], encoding='utf-8')
+            (root / 'preset').write_text(
+                "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n",
+                encoding='utf-8')
+            common = [str(binary), 'content-change', '--preset', 'test', '--preset-source',
+                'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', identity]
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            exported = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            self.assertEqual((root / 'evaluator').read_bytes(), identity.encode('ascii'))
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                '--candidate-after', str(root / 'after'), '--draft-portable-verdict']
+            previous = subprocess.run(command, cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'previous')), capture_output=True, text=True)
+            self.assertEqual(previous.returncode, 0, previous.stderr)
+            runner = [sys.executable, str(HERE / 'run_portable_verdict.py')]
+            for name in ('previous', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                runner += ['--' + name.replace('_', '-'), str(root / name)]
+            runner += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
+                '--validator-version', ENGINE_VERSION, '--timeout-seconds', '20',
+                '--executable-sha256', pin, '--bind-executable-identity', '--telemetry', '--']
+            matched = subprocess.run(runner + command, cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(matched.returncode, 0, matched.stdout + matched.stderr)
+            self.assertFalse(json.loads(matched.stdout)['publication_authorized'])
+            self.assertTrue(json.loads(matched.stderr)['executable_identity_binding_requested'])
+            self.assertNotIn(pin, matched.stderr)
+            (root / 'evaluator').write_text('sha256:' + '0' * 64, encoding='ascii')
+            rejected = subprocess.run(runner + command, cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+            self.assertIn('identity does not match', rejected.stderr)
+            self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+
     def test_source_evidence_real_cli_and_python_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         binary = os.environ.get('AEXEO_CLI_BIN')

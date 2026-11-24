@@ -189,6 +189,55 @@ class PortableRunner(unittest.TestCase):
         self.flags[-1] = 'A' * 64
         self.assertEqual(self.execute(code).returncode, 2)
 
+    def test_bound_executable_identity_requires_pin_and_matches_verdict(self):
+        executable = Path(sys.executable).resolve()
+        pin = hashlib.sha256(executable.read_bytes()).hexdigest()
+        marker = self.root / 'executed'
+        code = ("import os,sys; from pathlib import Path; "
+                "Path(sys.argv[2]).touch(); "
+                "Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes())")
+        self.flags += ['--bind-executable-identity']
+        result = self.execute(code, [str(marker)])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('requires an executable pin', result.stderr)
+        self.assertFalse(marker.exists())
+
+        self.flags += ['--executable-sha256', pin]
+        result = self.execute(code, [str(marker)])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('identity does not match', result.stderr)
+        self.assertFalse(marker.exists())
+
+        (self.root / 'evaluator').write_bytes(('sha256:' + pin).encode('ascii'))
+        # The host identity alone is insufficient: the prior verdict must bind it too.
+        result = self.execute(code, [str(marker)])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('candidate input binding differs', result.stderr)
+        self.assertTrue(marker.exists())
+        marker.unlink()
+
+        change = json.loads((self.root / 'change').read_text())
+        base = json.loads((self.root / 'base').read_text())
+        after = json.loads((self.root / 'after').read_text())
+        candidate = overlay(base, change, after)
+        artifacts = {name: (self.root / name).read_bytes() for name in
+                     ('change', 'resolved_policy', 'host_options', 'evaluator')}
+        inputs = dict(artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        previous = json.loads((self.root / 'previous').read_text())
+        previous['binding_sha256'] = binding(inputs)
+        (self.root / 'previous').write_text(json.dumps(previous))
+        result = self.execute(code, [str(marker)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(marker.exists())
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+        event = json.loads(result.stderr)
+        self.assertTrue(event['executable_identity_binding_requested'])
+        self.assertNotIn(pin, result.stderr)
+        self.assertNotIn(str(executable), result.stderr)
+
     def test_executable_pin_rejects_symlink_relative_path_and_changed_script(self):
         script = self.root / 'evaluator'
         script.write_text('#!' + str(Path(sys.executable).resolve()) + "\n"
