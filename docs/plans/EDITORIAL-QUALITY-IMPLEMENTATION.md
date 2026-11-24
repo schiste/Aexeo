@@ -33,6 +33,12 @@ rendered citations, factual currency, translation quality or independent human
 accuracy. The package, target host configuration and connected MCP still require
 end-to-end deployment verification. See [the content roadmap](CONTENT-ROADMAP.md#cms-review-feedback--2026-11-19).
 
+A real assistant-driven CLI session has now exercised a three-proposal budget,
+with an exhausted failure preserved; see the [interactive trial](EDITORIAL-AGENT-TRIAL.md#interactive-agent-retry-budget-trial-2026-11-24). A separate
+scripted regression covers four formats. The deliberately strict rule counted
+headings, illustrating why fewer warnings do not necessarily mean better prose.
+Independent human evaluation and representative production trials remain open.
+
 ## Validation notes
 
 - Synthetic CLI regression covers a targeted edit, source location, recheck and
