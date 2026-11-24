@@ -5,7 +5,8 @@ use aexeo_core::{
     content_gate_sources::ConfinedContentFiles,
     content_gate_verdict::{
         CandidateDecisionContext, ExperimentalCandidateVerdict, OfflineDecisionContext,
-        evaluate_draft_portable_candidate_verdict, revalidate_experimental_candidate_verdict,
+        evaluate_draft_portable_candidate_verdict, evaluate_experimental_candidate_verdict,
+        revalidate_experimental_candidate_verdict,
     },
     html_content_adapter::HtmlContentScope,
 };
@@ -59,12 +60,11 @@ fn python_fixture_is_revalidated_by_rust_producer() {
             .unwrap()
             .as_bytes()
     );
+    let mut expected_options = options.clone();
+    expected_options["engine_version"] = env!("CARGO_PKG_VERSION").into();
     assert_eq!(
         artifacts.host_options,
-        fixture["artifacts"]["host_options"]
-            .as_str()
-            .unwrap()
-            .as_bytes()
+        serde_json::to_vec(&expected_options).unwrap()
     );
     let context = CandidateDecisionContext {
         decision: &decision,
@@ -84,21 +84,53 @@ fn python_fixture_is_revalidated_by_rust_producer() {
         HtmlContentScope::Document,
     )
     .unwrap();
-    assert_eq!(
-        serde_json::to_value(&produced).unwrap(),
-        portable_fixture["portable"]
-    );
+    let actual = serde_json::to_value(&produced).unwrap();
+    let mut expected = portable_fixture["portable"].clone();
+    if options["engine_version"] != env!("CARGO_PKG_VERSION") {
+        // These hashes bind the engine version and must change on an upgrade.
+        assert_ne!(actual["binding_sha256"], expected["binding_sha256"]);
+        assert_ne!(
+            actual["verdict"]["extensions"],
+            expected["verdict"]["extensions"]
+        );
+        expected["binding_sha256"] = actual["binding_sha256"].clone();
+        expected["verdict"]["extensions"] = actual["verdict"]["extensions"].clone();
+        expected["verdict"]["validator"]["version"] = env!("CARGO_PKG_VERSION").into();
+    }
+    assert_eq!(actual, expected);
     let encoded = serde_json::to_vec(&produced).unwrap();
     assert_eq!(
         aexeo_contracts::content_gate_portable_v2::BoundVerdict::parse(&encoded).unwrap(),
         produced
     );
-    revalidate_experimental_candidate_verdict(
+    let old_result = revalidate_experimental_candidate_verdict(
         &previous,
         &context,
         &mut NoFiles,
         "2026-01-02T00:00:00Z",
         HtmlContentScope::Document,
-    )
-    .unwrap();
+    );
+    if options["engine_version"] == env!("CARGO_PKG_VERSION") {
+        old_result.unwrap();
+    } else {
+        assert!(
+            old_result.is_err(),
+            "a historical engine binding must not revalidate"
+        );
+        let fresh = evaluate_experimental_candidate_verdict(
+            &context,
+            &mut NoFiles,
+            "2026-01-02T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        revalidate_experimental_candidate_verdict(
+            &fresh,
+            &context,
+            &mut NoFiles,
+            "2026-01-02T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+    }
 }
