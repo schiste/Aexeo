@@ -1,5 +1,5 @@
 {
-  "preset": "version=1\nname='cross'\n[[gates]]\nid='style'\nkind='forbidden_terms'\nterms=['generic phrase']\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nmax=2\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\nblocking=false\n[[gates]]\nid='words'\nkind='word_count'\nmin=100\n[[gates]]\nid='characters'\nkind='character_count'\nmin=1000\nignore_whitespace=true\n[[gates]]\nid='characters_with_spaces'\nkind='character_count'\nmin=1000\n",
+  "preset": "version=1\nname='cross'\n[[gates]]\nid='style'\nkind='forbidden_terms'\nterms=['generic phrase']\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nmax=2\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\nblocking=false\n[[gates]]\nid='words'\nkind='word_count'\nmin=100\n[[gates]]\nid='characters'\nkind='character_count'\nmin=1000\nignore_whitespace=true\n[[gates]]\nid='characters_with_spaces'\nkind='character_count'\nmin=1000\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['élan', 'absent term']\ncase_insensitive=true\n",
   "markdown": "# Élan\n\n😀 generic phrase and [source](https://example.org).\n\n### X\n",
   "document": {
     "route": "/example",
@@ -62,6 +62,7 @@
       "passed",
       "passed",
       "not_checked",
+      "failed",
       "failed",
       "failed",
       "failed",
@@ -138,7 +139,9 @@
       "markdown": 36,
       "html": 39,
       "emdash": 35
-    }
+    },
+    "required_present_terms": 1,
+    "required_missing_terms": 1
   },
   "empty_markdown": "",
   "empty_document": {
@@ -154,6 +157,7 @@
     "not_checked",
     "passed",
     "passed",
+    "failed",
     "failed",
     "failed",
     "failed"
