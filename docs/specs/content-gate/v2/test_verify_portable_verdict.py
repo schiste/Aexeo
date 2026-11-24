@@ -317,6 +317,52 @@ class PortableComparison(unittest.TestCase):
             with self.subTest(kind=invalid), self.assertRaises(VerificationError):
                 require_policy_coverage(policy, change, False, verdict)
 
+    def test_collection_gate_requires_complete_observed_metadata(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'] = [{'id': 'unique', 'kind': 'unique_collection_metadata',
+                            'field': 'slug', 'group_by': 'lang',
+                            'severity': 'warning', 'blocking': True}]
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'][0].update(id='collection:0::unique', status='passed')
+        complete = {'complete': True, 'items': [
+            {'id': 'article', 'metadata': {'slug': 'one', 'lang': 'en'}}]}
+        require_policy_coverage(policy, change, True, verdict, collection_projection=complete)
+        cases = [dict(complete, complete=False),
+                 dict(complete, items=[{'id': 'article'}]),
+                 dict(complete, items=[{'id': 'article', 'metadata': None}]),
+                 dict(complete, items=[{'id': 'article', 'metadata': {'slug': 'one'}}]),
+                 dict(complete, items=[{'id': 'article', 'metadata': {'slug': '  ', 'lang': 'en'}}])]
+        for projection in cases:
+            for status in ('passed', 'failed'):
+                verdict['checks'][0]['status'] = status
+                with self.subTest(projection=projection, status=status), self.assertRaises(VerificationError):
+                    require_policy_coverage(policy, change, True, verdict, collection_projection=projection)
+            verdict['checks'][0]['status'] = 'not_checked'
+            require_policy_coverage(policy, change, True, verdict, collection_projection=projection)
+
+    def test_rebound_collection_cannot_claim_incomplete_metadata_passed(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'] = [{'id': 'unique', 'kind': 'unique_collection_metadata',
+                            'field': 'slug', 'severity': 'warning', 'blocking': True}]
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        self.artifacts['collection'] = self.encoded({
+            'change_id': change['change_id'], 'complete': True,
+            'items': [{'id': 'article'}],
+        })
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        for envelope in (self.previous, self.fresh):
+            envelope['binding_sha256'] = binding(inputs)
+            envelope['verdict']['checks'][0]['id'] = 'collection:0::unique'
+        self.required = ['collection:0::unique']
+        with self.assertRaisesRegex(VerificationError, 'incomplete observations'):
+            self.check()
+
     def test_collection_gate_cannot_run_without_collection(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])

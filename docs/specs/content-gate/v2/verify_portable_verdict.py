@@ -126,7 +126,7 @@ def validate_count_gate(gate):
         raise VerificationError('invalid counting gate metadata field')
 
 
-def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None, plain_text_paragraphs=False):
+def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None, plain_text_paragraphs=False, collection_projection=None):
     """Reject a verdict omitting a configured gate instance or its blocking flag."""
     if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
             or type(policy['version']) is not int or policy['version'] != 1
@@ -176,6 +176,20 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 raise VerificationError('resolved policy check is missing or has inconsistent blocking')
             if kind == 'unique_collection_metadata' and not has_collection and check.get('status') != 'not_checked':
                 raise VerificationError('candidate evaluator cannot execute collection gate without a collection')
+            if kind == 'unique_collection_metadata' and collection_projection is not None:
+                field, group = gate.get('field'), gate.get('group_by')
+                if (not isinstance(field, str) or not field.strip()
+                        or group is not None and (not isinstance(group, str) or not group.strip())):
+                    raise VerificationError('invalid collection metadata fields')
+                def missing_metadata(item):
+                    metadata = item.get('metadata') or {}
+                    return any(not isinstance(value, str) or not value.strip()
+                               for key in (field, group) if key is not None
+                               for value in (metadata.get(key),))
+                if (check.get('status') != 'not_checked'
+                        and (not collection_projection['complete']
+                             or any(map(missing_metadata, collection_projection['items'])))):
+                    raise VerificationError('collection gate cannot assess incomplete observations')
             if kind in {'custom', 'site_group', 'site_audit'} and check.get('status') != 'not_checked':
                 raise VerificationError('candidate evaluator cannot execute site or custom gates')
             if (kind == 'literal_markdown_links' and item_media.get(entity) != 'text/html'
@@ -246,8 +260,10 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     base, after = parse(base_bytes), parse(after_bytes)
     candidate = overlay(base, change, after, content_bytes=content_bytes)
     collection = artifacts.get('collection')
+    collection_projection = None
     if collection is not None:
-        validate_collection_projection(parse(collection), candidate, change)
+        collection_projection = parse(collection)
+        validate_collection_projection(collection_projection, candidate, change)
     evidence = artifacts.get('external_evidence')
     sources, links = None, None
     if evidence is not None:
@@ -279,7 +295,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (links is not None) or source_bound != (sources is not None):
             raise VerificationError('external evidence does not match the verdict profile')
         validate_verdict(verdict)
-        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'])
+        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'], collection_projection)
         if links is not None:
             verify_link_observation_statuses(links, policy, verdict, change)
         if verdict['validator']['version'] != host_options['engine_version']:
