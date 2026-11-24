@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -72,6 +72,59 @@ class PortableComparison(unittest.TestCase):
             verdict['findings'] = [finding]
             with self.subTest(finding=finding), self.assertRaises(VerificationError):
                 verify_host_candidate_projection(policy, verdict, after)
+
+    def test_resolved_heading_gate_validation_matches_rust_constraints(self):
+        gates = [
+            {'kind': 'required_headings', 'id': 'h', 'severity': 'warning', 'blocking': True,
+             'headings': ['Intro']},
+            {'kind': 'heading_length', 'id': 'h', 'severity': 'warning', 'blocking': True,
+             'max_chars': 1},
+            {'kind': 'heading_hierarchy', 'id': 'h', 'severity': 'warning', 'blocking': True,
+             'initial_level': None},
+        ]
+        for gate in gates:
+            validate_heading_gate(gate)
+            for invalid in (dict(gate, severity='info'), dict(gate, unexpected=True)):
+                with self.subTest(gate=invalid), self.assertRaises(VerificationError):
+                    validate_heading_gate(invalid)
+            missing = dict(gate)
+            del missing['severity']
+            with self.subTest(gate=missing), self.assertRaises(VerificationError):
+                validate_heading_gate(missing)
+        for headings in ([], [''], ['  '], [1], ['\ud800']):
+            with self.subTest(headings=headings), self.assertRaises(VerificationError):
+                validate_heading_gate(dict(gates[0], headings=headings))
+        # Rust's trim does not remove ASCII information separators.
+        validate_heading_gate(dict(gates[0], headings=['\x1c']))
+        for maximum in (0, -1, True, 1 << 64, '5', None):
+            with self.subTest(maximum=maximum), self.assertRaises(VerificationError):
+                validate_heading_gate(dict(gates[1], max_chars=maximum))
+        for level in (0, 7, -1, True, '1'):
+            with self.subTest(level=level), self.assertRaises(VerificationError):
+                validate_heading_gate(dict(gates[2], initial_level=level))
+        for level in (None, 1, 6):
+            validate_heading_gate(dict(gates[2], initial_level=level))
+
+    def test_comparator_rejects_invalid_gate_kinds_cleanly(self):
+        for invalid in (None, [], {}, {'kind': []}):
+            policy = json.loads(self.artifacts['resolved_policy'])
+            policy['gates'] = [invalid]
+            self.artifacts['resolved_policy'] = self.encoded(policy)
+            with self.subTest(gate=invalid), self.assertRaisesRegex(VerificationError, 'invalid resolved gate'):
+                self.check()
+
+    def test_heading_policy_validation_applies_when_not_checked(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'][0]['status'] = 'not_checked'
+        policy['gates'][0] = {'kind': 'heading_length', 'id': 'words',
+                              'severity': 'warning', 'blocking': True, 'max_chars': 1}
+        require_policy_coverage(policy, change, False, verdict)
+        for invalid in (0, True, '1', None):
+            policy['gates'][0]['max_chars'] = invalid
+            with self.subTest(maximum=invalid), self.assertRaises(VerificationError):
+                require_policy_coverage(policy, change, False, verdict)
 
     def test_host_required_headings_are_recomputed(self):
         policy = {'gates': [{'kind': 'required_headings', 'id': 'head', 'headings': ['Intro', 'Fin']}]}
@@ -137,6 +190,18 @@ class PortableComparison(unittest.TestCase):
             envelope['binding_sha256'] = binding(inputs)
             envelope['verdict']['subject']['entries'][0]['sha256'] = digest
         self.assertFalse(self.check()['publication_authorized'])
+        valid_policy = self.artifacts['resolved_policy']
+        policy['gates'][2]['max_chars'] = 0
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        inputs['resolved_policy'] = self.artifacts['resolved_policy']
+        for envelope in (self.previous, self.fresh):
+            envelope['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'invalid heading length'):
+            self.check()
+        self.artifacts['resolved_policy'] = valid_policy
+        inputs['resolved_policy'] = valid_policy
+        for envelope in (self.previous, self.fresh):
+            envelope['binding_sha256'] = binding(inputs)
         self.fixture['after'][0]['source'] = source + ' '
         with self.assertRaises(VerificationError):
             self.check()
@@ -1004,7 +1069,15 @@ class PortableComparison(unittest.TestCase):
         for kind in ('list_item_count', 'link_count', 'link_destinations',
                      'required_headings', 'heading_length', 'heading_hierarchy',
                      'duplicate_headings', 'prose_sentence_length_variance'):
-            policy['gates'][0]['kind'] = kind
+            if kind in ('required_headings', 'heading_length', 'heading_hierarchy'):
+                parameter = {'required_headings': ('headings', ['Intro']),
+                             'heading_length': ('max_chars', 12),
+                             'heading_hierarchy': ('initial_level', None)}[kind]
+                policy['gates'][0] = {'kind': kind, 'id': 'words', 'severity': 'warning',
+                                      'blocking': True, parameter[0]: parameter[1]}
+            else:
+                policy['gates'][0] = json.loads(self.artifacts['resolved_policy'])['gates'][0]
+                policy['gates'][0]['kind'] = kind
             for blocking in (True, False):
                 policy['gates'][0]['blocking'] = blocking
                 verdict['checks'][0]['blocking'] = blocking

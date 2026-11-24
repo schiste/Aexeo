@@ -129,6 +129,36 @@ def validate_count_gate(gate):
 
 
 
+def validate_heading_gate(gate):
+    """Check the resolved heading-gate shape and Rust preset constraints."""
+    kind = gate.get('kind')
+    fields = {
+        'required_headings': 'headings',
+        'heading_length': 'max_chars',
+        'heading_hierarchy': 'initial_level',
+    }
+    if not isinstance(kind, str) or kind not in fields:
+        return
+    if (set(gate) != {'kind', 'id', 'severity', 'blocking', fields[kind]}
+            or gate['severity'] not in ('warning', 'error')):
+        raise VerificationError('invalid resolved heading gate shape')
+    if kind == 'required_headings':
+        headings = gate['headings']
+        if (not isinstance(headings, list) or not headings
+                or any(not isinstance(heading, str) or _rust_blank(heading) for heading in headings)):
+            raise VerificationError('invalid required headings')
+        for heading in headings:
+            text(heading)
+    elif kind == 'heading_length':
+        limit = gate['max_chars']
+        if type(limit) is not int or not 1 <= limit <= (1 << 64) - 1:
+            raise VerificationError('invalid heading length')
+    else:
+        level = gate['initial_level']
+        if level is not None and (type(level) is not int or not 1 <= level <= 6):
+            raise VerificationError('invalid initial heading level')
+
+
 # Bounds mirror the currently supported Aexeo collection evaluator; the
 # independent comparator also caps aggregate work across distinct gates.
 _COLLECTION_MAX_KEYS = 10_000
@@ -504,6 +534,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 or kind not in _ITEM_GATE_KINDS | {'unique_collection_metadata'}):
             raise VerificationError('unsupported resolved gate')
         validate_count_gate(gate)
+        validate_heading_gate(gate)
         if kind == 'unique_collection_metadata':
             required = {'kind', 'id', 'severity', 'blocking', 'field'}
             if (not required <= set(gate) or set(gate) - required - {'group_by'}
@@ -619,6 +650,11 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     previous, fresh = parse(previous_bytes), parse(fresh_bytes)
     validate_schemas((previous, fresh), HERE / 'bound-verdict.schema.json')
     policy = parse(artifacts['resolved_policy'])
+    if isinstance(policy, dict) and isinstance(policy.get('gates'), list):
+        for gate in policy['gates']:
+            if not isinstance(gate, dict) or not isinstance(gate.get('kind'), str):
+                raise VerificationError('invalid resolved gate')
+            validate_heading_gate(gate)
     if not isinstance(policy, dict) or 'name' not in policy:
         raise VerificationError('resolved policy name is unavailable')
     text(policy['name'], empty=False)

@@ -2054,7 +2054,9 @@ heading gate. Block boundaries
 split adjacent words without changing character counts. The verifiers
 independently recompute outcomes, reject
 claimed source positions for host findings, and bind the complete snapshot
-bytes. Other host capabilities remain unsupported and fail closed. These checks
+bytes. The independent Python comparator also validates the exact resolved
+heading-gate fields and their supported parameter bounds, including when a gate
+is not checked. Other host capabilities remain unsupported and fail closed. These checks
 do not establish host observation completeness, source freshness, or authorize
 publication.
 
