@@ -216,6 +216,11 @@ The trial also exposes a limitation: the intentionally strict sentence rule
 counts Markdown headings, so all three patches shortened headings while leaving
 the substantive paragraphs unchanged. Fewer findings do not demonstrate better
 prose; review the configured scope and do not optimize blindly for the count.
+On the same original Markdown, setting `paragraphs_only = true` on the sentence
+length gate assessed 12 paragraph sentences and reported 12 over the deliberately
+strict limit, instead of 16 when headings were included. This requires an adapter
+that supplies paragraph observations; otherwise the check is `not_checked`.
+It is an option for a prose-focused policy, not a general quality guarantee.
 A CLI integration regression now also exercises a nonzero budget through three
 interactive submissions for text, paragraph text, Markdown and scoped HTML;
 that separate scripted test verifies the stop, last report, exit code and
