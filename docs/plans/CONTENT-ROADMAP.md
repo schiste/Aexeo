@@ -587,8 +587,9 @@ registry before considering the release delivered.
 - [x] Share the validated host JSON projection with core and use it in adapted
   in-process incremental item evaluation. The full JSON snapshot is digest-bound;
   unknown observations remain unchecked. Incremental metadata gates require the
-  separately bound metadata inventory. Direct change verdict support and portable
-  source positions in this path remain open.
+  separately bound metadata inventory. The v1 change evaluator also supports
+  host projections without claiming source positions; the independent v2
+  verifier and portable source positions remain open.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
   The single-content CLI accepts source- and destination-bound host link
