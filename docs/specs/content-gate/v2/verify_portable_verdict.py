@@ -398,6 +398,14 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 or kind not in _ITEM_GATE_KINDS | {'unique_collection_metadata'}):
             raise VerificationError('unsupported resolved gate')
         validate_count_gate(gate)
+        if kind == 'unique_collection_metadata':
+            required = {'kind', 'id', 'severity', 'blocking', 'field'}
+            if (not required <= set(gate) or set(gate) - required - {'group_by'}
+                    or gate['severity'] not in ('warning', 'error')
+                    or not isinstance(gate['field'], str) or _rust_blank(gate['field'])
+                    or ('group_by' in gate and
+                        (not isinstance(gate['group_by'], str) or _rust_blank(gate['group_by'])))):
+                raise VerificationError('invalid resolved collection metadata gate')
         if kind == 'repeated_punctuation':
             if (set(gate) != {'kind', 'id', 'severity', 'blocking', 'mark', 'max_per_paragraph'}
                     or gate['severity'] not in ('warning', 'error')
@@ -440,9 +448,6 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
                 raise VerificationError('candidate evaluator cannot execute collection gate without a collection')
             if kind == 'unique_collection_metadata' and collection_projection is not None:
                 field, group = gate.get('field'), gate.get('group_by')
-                if (not isinstance(field, str) or not field.strip()
-                        or group is not None and (not isinstance(group, str) or not group.strip())):
-                    raise VerificationError('invalid collection metadata fields')
                 status = check.get('status')
                 if status != 'not_checked':
                     cache_key = (field, group)

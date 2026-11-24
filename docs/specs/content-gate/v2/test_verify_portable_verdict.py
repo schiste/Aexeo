@@ -477,7 +477,7 @@ class PortableComparison(unittest.TestCase):
         change = json.loads(self.artifacts['change'])
         change['entries'][0]['media_type'] = 'application/json'
         policy = json.loads(self.artifacts['resolved_policy'])
-        policy['gates'][0].update(kind='unique_collection_metadata', id='unique')
+        policy['gates'][0] = dict(kind='unique_collection_metadata', id='unique', field='slug', severity='warning', blocking=True)
         verdict = copy.deepcopy(self.previous['verdict'])
         verdict['checks'][0]['id'] = 'collection:0::unique'
         self.assertEqual(require_policy_coverage(policy, change, True, verdict), (1, 1))
@@ -528,7 +528,7 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             require_policy_coverage(policy, change, False, verdict)
         verdict['checks'][0]['blocking'] = True
-        collection_gate = dict(policy['gates'][0], id='unique', kind='unique_collection_metadata')
+        collection_gate = dict(kind='unique_collection_metadata', id='unique', field='slug', severity='warning', blocking=True)
         policy['gates'].append(collection_gate)
         verdict['checks'].append({'id': 'collection:0::unique', 'blocking': True})
         require_policy_coverage(policy, change, True, verdict)
@@ -692,11 +692,28 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaisesRegex(VerificationError, 'incomplete observations'):
             self.check()
 
+    def test_collection_gate_policy_is_validated_without_observations(self):
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'][0]['status'] = 'not_checked'
+        valid = dict(kind='unique_collection_metadata', id='words', field='slug',
+                     severity='warning', blocking=True)
+        policy = json.loads(self.artifacts['resolved_policy'])
+        for mutation in ({'field': ''}, {'field': '  '}, {'field': None},
+                         {'group_by': ''}, {'group_by': None}, {'severity': 'info'},
+                         {'extra': True}):
+            policy['gates'] = [dict(valid, **mutation)]
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                    VerificationError, 'invalid resolved collection'):
+                require_policy_coverage(policy, change, False, verdict)
+        policy['gates'] = [dict(valid, group_by='locale')]
+        require_policy_coverage(policy, change, False, verdict)
+
     def test_collection_gate_cannot_run_without_collection(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])
         verdict = copy.deepcopy(self.previous['verdict'])
-        policy['gates'][0]['kind'] = 'unique_collection_metadata'
+        policy['gates'][0] = dict(kind='unique_collection_metadata', id='words', field='slug', severity='warning', blocking=True)
         for blocking in (False, True):
             policy['gates'][0]['blocking'] = blocking
             verdict['checks'][0]['blocking'] = blocking
