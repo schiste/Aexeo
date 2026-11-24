@@ -32,6 +32,15 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- CLI [v0.0.25](https://github.com/schiste/Aexeo/releases/tag/v0.0.25)
+  includes the current link-graph work, including HTML navigation roles on
+  generic elements (#947). The published macOS and Linux binary checksums and
+  syntax-adapter archive were verified; the macOS binary was also started.
+  The Homebrew formula was updated in schiste/homebrew-tap#5. This CLI release
+  does not add the rendered-HTML graph to the EmDash WASM package. The v2
+  publication protocol remains experimental, and Preview MCP access still
+  needs host consent and an end-to-end audit of a specific revision.
+
 - Index observed response paths when reconciling inventory aliases, and group
   observations by page. This preserves first-observation precedence and report
   ordering while avoiding repeated scans. The standalone release-mode example
