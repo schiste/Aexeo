@@ -699,6 +699,10 @@ registry before considering the release delivered.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  The experimental Python comparator independently recomputes checked
+  `repeated_punctuation` outcomes for plain-text paragraphs and limits comparison
+  work. This does not validate rich-text outcomes, authenticate inputs, or imply
+  that the native Aethyme runner performs this comparison.
   The Rust candidate verifier checks link-snapshot structure, change and source
   identities, and re-extracts ordered Markdown or scoped HTML destinations for
   supplied observations. Missing snapshots remain unobserved; this does not

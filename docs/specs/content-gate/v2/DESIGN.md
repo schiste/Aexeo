@@ -61,6 +61,9 @@ interop test. Their existence does not complete interoperable artifact
 semantics, authenticate the evaluator or inputs, establish freshness or
 completeness, or protect the publication boundary. These offline experiments
 do not satisfy the obligations of a production v2-required runner.
+The Python comparator independently recomputes checked `repeated_punctuation`
+results for plain-text paragraphs, with bounded comparison work; this does not
+apply to Markdown, HTML or other runners.
 The Python comparator independently checks source-backed `final_newline` outcomes
 for plain text, Markdown and HTML. It and the Rust candidate helper also compare
 checked `required_metadata`, `metadata_length` and `metadata_age` statuses with the independently

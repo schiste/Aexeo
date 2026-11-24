@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -276,6 +276,56 @@ class PortableComparison(unittest.TestCase):
         after[0]['media_type'] = 'text/markdown'
         check['status'] = 'passed'
         verify_plain_character_count_statuses(policy, verdict, after, {})
+
+    def test_repeated_punctuation_plain_paragraphs(self):
+        gate = dict(kind='repeated_punctuation', id='words', severity='warning',
+                    blocking=False, mark='—', max_per_paragraph=1)
+        check = {'id': 'gate:2:é:words', 'status': 'passed'}
+        verdict = {'checks': [check]}
+        for source, expected in [('', 'passed'), ('One — here.\n\nNext — here.', 'passed'),
+                                 ('One — here.\r\nNext — here.', 'failed'),
+                                 ('One — here.\r\n\u00a0\r\nNext — here.', 'passed'),
+                                 ('One — and — two.', 'failed')]:
+            with self.subTest(source=source):
+                after = [{'entity_id': 'é', 'media_type': 'text/plain', 'source': source}]
+                check['status'] = expected
+                verify_plain_punctuation_statuses({'gates': [gate]}, verdict, after, {})
+                check['status'] = 'passed' if expected == 'failed' else 'failed'
+                with self.assertRaisesRegex(VerificationError, 'punctuation status differs'):
+                    verify_plain_punctuation_statuses({'gates': [gate]}, verdict, after, {})
+                check['status'] = 'not_checked'
+                verify_plain_punctuation_statuses({'gates': [gate]}, verdict, after, {})
+
+    def test_repeated_punctuation_rejects_checked_overflow(self):
+        gate = dict(kind='repeated_punctuation', id='words', severity='warning',
+                    blocking=False, mark='—', max_per_paragraph=1)
+        verdict = {'checks': [{'id': 'gate:2:é:words', 'status': 'passed'}]}
+        after = [{'entity_id': 'é', 'media_type': 'text/plain', 'source': 'x\n\n' * 100_001}]
+        with self.assertRaisesRegex(VerificationError, 'paragraph limit'):
+            verify_plain_punctuation_statuses({'gates': [gate]}, verdict, after, {})
+
+    def test_repeated_punctuation_limits_comparison_work(self):
+        gate = dict(kind='repeated_punctuation', id='words', severity='warning',
+                    blocking=False, mark='—', max_per_paragraph=1)
+        verdict = {'checks': [{'id': 'gate:2:é:words', 'status': 'passed'}]}
+        after = [{'entity_id': 'é', 'media_type': 'text/plain', 'source': 'text'}]
+        with patch('verify_portable_verdict._PUNCTUATION_MAX_WORK_BYTES', 3):
+            with self.assertRaisesRegex(VerificationError, 'work limit'):
+                verify_plain_punctuation_statuses({'gates': [gate]}, verdict, after, {})
+
+    def test_repeated_punctuation_policy_shape_is_validated(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        gate = dict(kind='repeated_punctuation', id='words', severity='warning',
+                    blocking=True, mark='—', max_per_paragraph=1)
+        policy['gates'] = [gate]
+        require_policy_coverage(policy, change, False, self.previous['verdict'], plain_text_paragraphs=True)
+        for invalid in ({'mark': ''}, {'mark': 'aa'}, {'mark': 'a'}, {'mark': '\n'},
+                        {'mark': '\ud800'}, {'max_per_paragraph': -1},
+                        {'max_per_paragraph': True}, {'extra': 1}):
+            policy['gates'] = [dict(gate, **invalid)]
+            with self.assertRaises(VerificationError):
+                require_policy_coverage(policy, change, False, self.previous['verdict'], plain_text_paragraphs=True)
 
     def test_final_newline_source_and_status_cases(self):
         gate = dict(kind='final_newline', id='words', severity='warning', blocking=True)
@@ -668,7 +718,11 @@ class PortableComparison(unittest.TestCase):
                      'sentence_opening_window', 'sentence_opening_terms', 'repeated_punctuation',
                      'trailing_ing_clause', 'similar_sentence_lengths', 'sentence_length_variance',
                      'inline_triple_candidates', 'duplicate_paragraphs'):
-            policy['gates'][0]['kind'] = kind
+            policy['gates'][0] = dict(kind=kind, id='words', severity='warning', blocking=True)
+            if kind == 'paragraph_count':
+                policy['gates'][0].update(min=1, max=None)
+            elif kind == 'repeated_punctuation':
+                policy['gates'][0].update(mark='—', max_per_paragraph=1)
             for status in ('passed', 'failed', 'not_checked'):
                 verdict['checks'][0]['status'] = status
                 with self.subTest(kind=kind, status=status):
