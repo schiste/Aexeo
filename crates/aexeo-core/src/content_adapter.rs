@@ -8,6 +8,9 @@ use anyhow::{Result, ensure};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Explicit media type for a host observation snapshot (not arbitrary JSON).
+pub const MEDIA_TYPE: &str = "application/vnd.aexeo.content-adapter+json";
+
 const MAX_OBSERVATIONS: usize = 100_000;
 
 #[derive(Deserialize)]
@@ -446,11 +449,8 @@ impl HostSourceMap {
         {
             return None;
         }
-        let indices = crate::source_mapping::link_finding_indices(
-            gate,
-            Some(destinations),
-            observations,
-        )?;
+        let indices =
+            crate::source_mapping::link_finding_indices(gate, Some(destinations), observations)?;
         if indices.len() != result.total_findings() {
             return None;
         }
