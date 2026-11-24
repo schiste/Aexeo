@@ -3654,6 +3654,59 @@ mod tests {
     }
 
     #[test]
+    fn unordered_base_reuses_correct_reports_after_mixed_operations() {
+        let (mut snapshot, preset, mut change) = fixture();
+        snapshot.items.reverse();
+        let get = |id: &str| {
+            snapshot
+                .items
+                .iter()
+                .find(|item| item.entity_id == id)
+                .unwrap()
+        };
+        let updated = item("a", "updated with enough words", Some(vec![]));
+        let created = item("new", "new", Some(vec![]));
+        let renamed = item("renamed", "renamed item", Some(vec![]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(get("a")),
+            Some(&updated),
+        ));
+        change
+            .entries
+            .push(entry("b", Operation::Delete, Some(get("b")), None));
+        change
+            .entries
+            .push(entry("new", Operation::Create, None, Some(&created)));
+        let mut rename = entry("renamed", Operation::Rename, Some(get("c")), Some(&renamed));
+        rename.previous_entity_id = Some("c".into());
+        change.entries.push(rename);
+        let after = [updated, created, renamed];
+        let expected = full(
+            &overlay_candidate(&snapshot, &change, &after)
+                .unwrap()
+                .candidate,
+            &preset,
+        );
+        let baseline = IncrementalBaseline::prepare(snapshot, preset).unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, &after)
+        else {
+            panic!("expected evaluated candidate")
+        };
+        assert_eq!(
+            serde_json::to_value(reports).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!((evaluated, reused), (3, 2));
+    }
+
+    #[test]
     fn referenced_incremental_operations_match_inline_and_full_evaluation() {
         use crate::content_gate_sources::{ConfinedContentFiles, ContentPhase};
         use std::{io, io::Cursor, path::Path};
