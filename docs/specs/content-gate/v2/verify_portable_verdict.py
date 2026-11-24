@@ -80,7 +80,7 @@ def validate_host_options(options):
 
 
 # This is a versioned understanding of Aexeo's current gate scopes, not a
-# validation of each gate's parameters or proof that its evaluator ran.
+# validation of every gate's parameters or proof that its evaluator ran.
 _ITEM_GATE_KINDS = frozenset({
     'editorial_pacing', 'literal_markdown_links', 'list_item_count', 'word_count',
     'character_count', 'metadata_length', 'metadata_age', 'paragraph_count',
@@ -95,6 +95,35 @@ _ITEM_GATE_KINDS = frozenset({
     'structured_fact', 'evidence_review', 'evidence_review_age', 'custom',
     'site_group', 'site_audit',
 })
+
+
+_COUNT_GATE_EXTRAS = {
+    'word_count': set(),
+    'character_count': {'ignore_whitespace'},
+    'paragraph_count': set(),
+    'metadata_length': {'field'},
+}
+
+
+def validate_count_gate(gate):
+    """Validate the resolved representation of the supported counting gates."""
+    kind = gate['kind']
+    if kind not in _COUNT_GATE_EXTRAS:
+        return
+    if set(gate) != {'kind', 'id', 'severity', 'blocking', 'min', 'max'} | _COUNT_GATE_EXTRAS[kind]:
+        raise VerificationError('invalid resolved counting gate shape')
+    if gate['severity'] not in ('warning', 'error'):
+        raise VerificationError('invalid counting gate severity')
+    lower, upper = gate['min'], gate['max']
+    if any(value is not None and (type(value) is not int or not 0 <= value <= (1 << 64) - 1)
+           for value in (lower, upper)):
+        raise VerificationError('invalid counting gate bound')
+    if lower is None and upper is None or lower is not None and upper is not None and lower > upper:
+        raise VerificationError('invalid counting gate bounds')
+    if kind == 'character_count' and type(gate['ignore_whitespace']) is not bool:
+        raise VerificationError('invalid counting gate whitespace option')
+    if kind == 'metadata_length' and (not isinstance(gate['field'], str) or not gate['field'].strip()):
+        raise VerificationError('invalid counting gate metadata field')
 
 
 def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None, plain_text_paragraphs=False):
@@ -121,6 +150,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
         if (gate_id in ids or type(blocking) is not bool or not isinstance(kind, str)
                 or kind not in _ITEM_GATE_KINDS | {'unique_collection_metadata'}):
             raise VerificationError('unsupported resolved gate')
+        validate_count_gate(gate)
         ids.add(gate_id)
         collection_gate = kind == 'unique_collection_metadata' and has_collection
         expected_count += 1 if collection_gate else len(entries)

@@ -156,6 +156,51 @@ class PortableComparison(unittest.TestCase):
                     self.encoded(base), self.encoded([]), self.artifacts,
                     self.required, self.identity, 0, False)
 
+    def test_rebound_invalid_word_bounds_cannot_claim_a_pass(self):
+        # Matching bindings and equal verdicts do not make an invalid policy executable.
+        original = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        for fields in ({'min': None, 'max': None}, {'min': 4, 'max': 3},
+                       {'min': True}, {'min': 1.0}, {'min': -1}, {'min': 1 << 64},
+                       {'unexpected': 1}, {'severity': 'critical'}):
+            with self.subTest(fields=fields):
+                policy = copy.deepcopy(original)
+                policy['gates'][0].update(fields)
+                self.artifacts['resolved_policy'] = self.encoded(policy)
+                inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                    candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                    candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                    candidate_revision_sha256=revision_digest(candidate))
+                self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+                with self.assertRaises(VerificationError):
+                    self.check()
+
+    def test_count_gate_policy_validation_covers_all_count_kinds(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        change['entries'][0]['media_type'] = 'text/markdown'
+        change['entries'][0]['metadata'] = {'title': 'Example'}
+        verdict = self.previous['verdict']
+        base = {'id': 'words', 'severity': 'warning', 'blocking': True, 'min': 1, 'max': 3}
+        for kind, extras in [('word_count', {}), ('character_count', {'ignore_whitespace': True}),
+                             ('paragraph_count', {}), ('metadata_length', {'field': 'title'})]:
+            with self.subTest(kind=kind):
+                gate = dict(base, kind=kind, **extras)
+                policy['gates'] = [gate]
+                self.assertEqual(require_policy_coverage(policy, change, False, verdict), (1, 1))
+                for invalid in ({'min': None, 'max': None}, {'min': 4, 'max': 3},
+                                {'min': -1}, {'max': True}, {'max': 1.0}, {'unrecognized': 'x'}):
+                    policy['gates'] = [dict(gate, **invalid)]
+                    with self.assertRaises(VerificationError):
+                        require_policy_coverage(policy, change, False, verdict)
+        policy['gates'] = [dict(base, kind='metadata_length', field='   ')]
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, False, verdict)
+        policy['gates'] = [dict(base, kind='character_count', ignore_whitespace=1)]
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, False, verdict)
+
     def test_policy_coverage_rejects_rebound_omitted_gate(self):
         # Both verdicts agree and the binding matches the expanded policy; a
         # host-supplied list containing only the first check is insufficient.
@@ -316,7 +361,10 @@ class PortableComparison(unittest.TestCase):
         for kind in ('paragraph_count', 'sentence_length', 'sentence_character_length'):
             policy['gates'][0]['kind'] = kind
             for paragraphs_only in (False, True):
-                policy['gates'][0]['paragraphs_only'] = paragraphs_only
+                if kind == 'paragraph_count':
+                    policy['gates'][0].pop('paragraphs_only', None)
+                else:
+                    policy['gates'][0]['paragraphs_only'] = paragraphs_only
                 for media in ('text/plain', 'text/markdown', 'text/html'):
                     change['entries'][0]['media_type'] = media
                     for available in (False, True):
@@ -338,6 +386,8 @@ class PortableComparison(unittest.TestCase):
         verdict = copy.deepcopy(self.previous['verdict'])
         for kind in ('required_metadata', 'metadata_length', 'metadata_age'):
             policy['gates'][0]['kind'] = kind
+            if kind == 'metadata_length':
+                policy['gates'][0]['field'] = 'title'
             for metadata in (None, {}):
                 if metadata is None:
                     change['entries'][0].pop('metadata', None)
