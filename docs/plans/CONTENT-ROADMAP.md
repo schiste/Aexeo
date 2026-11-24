@@ -672,7 +672,8 @@ registry before considering the release delivered.
   word, character, paragraph and metadata-length count gate parameters. Other
   gate parameters still require independent validation. The Python comparator
   also rejects checked collection uniqueness results for incomplete snapshots
-  or unavailable required metadata. This does not
+  or unavailable required metadata, and independently recomputes checked
+  uniqueness outcomes within bounded work and evaluator limits. This does not
   authenticate the evaluator, establish freshness or authorize publication;
   Aethyme's native comparator adopted the check in
   [PR #1939](https://github.com/schiste/Aethyme/pull/1939). On 2026-11-22,
