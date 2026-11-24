@@ -64,6 +64,12 @@ fn allows_canonical_noindex(route: &str, config: &Config) -> bool {
             })
 }
 
+pub(crate) fn allows_missing_canonical_noindex(route: &str, config: &Config) -> bool {
+    config.policy().route_policy_overrides.iter().any(|rule| {
+        rule.allow_missing_canonical_noindex && route_matches_pattern(route, &rule.pattern)
+    })
+}
+
 fn allows_nofollow(route: &str, config: &Config) -> bool {
     is_utility_route(route, config)
         || config

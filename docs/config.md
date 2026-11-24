@@ -278,7 +278,7 @@ Each key is listed where it goes. Nested names are often shorter than the intern
 ## `route_policy_overrides` under `[policy]`
 
 - Default: (none)
-- Meaning: Per-route robots policy overrides such as allowing canonical+noindex or nofollow.
+- Meaning: Per-route robots policy overrides, including an opt-in missing-canonical exemption when general noindex is observed.
 
 ## `min_inbound_links` under `[rules.links]`
 

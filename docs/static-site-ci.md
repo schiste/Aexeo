@@ -220,6 +220,24 @@ This silences the `ROB005` ("page declares both canonical and
 noindex") warning specifically for that route, without broadening
 the ignore for the whole site.
 
+Some sites intentionally omit canonical links on selected noindex routes.
+To allow that policy without hiding missing canonicals on indexable pages:
+
+```toml
+[[policy.route_policy_overrides]]
+pattern = "/glossary/category/"
+allow_missing_canonical_noindex = true
+```
+
+The existing route pattern uses substring matching. This opt-in exempts
+`SEO004` only when the observed page has a general `noindex` or `none`
+directive in `<meta name="robots">` or an unscoped `X-Robots-Tag` response
+header. A crawler-specific or ambiguous header does not establish a general
+exemption. Static artifact audits cannot observe server response headers.
+If the page becomes indexable, or the directive is not observed, the missing
+canonical remains a finding. This setting is independent of
+`allow_canonical_noindex`, which controls `ROB005`.
+
 ## Tuning rules for site-specific noise
 
 Two rules tend to fire on legitimate site patterns and have config

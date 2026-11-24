@@ -103,6 +103,24 @@ fn robot_directives(page: &Page) -> BTreeSet<String> {
         .collect()
 }
 
+// Only general directives are sufficient. An agent-scoped header can also
+// contain comma-separated values, so a colon makes its entire scope ambiguous.
+fn has_general_noindex(page: &Page) -> bool {
+    fn has_directive(value: &str) -> bool {
+        value.split(',').any(|token| {
+            let token = token.trim();
+            token.eq_ignore_ascii_case("noindex") || token.eq_ignore_ascii_case("none")
+        })
+    }
+    page.meta_by_name
+        .get("robots")
+        .is_some_and(|value| has_directive(value))
+        || page
+            .response_headers
+            .get("x-robots-tag")
+            .is_some_and(|value| !value.contains(':') && has_directive(value))
+}
+
 fn restrictive_max_snippet(directives: &BTreeSet<String>) -> Option<String> {
     directives.iter().find_map(|directive| {
         let value = directive.strip_prefix("max-snippet:")?.trim();
@@ -149,7 +167,11 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 "error",
             ));
         }
-        if page.relative_path != "404.html" && page.canonical.is_none() {
+        if page.relative_path != "404.html"
+            && page.canonical.is_none()
+            && !(crate::robots_rules::allows_missing_canonical_noindex(&page.route, config)
+                && has_general_noindex(page))
+        {
             findings.push(finding(
                 "SEO004",
                 "missing canonical link",
@@ -368,6 +390,85 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn missing_canonical_exemption_requires_both_route_policy_and_general_noindex() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        for (path, head) in [
+            (
+                "glossary/category/noindex/index.html",
+                "<meta name='robots' content='NOINDEX, follow'>",
+            ),
+            (
+                "glossary/category/none/index.html",
+                "<meta name='robots' content='none'>",
+            ),
+            ("glossary/category/header/index.html", ""),
+            ("glossary/category/bot/index.html", ""),
+            (
+                "glossary/category/property/index.html",
+                "<meta property='robots' content='noindex'>",
+            ),
+            (
+                "glossary/category/indexable/index.html",
+                "<meta name='robots' content='index'>",
+            ),
+            (
+                "other/noindex/index.html",
+                "<meta name='robots' content='noindex'>",
+            ),
+        ] {
+            write(
+                &root.join(path),
+                &format!("<html><head>{head}</head><body><h1>Test</h1></body></html>"),
+            );
+        }
+        let mut site = load_site(root).unwrap();
+        for page in &mut site.pages {
+            let value = match page.relative_path.as_str() {
+                "glossary/category/header/index.html" => Some("noindex, nofollow"),
+                "glossary/category/bot/index.html" => Some("googlebot: noindex"),
+                _ => None,
+            };
+            if let Some(value) = value {
+                page.response_headers
+                    .insert("x-robots-tag".into(), value.into());
+            }
+        }
+        let default_findings = run_html_rules(&site, &Config::default());
+        assert_eq!(
+            default_findings
+                .iter()
+                .filter(|f| f.rule_id == "SEO004")
+                .count(),
+            7
+        );
+        fs::write(
+            root.join("aexeo.toml"),
+            "version = 1\n[[policy.route_policy_overrides]]\npattern='/glossary/category/'\nallow_missing_canonical_noindex=true\n",
+        )
+        .unwrap();
+        let config = crate::config::load_config(root, None).unwrap();
+        let findings = run_html_rules(&site, &config);
+        let missing: Vec<_> = findings
+            .iter()
+            .filter(|f| f.rule_id == "SEO004")
+            .map(|f| f.path.as_str())
+            .collect();
+        for expected in [
+            "bot/index.html",
+            "property/index.html",
+            "indexable/index.html",
+            "other/noindex/index.html",
+        ] {
+            assert!(
+                missing.iter().any(|path| path.ends_with(expected)),
+                "{missing:?}"
+            );
+        }
+        assert_eq!(missing.len(), 4, "{missing:?}");
     }
 
     #[test]
