@@ -2040,8 +2040,11 @@ JSON bytes, including its observations. Missing capabilities and invalid snapsho
 fail closed; host observation completeness and truth remain host responsibilities.
 For incremental metadata gates, provide the separate revision-bound metadata
 inventory; embedded host metadata is rejected when these gates are selected.
-This support does not by itself extend `content-change`, establish source
-freshness or authorize publication.
+The v1 `content-change` evaluator also accepts this explicit media type and
+binds the whole JSON as content. It does not currently attach source positions
+for these findings, and rejects embedded metadata when metadata gates are
+selected. The experimental v2 independent verifier does not yet accept this
+media type. Neither flow establishes source freshness or authorizes publication.
 
 ### Experimental incremental batches
 

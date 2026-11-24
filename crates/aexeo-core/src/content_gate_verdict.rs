@@ -2888,6 +2888,53 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
             .media_type
             .as_str()
         {
+            crate::content_adapter::MEDIA_TYPE => {
+                let adapted = match crate::content_adapter::parse(entry.entity_id.clone(), &text) {
+                    Ok(adapted) => adapted,
+                    Err(_) => {
+                        checks.push(Check {
+                            id: scoped_id("system", &entry.entity_id, "adapter_projection"),
+                            status: CheckStatus::NotChecked,
+                            blocking: true,
+                            reason: Some("Host adapter projection is invalid".into()),
+                        });
+                        continue;
+                    }
+                };
+                if adapted.input.metadata.is_some()
+                    && item_preset.gates.iter().any(|gate| {
+                        matches!(
+                            gate,
+                            crate::content_gate::ContentGate::RequiredMetadata { .. }
+                                | crate::content_gate::ContentGate::MetadataLength { .. }
+                                | crate::content_gate::ContentGate::MetadataAge { .. }
+                        )
+                    })
+                {
+                    checks.push(Check {
+                        id: scoped_id("system", &entry.entity_id, "adapter_metadata"),
+                        status: CheckStatus::NotChecked,
+                        blocking: true,
+                        reason: Some(
+                            "Embedded host metadata cannot be combined with change metadata gates"
+                                .into(),
+                        ),
+                    });
+                    continue;
+                }
+                literal_projection = adapted.literal_text;
+                structured_lists = adapted.lists;
+                heading_levels = adapted.headings;
+                paragraph_list_items = adapted.paragraph_list_items;
+                let count = adapted.destinations.as_ref().map(Vec::len);
+                (
+                    adapted.input,
+                    Some(adapted.context),
+                    count,
+                    adapted.destinations,
+                    None,
+                )
+            }
             "text/markdown" => {
                 let adapted = crate::markdown_adapter::markdown_project(
                     &entry.entity_id,
@@ -3075,7 +3122,8 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
             paragraph_list_items.as_deref(),
             literal_projection.as_deref(),
         )?;
-        let identity_projection = input.text.as_deref().is_some()
+        let identity_projection = entry.media_type != crate::content_adapter::MEDIA_TYPE
+            && input.text.as_deref().is_some()
             && input.text.as_deref() == input.source_text.as_deref();
         let html_map = if entry.media_type == "text/html" && !identity_projection {
             input
@@ -3137,6 +3185,7 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
             };
             let positions = hierarchy_positions
                 .or_else(|| {
+                    (entry.media_type != crate::content_adapter::MEDIA_TYPE).then_some(())?;
                     crate::markdown_adapter::list_source_positions(
                         structured_lists.as_deref()?,
                         definition,
@@ -9093,6 +9142,88 @@ mod tests {
         assert_eq!(
             location(":links"),
             vec![Some(protocol::Location { line: 5, column: 1 })]
+        );
+    }
+
+    #[test]
+    fn host_change_uses_observed_capabilities_without_inventing_locations() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='host'\n[[gates]]\nid='words'\nkind='word_count'\nmin=3\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\n").unwrap();
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let evaluate = |change: &mut Change, value: &str| {
+            let state = change.entries[0].after.as_mut().unwrap();
+            state.inline = Some(value.into());
+            state.sha256 = format!("{:x}", Sha256::digest(value.as_bytes()));
+            evaluate_change(
+                change,
+                &mut NoFiles,
+                &preset,
+                "2026-01-01T00:00:00Z",
+                4096,
+                4096,
+            )
+            .unwrap()
+        };
+        let report = evaluate(
+            &mut change,
+            r#"{"schema":"aexeo.content-adapter/v1","text":"one two","lists":[{"item_count":3,"depth":1}]}"#,
+        );
+        assert_eq!(report.findings.len(), 2);
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|finding| finding.location.is_none())
+        );
+        let report = evaluate(
+            &mut change,
+            r#"{"schema":"aexeo.content-adapter/v1","text":null}"#,
+        );
+        assert_eq!(report.status, VerdictStatus::NotChecked);
+        assert!(
+            report
+                .checks
+                .iter()
+                .all(|check| check.status == CheckStatus::NotChecked)
+        );
+        let report = evaluate(
+            &mut change,
+            r#"{"schema":"aexeo.content-adapter/v1","text":"x","text":"y"}"#,
+        );
+        assert_eq!(report.status, VerdictStatus::NotChecked);
+    }
+
+    #[test]
+    fn host_change_rejects_competing_metadata_for_metadata_gates() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='metadata'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n").unwrap();
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        change.entries[0].metadata = Some(std::collections::BTreeMap::from([(
+            "description".into(),
+            "external".into(),
+        )]));
+        let source = r#"{"schema":"aexeo.content-adapter/v1","text":"body","metadata":{"description":"embedded"},"observed_metadata_fields":["description"]}"#;
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let report = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        assert_eq!(report.status, VerdictStatus::NotChecked);
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.id.ends_with(":adapter_metadata")
+                    && check.status == CheckStatus::NotChecked)
         );
     }
 
