@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import verify_host_candidate_counts, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -33,6 +33,58 @@ class PortableComparison(unittest.TestCase):
                        self.encoded(self.fixture['base']), self.encoded(self.fixture['after']),
                        self.artifacts, self.required, self.identity,
                        self.fresh_exit_code, self.fresh_timed_out)
+
+    def test_host_counts_are_recomputed_and_capabilities_are_bounded(self):
+        media = 'application/vnd.aexeo.content-adapter+json'
+        source = '{"schema":"aexeo.content-adapter/v1","text":"one two"}'
+        after = [{'entity_id': 'a', 'media_type': media, 'source': source}]
+        policy = {'gates': [{'kind': 'word_count', 'id': 'words', 'min': 2}]}
+        verdict = {'checks': [{'id': 'gate:1:a:words', 'status': 'passed'}], 'findings': []}
+        self.assertTrue(verify_host_candidate_counts(policy, verdict, after))
+        forged = copy.deepcopy(verdict)
+        forged['checks'][0]['status'] = 'failed'
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_counts(policy, forged, after)
+        invalid_sources = (
+            '{"schema":"aexeo.content-adapter/v1","text":null}',
+            '{"schema":"aexeo.content-adapter/v1","text":"one two","block_ends":[3]}',
+            '{"schema":"aexeo.content-adapter/v1","text":"one","text":"two"}',
+            '{"schema":"aexeo.content-adapter/v2","text":"one two"}',
+        )
+        for invalid in invalid_sources:
+            with self.subTest(source=invalid), self.assertRaises(VerificationError):
+                verify_host_candidate_counts(policy, verdict, [dict(after[0], source=invalid)])
+        unsafe_policy = {'gates': [{'kind': 'link_count', 'id': 'links'}]}
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_counts(unsafe_policy, verdict, after)
+        for finding in ({'entity_id': 'a', 'location': {'line': 1, 'column': 1}},
+                        {'location': {'line': 1, 'column': 1}}):
+            verdict['findings'] = [finding]
+            with self.subTest(finding=finding), self.assertRaises(VerificationError):
+                verify_host_candidate_counts(policy, verdict, after)
+
+    def test_bound_host_projection_accepts_only_recomputed_counts(self):
+        import hashlib
+        source = '{"schema":"aexeo.content-adapter/v1","text":"abc"}'
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        media = 'application/vnd.aexeo.content-adapter+json'
+        change = json.loads(self.artifacts['change'])
+        change['entries'][0]['media_type'] = media
+        change['entries'][0]['after'] = {'inline': source, 'sha256': digest}
+        self.artifacts['change'] = self.encoded(change)
+        self.fixture['after'][0].update(media_type=media, source=source, sha256=digest)
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+            candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+            candidate_revision_profile=b'content-gate.candidate-revision/v1',
+            candidate_revision_sha256=revision_digest(candidate))
+        for envelope in (self.previous, self.fresh):
+            envelope['binding_sha256'] = binding(inputs)
+            envelope['verdict']['subject']['entries'][0]['sha256'] = digest
+        self.assertFalse(self.check()['publication_authorized'])
+        self.fixture['after'][0]['source'] = source + ' '
+        with self.assertRaises(VerificationError):
+            self.check()
 
     def test_matching_independently_supplied_inputs_and_verdict(self):
         self.assertEqual(self.check(), {'input_binding': 'match', 'fresh_verdict_match': True,
