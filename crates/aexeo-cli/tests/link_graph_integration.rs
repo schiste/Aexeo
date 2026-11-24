@@ -1603,7 +1603,7 @@ fn optional_graph_locations_work_for_json_and_audit_and_emit_aggregate_coverage(
 fn graph_telemetry_distinguishes_unrequested_and_unmapped_positions() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("input.json");
-    let html = "<!doctype html><html><head><title>x</title></head><body><nav><a href='/same'>nav</a></nav><main><a href='/unique'>one</a><a href='/same'>two</a><a title=\"<a href='/fake'\" href='/ambiguous'>three</a></main></body></html>";
+    let html = "<!doctype html><html><head><title>x</title></head><body><nav><a href='/same'>nav</a></nav><main><a href='/unique'>one</a><a href='/same'>two</a><a title=\"<a href='/fake'\" href='/same'>three</a></main></body></html>";
     let data = serde_json::json!({"version":1,"identity":{"origin":"https://example.org","release":"r","surface":"s","snapshot":"t"},"snapshot_date":null,"crawl_complete":false,"pages":[{"url":"https://example.org/a","html":html}],"inventory":null});
     fs::write(&input, serde_json::to_vec(&data).unwrap()).unwrap();
     for requested in [false, true] {
