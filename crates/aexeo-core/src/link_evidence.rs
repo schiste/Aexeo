@@ -341,18 +341,26 @@ pub fn extract_document(
                 "aside" | "header" if !scope.explicit && scope.context == LinkContext::Body => {
                     Some(LinkContext::Unknown)
                 }
-                "nav" if !scope.explicit => Some(
-                    match attribute(&node, "aria-label")
-                        .as_deref()
-                        .map(str::trim)
-                        .map(str::to_ascii_lowercase)
-                        .as_deref()
-                    {
-                        Some("breadcrumb" | "breadcrumbs") => LinkContext::Breadcrumb,
-                        Some("pagination") => LinkContext::Pagination,
-                        _ => LinkContext::Navigation,
-                    },
-                ),
+                "nav" | "div" | "section"
+                    if !scope.explicit
+                        && (tag == "nav"
+                            || attribute(&node, "role").is_some_and(|role| {
+                                role.trim().eq_ignore_ascii_case("navigation")
+                            })) =>
+                {
+                    Some(
+                        match attribute(&node, "aria-label")
+                            .as_deref()
+                            .map(str::trim)
+                            .map(str::to_ascii_lowercase)
+                            .as_deref()
+                        {
+                            Some("breadcrumb" | "breadcrumbs") => LinkContext::Breadcrumb,
+                            Some("pagination") => LinkContext::Pagination,
+                            _ => LinkContext::Navigation,
+                        },
+                    )
+                }
                 "footer" if !scope.explicit => Some(LinkContext::Footer),
                 _ => None,
             };
@@ -1084,6 +1092,57 @@ mod tests {
         assert_eq!(
             contexts("<main><div class='related-posts'><a href='/a'>a</a></div></main>"),
             vec![LinkContext::Body]
+        );
+    }
+
+    #[test]
+    fn generic_navigation_landmarks_do_not_count_as_body() {
+        let html = "<main><div role='navigation' id='menu'><a href='/target'>menu</a></div><section role=' NAVIGATION ' aria-label='Breadcrumb'><a href='/target'>crumb</a></section><div role='navigation' aria-label='Pagination'><a href='/target'>next</a></div><div role='navigation' data-aexeo-link-context='related'><a href='/target'>related</a></div><p><a href='/target'>body</a></p></main>";
+        let links = extract_links(
+            html,
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(
+            links.iter().map(|link| link.context).collect::<Vec<_>>(),
+            vec![
+                LinkContext::Navigation,
+                LinkContext::Breadcrumb,
+                LinkContext::Pagination,
+                LinkContext::RelatedContent,
+                LinkContext::Body
+            ]
+        );
+        assert_eq!(links[0].component.as_deref(), Some("div#menu"));
+        let counts = crate::link_counts::count_links(links);
+        let target = &counts.destinations[0];
+        assert_eq!(target.source_pages_by_context[&LinkContext::Body], 1);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Navigation], 1);
+        assert_eq!(target.distinct_source_pages, 1);
+
+        let navigation_only = extract_links(
+            "<main><div role='navigation'><a href='/target'>menu</a></div></main>",
+            "https://example.org/navigation-only",
+            "https://example.org",
+            None,
+        );
+        let counts = crate::link_counts::count_links(navigation_only);
+        assert_eq!(
+            counts.destinations[0]
+                .source_pages_by_context
+                .get(&LinkContext::Body),
+            None
+        );
+        assert_eq!(
+            counts.destinations[0].source_pages_by_context[&LinkContext::Navigation],
+            1
+        );
+        assert_eq!(
+            contexts(
+                "<main><div data-aexeo-link-context='body'><div role='navigation'><a href='/a'>a</a></div></div><div role='presentation'><a href='/b'>b</a></div><template><div role='navigation'><a href='/c'>c</a></div></template></main>"
+            ),
+            vec![LinkContext::Body, LinkContext::Body, LinkContext::Unknown]
         );
     }
 
