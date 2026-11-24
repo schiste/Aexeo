@@ -30,6 +30,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   commands run by the broker and may be unset in the interactive shell. Check that
   a variable is nonempty before using it as an output directory, and quote paths
   with spaces.
+- Give concurrent Cargo validations separate absolute `CARGO_TARGET_DIR` paths,
+  including a broker merged-tree gate and direct worktree tests. Shared targets
+  can leave a doctest looking for an artifact replaced by the other build;
+  rerun the affected check in isolation before attributing it to source code.
 - After `broker finish`, verify the exact session scratch path is gone even
   when the broker reports cleanup completed. If it remains, inspect it and
   remove only that session's disposable artifacts when retention permits;
