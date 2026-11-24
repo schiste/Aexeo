@@ -252,6 +252,19 @@ configuration and environment are not authenticated. A matching hash therefore
 does not prove which bytes ran or establish dependency closure. The host must
 protect the executable and all dependencies throughout the operation.
 
+A host can additionally set `--bind-executable-identity` together with
+`--executable-sha256`. The independently supplied evaluator artifact must
+then be the exact ASCII bytes `sha256:<lowercase digest>`, with no newline.
+The candidate binding must already bind that artifact, so a missing pin, a
+different identity or an older verdict bound to another identity fails closed.
+For Aexeo's CLI producer, use the same value in `--evaluator-identity` and in
+the independently supplied evaluator artifact. This opt-in convention binds
+one checked executable file, not its interpreter, libraries, configuration,
+environment or complete dependency set. It does not authenticate execution,
+prevent replacement races, or authorize publication. The host must acquire the
+pin independently and protect all relevant inputs. Telemetry reports only
+whether this additional check was requested.
+
 ### Referenced content in the independent Python verifier
 
 The Python comparator and runner accept an optional `--content-files map.json`.
