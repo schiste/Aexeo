@@ -131,6 +131,17 @@ publishing 0.9.5 and host-side validation remain open.
     discovery as needed and test permission-scoped audit and retrieval on a real
     revision. Package deployment and preset configuration alone do not establish
     MCP availability, historical capability approval, or publication readiness.
+  - Local adapter validation, 2026-11-24: tested the published npm 0.9.5
+    archive and its WASM against two current Preview CMS records and the
+    [host configuration](https://github.com/Aeptus/website-and-content/blob/612a2562349406fda5d71b83f7f15c9d59cca98c/sites/aeptus-com-cms/src/aexeo-editorial-options.mjs).
+    For the mixed-component English article, the configured `askYourAi`
+    mapping retained all 18 Portable Text blocks from 20 input blocks; the French
+    article retained all 27 input blocks. Both projections supplied text,
+    matched their configured title and description fallbacks, and passed the
+    three `article-editorial` gates. This exercised the local package API,
+    not the hosted save hook, historical revisions, rendered HTML or MCP.
+    The configuration treats the component as UI rather than article prose;
+    this sample does not establish completeness for other components or fields.
 - [ ] Validate the host's historical metadata and component mappings, citations,
   language-specific coverage and redirect HTML against representative rendered
   builds. Style checks do not establish factual accuracy, currency or translation
