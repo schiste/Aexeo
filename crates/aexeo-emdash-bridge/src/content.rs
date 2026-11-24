@@ -1618,6 +1618,31 @@ mod tests {
     }
 
     #[test]
+    fn builtin_paragraph_readability_respects_cms_capabilities() {
+        use aexeo_core::content_presets::{builtin_content_presets, resolve_content_preset};
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/t", "title":"T", "body":[
+                {"style":"h2","children":[{"_type":"span", "text":"word ".repeat(31)}]},
+                {"children":[{"_type":"span","text":"Short paragraph."}]}
+            ]
+        }))
+        .unwrap();
+        let preset =
+            resolve_content_preset("readability-paragraphs", &builtin_content_presets()).unwrap();
+        let full = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(full.gates[0].status, GateStatus::Passed);
+        assert_eq!(full.gates[0].measurements["sentence_count"], 1);
+        let partial = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, true, false, true],
+        )
+        .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
     fn markdown_and_portable_text_keep_http_urls_in_sentence_measurements() {
         let source = "See https://example.org/a.b?x=1. Next sentence.";
         let document: EmdashDocument = serde_json::from_value(serde_json::json!({

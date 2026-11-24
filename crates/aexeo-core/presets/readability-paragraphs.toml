@@ -1,0 +1,12 @@
+version = 1
+name = "Paragraph readability starter"
+extends = ["readability"]
+
+# A gate with the same ID replaces the inherited gate as a complete definition.
+[[gates]]
+id = "editorial.sentence_length"
+kind = "sentence_length"
+max_words = 30
+require_latin_word_boundaries = true
+paragraphs_only = true
+blocking = false
