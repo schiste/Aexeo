@@ -208,6 +208,7 @@ class PortableComparison(unittest.TestCase):
                                  ('a\n\nb\n', 2)]:
             with self.subTest(source=source):
                 self.assertEqual(plain_text_paragraph_count(source), expected)
+        self.assertEqual(plain_text_paragraph_count('x\n\n' * 100_000), 100_000)
         with self.assertRaisesRegex(VerificationError, 'paragraph count exceeds'):
             plain_text_paragraph_count('x\n\n' * 100_001)
 
