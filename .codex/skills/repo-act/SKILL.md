@@ -34,10 +34,6 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   the selected tests and pass absolute `TMPDIR` and `CARGO_TARGET_DIR` in the
   parent environment, even when the command itself is Python. Run a single
   skipped test by its fully qualified name when the rest need not be repeated.
-- If `sccache` fails with `path must be shorter than SUN_LEN` for a long
-  session `TMPDIR` on macOS, retry the affected Cargo command with
-  `RUSTC_WRAPPER=''` while keeping the absolute session scratch paths. This
-  disables the wrapper for that command; it does not require moving the worktree.
 - Give concurrent Cargo validations separate absolute `CARGO_TARGET_DIR` paths,
   including a broker merged-tree gate and direct worktree tests. Shared targets
   can leave a doctest looking for an artifact replaced by the other build;
@@ -219,8 +215,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   caches or another session's artifacts. The same wrapper-free retry applies
   when `sccache` fails with `path must be shorter than SUN_LEN` for a long
   session temporary path, or cannot create its temporary directory because a
-  previously used temporary path no longer exists. Confirm the retried gate
-  completes.
+  previously used temporary path no longer exists. Keep the session scratch
+  paths and confirm the retried gate completes.
 - When adding a Cargo dependency, inspect the full `Cargo.lock` diff for
   unrelated resolution changes. Restore unrelated entries only after verifying
   a real `cargo check --locked` succeeds with the intended lockfile; metadata
