@@ -20,6 +20,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   before reporting a failure: an error annotation can come from an informative
   check while the job succeeds. Preserve and investigate the annotation rather
   than treating a green job as proof that the underlying issue is fixed.
+- In zsh, `path` is a special array tied to `PATH`. Do not use `path` as a
+  loop or scratch variable when running broker commands; use a task-specific
+  name such as `lease_target` so executables remain discoverable.
 - For direct shell commands, use the session scratch path printed by `broker
   start` explicitly as an absolute path, including in `CARGO_TARGET_DIR` and
   `TMPDIR`. Relative paths can resolve from a package or script working directory
