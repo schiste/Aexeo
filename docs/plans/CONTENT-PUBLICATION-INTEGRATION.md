@@ -41,10 +41,10 @@ unavailable check may become a pass.
   recomputes checked plain-text paragraph counts in the Python draft comparator
   when the host declares the plain-paragraph projection. Counts above 100,000
   are rejected; unavailable checks and rich formats do not become checked.
-  The native counterpart, [Aethyme #1985](https://github.com/schiste/Aethyme/pull/1985),
-  and its real-CLI cross-check, [Aexeo #944](https://github.com/schiste/Aexeo/pull/944),
-  are pending delivery. Real CLI tests pass with those candidate changes, but
-  an open PR is not a released or deployed feature.
+  [Aethyme #1985](https://github.com/schiste/Aethyme/pull/1985) delivers the
+  native counterpart, and [Aexeo #944](https://github.com/schiste/Aexeo/pull/944)
+  exercises both real CLIs against valid and forged paragraph verdicts. The
+  changes are merged; no release or deployment containing them is asserted.
 
 These comparisons establish neither source authenticity, freshness, inventory
 completeness nor an atomic publication boundary. The portable protocol remains
