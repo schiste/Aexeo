@@ -330,6 +330,9 @@ Options:
       --input <input>
           Versioned JSON batch file, or - for stdin; may contain private content
 
+      --source-locations
+          Map positional findings to the evaluated source snapshot (opt-in; additional parsing)
+
       --export-link-observations
           Export complete source-bound link observation templates as JSON; output may contain private URLs
 
