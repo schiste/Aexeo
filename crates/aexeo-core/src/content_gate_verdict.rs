@@ -1407,6 +1407,98 @@ fn verify_candidate_final_newlines(
     Ok(())
 }
 
+// Recompute the simple plain-text projections from the already bound source.
+// Rich formats can alter the projected text and are deliberately excluded.
+fn verify_candidate_plain_counts(
+    verdict: &Verdict,
+    preset: &ContentPreset,
+    after: &[crate::content_candidate::CandidateItem],
+    plain_text_paragraphs: bool,
+) -> Result<()> {
+    use crate::content_gate::ContentGate;
+    if !preset.gates.iter().any(|gate| {
+        matches!(
+            gate,
+            ContentGate::WordCount { .. }
+                | ContentGate::CharacterCount { .. }
+                | ContentGate::ParagraphCount { .. }
+        )
+    }) {
+        return Ok(());
+    }
+    let checks: std::collections::BTreeMap<_, _> = verdict
+        .checks
+        .iter()
+        .map(|check| (check.id.as_str(), check))
+        .collect();
+    for item in after.iter().filter(|item| item.media_type == "text/plain") {
+        let mut words = None;
+        let mut chars = [None, None];
+        let mut paragraphs = None;
+        for gate in &preset.gates {
+            let (id, min, max) = match gate {
+                ContentGate::WordCount { id, min, max, .. }
+                | ContentGate::CharacterCount { id, min, max, .. }
+                | ContentGate::ParagraphCount { id, min, max, .. } => (id, min, max),
+                _ => continue,
+            };
+            let check_id = format!("gate:{}:{}:{}", item.entity_id.len(), item.entity_id, id);
+            let check = checks
+                .get(check_id.as_str())
+                .ok_or_else(|| anyhow::anyhow!("resolved policy check is missing"))?;
+            if check.status == CheckStatus::NotChecked {
+                continue;
+            }
+            let count = match gate {
+                ContentGate::WordCount { .. } => {
+                    *words.get_or_insert_with(|| item.source.split_whitespace().count())
+                }
+                ContentGate::CharacterCount {
+                    ignore_whitespace, ..
+                } => *chars[usize::from(*ignore_whitespace)].get_or_insert_with(|| {
+                    item.source
+                        .chars()
+                        .filter(|ch| !ignore_whitespace || !ch.is_whitespace())
+                        .count()
+                }),
+                ContentGate::ParagraphCount { .. } => {
+                    if !plain_text_paragraphs {
+                        bail!("candidate evaluator cannot inspect unavailable paragraphs");
+                    }
+                    if paragraphs.is_none() {
+                        let mut count = 0usize;
+                        let mut inside = false;
+                        for line in item.source.split_inclusive('\n') {
+                            let blank = line.trim_end_matches(['\r', '\n']).trim().is_empty();
+                            if !blank && !inside {
+                                count += 1;
+                                if count > crate::plain_text_adapter::MAX_PLAIN_TEXT_PARAGRAPHS {
+                                    bail!("plain-text paragraph count exceeds evaluator limit");
+                                }
+                            }
+                            inside = !blank;
+                        }
+                        paragraphs = Some(count);
+                    }
+                    paragraphs.expect("paragraph count initialized")
+                }
+                _ => unreachable!(),
+            };
+            let failed =
+                min.is_some_and(|bound| count < bound) || max.is_some_and(|bound| count > bound);
+            let expected = if failed {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            };
+            if check.status != expected {
+                bail!("plain-text count status differs from source");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reconstruct the candidate and decision artifacts before verifying an experimental
 /// passing verdict and independently supplied content streams. The caller must
 /// independently obtain the context, evidence and streams, and establish their
@@ -1514,6 +1606,12 @@ pub fn verify_draft_passing_candidate_with_content<
         context.decision.plain_text_paragraphs,
     )?;
     verify_candidate_final_newlines(&envelope.verdict, context.decision.preset, context.after)?;
+    verify_candidate_plain_counts(
+        &envelope.verdict,
+        context.decision.preset,
+        context.after,
+        context.decision.plain_text_paragraphs,
+    )?;
     if let Some(snapshots) = snapshots {
         verify_candidate_link_destinations(
             snapshots,
@@ -4324,6 +4422,114 @@ mod tests {
     }
 
     #[test]
+    fn candidate_plain_counts_compare_checked_statuses_to_bound_source() {
+        use crate::content_candidate::CandidateItem;
+        let cases = [
+            (
+                "kind='word_count'\nmin=2",
+                "un\u{a0}deux",
+                true,
+                CheckStatus::Passed,
+            ),
+            (
+                "kind='word_count'\nmax=1",
+                "one two",
+                true,
+                CheckStatus::Failed,
+            ),
+            (
+                "kind='character_count'\nmin=3",
+                "é😀 ",
+                true,
+                CheckStatus::Passed,
+            ),
+            (
+                "kind='character_count'\nmin=3\nignore_whitespace=true",
+                "é😀 ",
+                true,
+                CheckStatus::Failed,
+            ),
+            (
+                "kind='paragraph_count'\nmin=2",
+                "first\r\n\r\nsecond",
+                true,
+                CheckStatus::Passed,
+            ),
+            (
+                "kind='paragraph_count'\nmax=1",
+                "first\n\nsecond",
+                true,
+                CheckStatus::Failed,
+            ),
+            (
+                "kind='paragraph_count'\nmax=0",
+                " \n\t\n",
+                true,
+                CheckStatus::Passed,
+            ),
+        ];
+        for (definition, source, paragraph_mode, expected) in cases {
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='test'\n[[gates]]\nid='words'\n{definition}\n"
+            ))
+            .unwrap();
+            let mut verdict = evaluate(&change(), 1).unwrap();
+            let mut item = CandidateItem {
+                entity_id: "article".into(),
+                public_path: "/article".into(),
+                media_type: "text/plain".into(),
+                revision: None,
+                sha256: String::new(),
+                source: source.into(),
+                links: None,
+            };
+            verdict.checks[0].status = expected;
+            assert!(
+                verify_candidate_plain_counts(&verdict, &preset, &[item.clone()], paragraph_mode)
+                    .is_ok()
+            );
+            verdict.checks[0].status = if expected == CheckStatus::Passed {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            };
+            assert!(
+                verify_candidate_plain_counts(&verdict, &preset, &[item.clone()], paragraph_mode)
+                    .is_err()
+            );
+            verdict.checks[0].status = CheckStatus::NotChecked;
+            assert!(
+                verify_candidate_plain_counts(&verdict, &preset, &[item.clone()], false).is_ok()
+            );
+            item.media_type = "text/markdown".into();
+            verdict.checks[0].status = if expected == CheckStatus::Passed {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            };
+            assert!(
+                verify_candidate_plain_counts(&verdict, &preset, &[item], paragraph_mode).is_ok()
+            );
+        }
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='words'\nkind='paragraph_count'\nmin=1\n",
+        )
+        .unwrap();
+        let mut verdict = evaluate(&change(), 1).unwrap();
+        verdict.checks[0].status = CheckStatus::Passed;
+        let item = CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: String::new(),
+            source: "x\n\n".repeat(crate::plain_text_adapter::MAX_PLAIN_TEXT_PARAGRAPHS + 1),
+            links: None,
+        };
+        assert!(verify_candidate_plain_counts(&verdict, &preset, &[item], true).is_err());
+    }
+
+    #[test]
     fn candidate_verifier_rejects_forged_final_newline_pass() {
         use crate::content_candidate::{CandidateItem, CandidateSnapshot};
         use crate::content_gate_sources::{ContentPhase, IndependentContent};
@@ -4407,6 +4613,109 @@ mod tests {
             err.to_string().contains("final newline status differs"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn candidate_verifier_rejects_forged_plain_count_passes() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate_sources::{ContentPhase, IndependentContent};
+        struct Bytes;
+        impl IndependentContent for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, _: ContentPhase) -> io::Result<Self::Reader> {
+                Ok(Cursor::new(b"abc".to_vec()))
+            }
+        }
+        let change = change();
+        for (kind, min) in [
+            ("word_count", 2),
+            ("character_count", 4),
+            ("paragraph_count", 2),
+        ] {
+            let preset = ContentPreset::from_toml(&format!("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='target'\nkind='{kind}'\nmin={min}\nblocking=false\n")).unwrap();
+            let decision = OfflineDecisionContext {
+                change: &change,
+                preset: &preset,
+                max_entry_bytes: 1024,
+                max_total_bytes: 1024,
+                plain_text_paragraphs: true,
+                collection: None,
+                evaluator_identity: b"build",
+            };
+            let base = CandidateSnapshot {
+                scope: "site".into(),
+                site_id: "s".into(),
+                site_base_url: None,
+                base: change.base.clone(),
+                complete: true,
+                items: vec![],
+            };
+            let after = vec![CandidateItem {
+                entity_id: "article".into(),
+                public_path: "/article".into(),
+                media_type: "text/plain".into(),
+                revision: None,
+                sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+                source: "abc".into(),
+                links: None,
+            }];
+            let context = CandidateDecisionContext {
+                decision: &decision,
+                base: &base,
+                after: &after,
+            };
+            let mut portable = evaluate_draft_portable_candidate_verdict(
+                &context,
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .unwrap();
+            let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+                validator_name: "aexeo",
+                validator_version: env!("CARGO_PKG_VERSION"),
+                required_checks: &["gate:7:article:words"],
+                exit_code: 0,
+                timed_out: false,
+            };
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &context,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Bytes,
+                1024,
+                1024,
+            )
+            .expect("honest advisory result should verify");
+            let check = portable
+                .verdict
+                .checks
+                .iter_mut()
+                .find(|c| c.id == "gate:7:article:target")
+                .unwrap();
+            assert_eq!(check.status, CheckStatus::Failed);
+            check.status = CheckStatus::Passed;
+            portable.verdict.summary.failed -= 1;
+            portable.verdict.summary.passed += 1;
+            portable.verdict.findings.clear();
+            let err = verify_draft_passing_candidate_with_content(
+                &portable,
+                &context,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Bytes,
+                1024,
+                1024,
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("plain-text count status differs"),
+                "{err}"
+            );
+        }
     }
 
     #[test]
