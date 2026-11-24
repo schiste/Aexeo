@@ -1029,10 +1029,11 @@ class PortableCliInterop(unittest.TestCase):
                 rejected = subprocess.run(verify, capture_output=True, text=True)
                 self.assertEqual(rejected.returncode, 2, rejected.stderr)
 
-    def test_host_paragraph_count_with_real_cli_and_independent_comparator(self):
+    def test_host_gates_with_real_cli_and_independent_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         source = json.dumps({'schema': 'aexeo.content-adapter/v1', 'text': 'é x',
-                             'paragraphs': [{'start': 0, 'end': 2}, {'start': 3, 'end': 4}]},
+                             'paragraphs': [{'start': 0, 'end': 2}, {'start': 3, 'end': 4}],
+                             'headings': ['Titre'], 'heading_levels': [1]},
                             ensure_ascii=False, separators=(',', ':'))
         digest = hashlib.sha256(source.encode()).hexdigest()
         media = 'application/vnd.aexeo.content-adapter+json'
@@ -1045,7 +1046,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('base', 'after'):
                 (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
             (root / 'change').write_text(json.dumps(change), encoding='utf-8')
-            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=2\nmax=2\n[[gates]]\nid='pwords'\nkind='paragraph_length'\nmax_words=1\n[[gates]]\nid='pchars'\nkind='paragraph_character_length'\nmax_chars=1\n", encoding='utf-8')
+            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=2\nmax=2\n[[gates]]\nid='pwords'\nkind='paragraph_length'\nmax_words=1\n[[gates]]\nid='pchars'\nkind='paragraph_character_length'\nmax_chars=1\n[[gates]]\nid='words'\nkind='word_count'\nmin=2\nmax=2\n[[gates]]\nid='chars'\nkind='character_count'\nmin=3\nmax=3\n[[gates]]\nid='required'\nkind='required_headings'\nheadings=['Titre']\n[[gates]]\nid='heading_length'\nkind='heading_length'\nmax_chars=5\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\ninitial_level=1\n", encoding='utf-8')
             binary = os.environ.get('AEXEO_CLI_BIN')
             executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
             common = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
@@ -1071,6 +1072,9 @@ class PortableCliInterop(unittest.TestCase):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--require-check', 'gate:7:article:paragraphs',
                        '--require-check', 'gate:7:article:pwords', '--require-check', 'gate:7:article:pchars',
+                       '--require-check', 'gate:7:article:words', '--require-check', 'gate:7:article:chars',
+                       '--require-check', 'gate:7:article:required', '--require-check', 'gate:7:article:heading_length',
+                       '--require-check', 'gate:7:article:hierarchy',
                        '--validator-name', 'aexeo',
                        '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
@@ -1083,7 +1087,9 @@ class PortableCliInterop(unittest.TestCase):
                 manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
                     validator_name='aexeo', validator_version=ENGINE_VERSION,
                     required_checks=['gate:7:article:paragraphs', 'gate:7:article:pwords',
-                                     'gate:7:article:pchars'], fresh_exit_code=0, fresh_timed_out=False)
+                                     'gate:7:article:pchars', 'gate:7:article:words', 'gate:7:article:chars',
+                                     'gate:7:article:required', 'gate:7:article:heading_length',
+                                     'gate:7:article:hierarchy'], fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
