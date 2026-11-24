@@ -1029,6 +1029,56 @@ class PortableCliInterop(unittest.TestCase):
                 rejected = subprocess.run(verify, capture_output=True, text=True)
                 self.assertEqual(rejected.returncode, 2, rejected.stderr)
 
+    def test_host_paragraph_count_with_real_cli_and_independent_comparator(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        source = json.dumps({'schema': 'aexeo.content-adapter/v1', 'text': 'é x',
+                             'paragraphs': [{'start': 0, 'end': 2}, {'start': 3, 'end': 4}]},
+                            ensure_ascii=False, separators=(',', ':'))
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        media = 'application/vnd.aexeo.content-adapter+json'
+        change = json.loads(fixture['artifacts']['change'])
+        change['entries'][0]['media_type'] = media
+        change['entries'][0]['after'] = {'sha256': digest, 'inline': source}
+        fixture['after'][0].update(media_type=media, sha256=digest, source=source)
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-host-paragraph-') as directory:
+            root = Path(directory)
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(json.dumps(change), encoding='utf-8')
+            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=2\nmax=2\n", encoding='utf-8')
+            binary = os.environ.get('AEXEO_CLI_BIN')
+            executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+            common = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
+                                   '--offline-receipt', '--evaluator-identity', 'build']
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            export = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')),
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(export.returncode, 0, export.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                                '--candidate-after', str(root / 'after'), '--draft-portable-verdict']
+            for name in ('previous', 'fresh'):
+                replay = ['--verify-draft-portable-verdict', str(root / 'previous')] if name == 'fresh' else []
+                result = subprocess.run(command + replay, cwd=ROOT,
+                                        env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+            for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                verify += ['--' + name.replace('_', '-'), str(root / name)]
+            verify += ['--require-check', 'gate:7:article:paragraphs', '--validator-name', 'aexeo',
+                       '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+            result = subprocess.run(verify, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            fixture['after'][0]['source'] = source.replace('"end":4', '"end":3')
+            (root / 'after').write_text(json.dumps(fixture['after']), encoding='utf-8')
+            rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+
     def test_html_main_scope_with_real_cli_and_independent_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         source = '<header>Ignored.</header><main><p>abc</p></main>'
