@@ -1499,6 +1499,69 @@ fn verify_candidate_plain_counts(
     Ok(())
 }
 
+fn verify_candidate_metadata_statuses(
+    verdict: &Verdict,
+    preset: &ContentPreset,
+    change: &Change,
+) -> Result<()> {
+    use crate::content_gate::ContentGate;
+    let checks: std::collections::BTreeMap<_, _> = verdict
+        .checks
+        .iter()
+        .map(|check| (check.id.as_str(), check))
+        .collect();
+    for entry in change.entries.iter().filter(|entry| entry.after.is_some()) {
+        for gate in &preset.gates {
+            let id = match gate {
+                ContentGate::RequiredMetadata { id, .. }
+                | ContentGate::MetadataLength { id, .. } => id,
+                _ => continue,
+            };
+            let check_id = format!("gate:{}:{}:{}", entry.entity_id.len(), entry.entity_id, id);
+            let check = checks
+                .get(check_id.as_str())
+                .ok_or_else(|| anyhow::anyhow!("resolved policy check is missing"))?;
+            if check.status == CheckStatus::NotChecked {
+                continue;
+            }
+            let metadata = entry.metadata.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("candidate evaluator cannot inspect unavailable metadata")
+            })?;
+            let failed = match gate {
+                ContentGate::RequiredMetadata { fields, .. } => fields.iter().any(|field| {
+                    !metadata
+                        .get(field)
+                        .is_some_and(|value| !value.trim().is_empty())
+                }),
+                ContentGate::MetadataLength {
+                    field, min, max, ..
+                } => {
+                    let count = metadata
+                        .get(field)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "candidate evaluator cannot inspect absent metadata field"
+                            )
+                        })?
+                        .chars()
+                        .count();
+                    min.is_some_and(|bound| count < bound) || max.is_some_and(|bound| count > bound)
+                }
+                _ => bail!("unsupported metadata gate"),
+            };
+            let expected = if failed {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            };
+            if check.status != expected {
+                bail!("metadata status differs from bound input");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reconstruct the candidate and decision artifacts before verifying an experimental
 /// passing verdict and independently supplied content streams. The caller must
 /// independently obtain the context, evidence and streams, and establish their
@@ -1604,6 +1667,11 @@ pub fn verify_draft_passing_candidate_with_content<
         snapshots.is_some(),
         sources,
         context.decision.plain_text_paragraphs,
+    )?;
+    verify_candidate_metadata_statuses(
+        &envelope.verdict,
+        context.decision.preset,
+        context.decision.change,
     )?;
     verify_candidate_final_newlines(&envelope.verdict, context.decision.preset, context.after)?;
     verify_candidate_plain_counts(
@@ -4422,6 +4490,69 @@ mod tests {
     }
 
     #[test]
+    fn candidate_metadata_statuses_use_bound_values() {
+        let cases = [
+            (
+                "kind='required_metadata'\nfields=['title']",
+                Some("Bonjour"),
+                CheckStatus::Passed,
+            ),
+            (
+                "kind='required_metadata'\nfields=['title']",
+                Some(" \u{a0}"),
+                CheckStatus::Failed,
+            ),
+            (
+                "kind='required_metadata'\nfields=['title']",
+                None,
+                CheckStatus::Failed,
+            ),
+            (
+                "kind='metadata_length'\nfield='title'\nmin=2\nmax=2",
+                Some("é😀"),
+                CheckStatus::Passed,
+            ),
+            (
+                "kind='metadata_length'\nfield='title'\nmin=3",
+                Some("é😀"),
+                CheckStatus::Failed,
+            ),
+        ];
+        for (definition, value, expected) in cases {
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='test'\n[[gates]]\nid='words'\n{definition}\n"
+            ))
+            .unwrap();
+            let mut change = change();
+            change.entries[0].metadata = Some(
+                value
+                    .map(|v| [("title".into(), v.into())].into())
+                    .unwrap_or_default(),
+            );
+            let mut verdict = evaluate(&change, 1).unwrap();
+            verdict.checks[0].status = expected;
+            assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_ok());
+            verdict.checks[0].status = if expected == CheckStatus::Passed {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            };
+            assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_err());
+            verdict.checks[0].status = CheckStatus::NotChecked;
+            assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_ok());
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='metadata_length'\nfield='title'\nmin=1\n").unwrap();
+        let mut change = change();
+        let mut verdict = evaluate(&change, 1).unwrap();
+        verdict.checks[0].status = CheckStatus::Passed;
+        assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_err());
+        change.entries[0].metadata = Some(Default::default());
+        assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_err());
+        verdict.checks[0].status = CheckStatus::NotChecked;
+        assert!(verify_candidate_metadata_statuses(&verdict, &preset, &change).is_ok());
+    }
+
+    #[test]
     fn candidate_plain_counts_compare_checked_statuses_to_bound_source() {
         use crate::content_candidate::CandidateItem;
         let cases = [
@@ -4715,6 +4846,106 @@ mod tests {
                 err.to_string().contains("plain-text count status differs"),
                 "{err}"
             );
+        }
+    }
+
+    #[test]
+    fn candidate_verifier_rejects_forged_metadata_passes() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate_sources::{ContentPhase, IndependentContent};
+        struct Bytes;
+        impl IndependentContent for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, _: ContentPhase) -> io::Result<Self::Reader> {
+                Ok(Cursor::new(b"abc".to_vec()))
+            }
+        }
+        let mut change = change();
+        change.entries[0].metadata = Some([("title".into(), "é".into())].into());
+        for definition in [
+            "kind='required_metadata'\nfields=['description']",
+            "kind='metadata_length'\nfield='title'\nmin=2",
+        ] {
+            let preset = ContentPreset::from_toml(&format!("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='target'\n{definition}\nblocking=false\n")).unwrap();
+            let decision = OfflineDecisionContext {
+                change: &change,
+                preset: &preset,
+                max_entry_bytes: 1024,
+                max_total_bytes: 1024,
+                plain_text_paragraphs: true,
+                collection: None,
+                evaluator_identity: b"build",
+            };
+            let base = CandidateSnapshot {
+                scope: "site".into(),
+                site_id: "s".into(),
+                site_base_url: None,
+                base: change.base.clone(),
+                complete: true,
+                items: vec![],
+            };
+            let after = vec![CandidateItem {
+                entity_id: "article".into(),
+                public_path: "/article".into(),
+                media_type: "text/plain".into(),
+                revision: None,
+                sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+                source: "abc".into(),
+                links: None,
+            }];
+            let context = CandidateDecisionContext {
+                decision: &decision,
+                base: &base,
+                after: &after,
+            };
+            let mut portable = evaluate_draft_portable_candidate_verdict(
+                &context,
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .unwrap();
+            let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+                validator_name: "aexeo",
+                validator_version: env!("CARGO_PKG_VERSION"),
+                required_checks: &["gate:7:article:words"],
+                exit_code: 0,
+                timed_out: false,
+            };
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &context,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Bytes,
+                1024,
+                1024,
+            )
+            .expect("honest advisory result should verify");
+            let check = portable
+                .verdict
+                .checks
+                .iter_mut()
+                .find(|c| c.id == "gate:7:article:target")
+                .unwrap();
+            assert_eq!(check.status, CheckStatus::Failed);
+            check.status = CheckStatus::Passed;
+            portable.verdict.summary.failed -= 1;
+            portable.verdict.summary.passed += 1;
+            portable.verdict.findings.clear();
+            let err = verify_draft_passing_candidate_with_content(
+                &portable,
+                &context,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Bytes,
+                1024,
+                1024,
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("metadata status differs"), "{err}");
         }
     }
 
