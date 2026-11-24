@@ -6,10 +6,12 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
+ENGINE_VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
 
 
 class PortableCliInterop(unittest.TestCase):
@@ -100,7 +102,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--external-evidence', str(root / 'evidence'), '--require-check', 'gate:7:article:source',
-                       '--validator-name', 'aexeo', '--validator-version', '0.0.24',
+                       '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION,
                        '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
             matched = subprocess.run(verify, capture_output=True, text=True)
             self.assertEqual(matched.returncode, 0, matched.stdout + matched.stderr)
@@ -111,7 +113,7 @@ class PortableCliInterop(unittest.TestCase):
                     ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
                 manifest.update(collection=None, external_evidence=str(root / 'evidence'),
                     evaluator_identity=str(root / 'evaluator'), validator_name='aexeo',
-                    validator_version='0.0.24', required_checks=['gate:7:article:source'],
+                    validator_version=ENGINE_VERSION, required_checks=['gate:7:article:source'],
                     fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_command = [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')]
@@ -164,7 +166,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
-                       '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+                       '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
             matched = subprocess.run(verify + ['--telemetry'], capture_output=True, text=True)
             self.assertEqual(matched.returncode, 0, matched.stderr)
             event = json.loads(matched.stderr)
@@ -178,7 +180,7 @@ class PortableCliInterop(unittest.TestCase):
                 native_manifest = {name: str(root / name) for name in
                     ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
                 native_manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
-                    validator_name='aexeo', validator_version='0.0.24',
+                    validator_name='aexeo', validator_version=ENGINE_VERSION,
                     required_checks=['gate:7:article:words'], fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'native-manifest').write_text(json.dumps(native_manifest), encoding='utf-8')
                 native_command = [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')]
@@ -274,11 +276,11 @@ class PortableCliInterop(unittest.TestCase):
                 verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
                 for artifact in (*artifacts, 'evaluator'):
                     verify += ['--' + artifact.replace('_', '-'), str(root / artifact)]
-                verify += ['--require-check', 'gate:7:article:always', '--validator-name', 'aexeo', '--validator-version', '0.0.24',
+                verify += ['--require-check', 'gate:7:article:always', '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION,
                            '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
                 manifest = {artifact: str(root / artifact) for artifact in artifacts}
                 manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'), validator_name='aexeo',
-                    validator_version='0.0.24', required_checks=['gate:7:article:always'], fresh_exit_code=0, fresh_timed_out=False)
+                    validator_version=ENGINE_VERSION, required_checks=['gate:7:article:always'], fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
@@ -351,11 +353,11 @@ class PortableCliInterop(unittest.TestCase):
                 for artifact in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator', 'collection'):
                     verify += ['--' + artifact.replace('_', '-'), str(root / artifact)]
                 verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
-                           '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+                           '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
                 manifest = {artifact: str(root / artifact) for artifact in
                     ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'collection')}
                 manifest.update(evaluator_identity=str(root / 'evaluator'), validator_name='aexeo',
-                    validator_version='0.0.24', required_checks=['gate:7:article:words'],
+                    validator_version=ENGINE_VERSION, required_checks=['gate:7:article:words'],
                     fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_env = dict(os.environ)
@@ -424,14 +426,14 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
-                       '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+                       '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
             native = os.environ.get('AETHYME_CLI_BIN')
             native_command = None
             if native:
                 manifest = {name: str(root / name) for name in
                     ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
                 manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
-                    validator_name='aexeo', validator_version='0.0.24',
+                    validator_name='aexeo', validator_version=ENGINE_VERSION,
                     required_checks=['gate:7:article:words'], fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_command = [native, 'content-gate', 'compare-v2', str(root / 'manifest')]
@@ -500,7 +502,7 @@ class PortableCliInterop(unittest.TestCase):
                 for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                     verify += ['--' + name.replace('_', '-'), str(root / name)]
                 verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo',
-                    '--validator-version', '0.0.24', '--fresh-exit-code', str(run.returncode), '--fresh-timed-out', 'false']
+                    '--validator-version', ENGINE_VERSION, '--fresh-exit-code', str(run.returncode), '--fresh-timed-out', 'false']
                 result = subprocess.run(verify, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 2 if blocking else 0, result.stdout + result.stderr)
                 self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -517,7 +519,7 @@ class PortableCliInterop(unittest.TestCase):
                     manifest = {name: str(root / name) for name in
                         ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
                     manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
-                        validator_name='aexeo', validator_version='0.0.24',
+                        validator_name='aexeo', validator_version=ENGINE_VERSION,
                         required_checks=['gate:7:article:words'], fresh_exit_code=run.returncode, fresh_timed_out=False)
                     (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
                     native_env = dict(os.environ)
@@ -576,7 +578,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
-                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', '0',
+                '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0',
                 '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -585,7 +587,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 runner += ['--' + name.replace('_', '-'), str(root / name)]
             runner += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
-                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--timeout-seconds', '180', '--']
+                '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--timeout-seconds', '180', '--']
             result = subprocess.run(runner + command, cwd=ROOT, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -645,7 +647,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
-                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', '0',
+                '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0',
                 '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -654,7 +656,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 runner += ['--' + name.replace('_', '-'), str(root / name)]
             runner += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
-                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--timeout-seconds', '180', '--']
+                '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--timeout-seconds', '180', '--']
             result = subprocess.run(runner + command, cwd=ROOT, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -739,7 +741,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
             verify += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
-                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+                '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
             checked = subprocess.run(verify, capture_output=True, text=True)
             self.assertEqual(checked.returncode, 0, checked.stderr)
             (root / 'old.txt').write_text('substituted old version', encoding='utf-8')
@@ -802,7 +804,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy',
                          'host_options', 'evaluator', 'external_evidence'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
-            verify += ['--require-check', 'gate:7:article:links', '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', str(run.returncode), '--fresh-timed-out', 'false']
+            verify += ['--require-check', 'gate:7:article:links', '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--fresh-exit-code', str(run.returncode), '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -811,7 +813,7 @@ class PortableCliInterop(unittest.TestCase):
                          'host_options', 'evaluator', 'external_evidence'):
                 runner += ['--' + name.replace('_', '-'), str(root / name)]
             runner += ['--require-check', 'gate:7:article:links', '--validator-name', 'aexeo',
-                       '--validator-version', '0.0.24', '--timeout-seconds', '180', '--telemetry', '--']
+                       '--validator-version', ENGINE_VERSION, '--timeout-seconds', '180', '--telemetry', '--']
             observed = subprocess.run(runner + command, cwd=ROOT, env=env,
                                       capture_output=True, text=True, check=False)
             self.assertEqual(observed.returncode, 0, observed.stderr)
@@ -823,7 +825,7 @@ class PortableCliInterop(unittest.TestCase):
                 manifest = {name: str(root / name) for name in
                             ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'external_evidence')}
                 manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
-                    validator_name='aexeo', validator_version='0.0.24',
+                    validator_name='aexeo', validator_version=ENGINE_VERSION,
                     required_checks=['gate:7:article:links'], fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_env = dict(os.environ)
@@ -911,7 +913,7 @@ class PortableCliInterop(unittest.TestCase):
                 for name in ('previous', 'fresh', 'base', 'after', *artifacts):
                     verify += ['--' + name.replace('_', '-'), str(root / name)]
                 verify += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:links',
-                    '--validator-name', 'aexeo', '--validator-version', '0.0.24',
+                    '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION,
                     '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
                 checked = subprocess.run(verify, capture_output=True, text=True)
                 self.assertEqual(checked.returncode, 0, checked.stderr)
@@ -920,7 +922,7 @@ class PortableCliInterop(unittest.TestCase):
                 for name in ('previous', 'base', 'after', *artifacts):
                     runner += ['--' + name.replace('_', '-'), str(root / name)]
                 runner += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:links',
-                    '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--timeout-seconds', '180', '--']
+                    '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--timeout-seconds', '180', '--']
                 checked = subprocess.run(runner + command, cwd=ROOT, env=env, capture_output=True, text=True)
                 self.assertEqual(checked.returncode, 0, checked.stderr)
                 self.assertFalse(json.loads(checked.stdout)['publication_authorized'])
@@ -976,7 +978,7 @@ class PortableCliInterop(unittest.TestCase):
             verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
-            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', str(result.returncode), '--fresh-timed-out', 'false']
+            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--fresh-exit-code', str(result.returncode), '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -985,7 +987,7 @@ class PortableCliInterop(unittest.TestCase):
                 manifest = {name: str(root / name) for name in
                             ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
                 manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
-                    validator_name='aexeo', validator_version='0.0.24',
+                    validator_name='aexeo', validator_version=ENGINE_VERSION,
                     required_checks=['gate:7:article:words'], fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
                 native_env = dict(os.environ)
@@ -1008,6 +1010,11 @@ class PortableCliInterop(unittest.TestCase):
 
     def test_actual_cli_and_python_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        # Historical vector stays immutable; only the real evaluator's host
+        # option changes with the workspace version under test.
+        host_options = json.loads(fixture['artifacts']['host_options'])
+        host_options['engine_version'] = ENGINE_VERSION
+        fixture['artifacts']['host_options'] = json.dumps(host_options, separators=(',', ':'))
         with tempfile.TemporaryDirectory(prefix='aexeo-v2-interop-') as directory:
             root = Path(directory)
             for name in ('base', 'after'):
@@ -1045,7 +1052,7 @@ class PortableCliInterop(unittest.TestCase):
             verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
-            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', str(result.returncode), '--fresh-timed-out', 'false']
+            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', ENGINE_VERSION, '--fresh-exit-code', str(result.returncode), '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['publication_authorized'], False)
@@ -1058,7 +1065,7 @@ class PortableCliInterop(unittest.TestCase):
                 native_manifest = {name: str(root / name) for name in
                     ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
                 native_manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
-                    validator_name='aexeo', validator_version='0.0.24',
+                    validator_name='aexeo', validator_version=ENGINE_VERSION,
                     required_checks=['gate:7:article:words'], fresh_exit_code=0, fresh_timed_out=False)
                 (root / 'native-manifest').write_text(json.dumps(native_manifest), encoding='utf-8')
                 native_command = [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')]
@@ -1107,7 +1114,7 @@ class PortableCliInterop(unittest.TestCase):
                 supervised_manifest = {name: str(root / name) for name in
                     ('previous', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
                 supervised_manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
-                    validator_name='aexeo', validator_version='0.0.24',
+                    validator_name='aexeo', validator_version=ENGINE_VERSION,
                     required_checks=['gate:7:article:words'], validator=[validator] + command[1:],
                     validator_sha256=hashlib.sha256(Path(validator).read_bytes()).hexdigest(),
                     env={}, timeout_seconds=30, additional={'preset': str(root / 'preset')})
