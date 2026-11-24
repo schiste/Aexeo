@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import verify_host_candidate_counts, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -40,11 +40,11 @@ class PortableComparison(unittest.TestCase):
         after = [{'entity_id': 'a', 'media_type': media, 'source': source}]
         policy = {'gates': [{'kind': 'word_count', 'id': 'words', 'min': 2}]}
         verdict = {'checks': [{'id': 'gate:1:a:words', 'status': 'passed'}], 'findings': []}
-        self.assertTrue(verify_host_candidate_counts(policy, verdict, after))
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, after))
         forged = copy.deepcopy(verdict)
         forged['checks'][0]['status'] = 'failed'
         with self.assertRaises(VerificationError):
-            verify_host_candidate_counts(policy, forged, after)
+            verify_host_candidate_projection(policy, forged, after)
         invalid_sources = (
             '{"schema":"aexeo.content-adapter/v1","text":null}',
             '{"schema":"aexeo.content-adapter/v1","text":"one two","block_ends":[999]}',
@@ -53,35 +53,60 @@ class PortableComparison(unittest.TestCase):
         )
         for invalid in invalid_sources:
             with self.subTest(source=invalid), self.assertRaises(VerificationError):
-                verify_host_candidate_counts(policy, verdict, [dict(after[0], source=invalid)])
+                verify_host_candidate_projection(policy, verdict, [dict(after[0], source=invalid)])
         bounded = dict(after[0], source='{"schema":"aexeo.content-adapter/v1","text":"éx","block_ends":[2]}')
-        self.assertTrue(verify_host_candidate_counts(policy, verdict, [bounded]))
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [bounded]))
         mixed_policy = {'gates': policy['gates'] + [{'kind': 'character_count', 'id': 'chars', 'max': 2}]}
         mixed_verdict = copy.deepcopy(verdict)
         mixed_verdict['checks'].append({'id': 'gate:1:a:chars', 'status': 'passed'})
-        self.assertTrue(verify_host_candidate_counts(mixed_policy, mixed_verdict, [bounded]))
+        self.assertTrue(verify_host_candidate_projection(mixed_policy, mixed_verdict, [bounded]))
         for ends in ('[1]', '[2,2]', '[true]', 'null'):
             invalid = dict(bounded, source=bounded['source'].replace('[2]', ends))
             with self.subTest(ends=ends), self.assertRaises(VerificationError):
-                verify_host_candidate_counts(policy, verdict, [invalid])
+                verify_host_candidate_projection(policy, verdict, [invalid])
         unsafe_policy = {'gates': [{'kind': 'link_count', 'id': 'links'}]}
         with self.assertRaises(VerificationError):
-            verify_host_candidate_counts(unsafe_policy, verdict, after)
+            verify_host_candidate_projection(unsafe_policy, verdict, after)
         for finding in ({'entity_id': 'a', 'location': {'line': 1, 'column': 1}},
                         {'location': {'line': 1, 'column': 1}}):
             verdict['findings'] = [finding]
             with self.subTest(finding=finding), self.assertRaises(VerificationError):
-                verify_host_candidate_counts(policy, verdict, after)
+                verify_host_candidate_projection(policy, verdict, after)
+
+    def test_host_required_headings_are_recomputed(self):
+        policy = {'gates': [{'kind': 'required_headings', 'id': 'head', 'headings': ['Intro', 'Fin']}]}
+        verdict = {'checks': [{'id': 'gate:1:a:head', 'status': 'passed'}], 'findings': []}
+        source = '{"schema":"aexeo.content-adapter/v1","text":"x","headings":["Intro","Fin"]}'
+        item = {'entity_id': 'a', 'media_type': 'application/vnd.aexeo.content-adapter+json', 'source': source}
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [item]))
+        for headings in ('["Intro"]', '[]', 'null', '[1]'):
+            changed = dict(item, source=source.replace('["Intro","Fin"]', headings))
+            with self.subTest(headings=headings), self.assertRaises(VerificationError):
+                verify_host_candidate_projection(policy, verdict, [changed])
+        missing = dict(item, source='{"schema":"aexeo.content-adapter/v1","text":"x"}')
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_projection(policy, verdict, [missing])
+        verdict['checks'][0]['status'] = 'not_checked'
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [missing]))
 
     def test_bound_host_projection_accepts_only_recomputed_counts(self):
         import hashlib
-        source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1]}'
+        source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1],"headings":["Intro"]}'
         digest = hashlib.sha256(source.encode()).hexdigest()
         media = 'application/vnd.aexeo.content-adapter+json'
         change = json.loads(self.artifacts['change'])
         change['entries'][0]['media_type'] = media
         change['entries'][0]['after'] = {'inline': source, 'sha256': digest}
         self.artifacts['change'] = self.encoded(change)
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'].append({'kind': 'required_headings', 'id': 'head', 'severity': 'warning',
+                                'blocking': True, 'headings': ['Intro']})
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        self.required.append('gate:7:article:head')
+        for envelope in (self.previous, self.fresh):
+            envelope['verdict']['checks'].append({'id': 'gate:7:article:head', 'status': 'passed', 'blocking': True})
+            envelope['verdict']['summary']['checks'] += 1
+            envelope['verdict']['summary']['passed'] += 1
         self.fixture['after'][0].update(media_type=media, source=source, sha256=digest)
         candidate = overlay(self.fixture['base'], change, self.fixture['after'])
         inputs = dict(self.artifacts, collection=None, external_evidence=None,

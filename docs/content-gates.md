@@ -2046,8 +2046,11 @@ for these findings, and rejects embedded metadata when metadata gates are
 selected. The experimental v2 Rust verifier and independent Python comparator
 accept only a narrow host subset: the JSON object must contain exactly the
 schema and string text fields, optionally with ordered UTF-8 byte boundaries
-in `block_ends`, and the preset must contain only word-count or character-count
-gates. Block boundaries split adjacent words without changing character counts. They independently recompute those outcomes, reject
+in `block_ends` and a string array of observed `headings`. The preset must
+contain only word-count, character-count or required-headings gates. Missing
+heading observations cannot satisfy a checked heading gate. Block boundaries
+split adjacent words without changing character counts. The verifiers
+independently recompute outcomes, reject
 claimed source positions for host findings, and bind the complete snapshot
 bytes. Other host capabilities remain unsupported and fail closed. These checks
 do not establish host observation completeness, source freshness, or authorize

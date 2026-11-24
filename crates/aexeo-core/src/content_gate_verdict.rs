@@ -1422,7 +1422,7 @@ fn verify_candidate_final_newlines(
 // Rich formats can alter the projected text and are deliberately excluded.
 // Deliberately narrow portable host profile. Neither a digest nor an asserted
 // capability proves that arbitrary host observations correspond to content.
-fn verify_host_candidate_counts(
+fn verify_host_candidate_projection(
     verdict: &Verdict,
     preset: &ContentPreset,
     after: &[crate::content_candidate::CandidateItem],
@@ -1438,11 +1438,18 @@ fn verify_host_candidate_counts(
     if preset.gates.iter().any(|gate| {
         !matches!(
             gate,
-            ContentGate::WordCount { .. } | ContentGate::CharacterCount { .. }
+            ContentGate::WordCount { .. }
+                | ContentGate::CharacterCount { .. }
+                | ContentGate::RequiredHeadings { .. }
         )
     }) {
-        bail!("host adapter portable verification only supports count gates");
+        bail!("host adapter portable verification does not support this gate");
     }
+    let checks: std::collections::BTreeMap<_, _> = verdict
+        .checks
+        .iter()
+        .map(|check| (check.id.as_str(), check))
+        .collect();
     let mut plain = Vec::with_capacity(host.len());
     let mut word_counts = std::collections::BTreeMap::new();
     for item in host {
@@ -1452,7 +1459,9 @@ fn verify_host_candidate_counts(
         let object = value
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("invalid portable host projection"))?;
-        if !(object.len() == 2 || (object.len() == 3 && object.contains_key("block_ends")))
+        if object
+            .keys()
+            .any(|key| !matches!(key.as_str(), "schema" | "text" | "block_ends" | "headings"))
             || object.get("schema").and_then(|v| v.as_str()) != Some("aexeo.content-adapter/v1")
         {
             bail!("unsupported portable host projection");
@@ -1461,6 +1470,55 @@ fn verify_host_candidate_counts(
             .get("text")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("host text is unavailable"))?;
+        let headings = object
+            .get("headings")
+            .map(|value| -> Result<std::collections::BTreeSet<&str>> {
+                let values = value
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("invalid host headings"))?;
+                if values.len() > 100_000 {
+                    bail!("adapter observation limit exceeded");
+                }
+                values
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .ok_or_else(|| anyhow::anyhow!("invalid host heading"))
+                    })
+                    .collect()
+            })
+            .transpose()?;
+        for gate in &preset.gates {
+            if let ContentGate::RequiredHeadings {
+                id,
+                headings: required,
+                ..
+            } = gate
+            {
+                let check_id = format!("gate:{}:{}:{}", item.entity_id.len(), item.entity_id, id);
+                let check = checks
+                    .get(check_id.as_str())
+                    .copied()
+                    .ok_or_else(|| anyhow::anyhow!("resolved policy check is missing"))?;
+                if check.status == CheckStatus::NotChecked {
+                    continue;
+                }
+                let actual = headings
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("host headings unavailable"))?;
+                let expected = if required
+                    .iter()
+                    .all(|heading| actual.contains(heading.as_str()))
+                {
+                    CheckStatus::Passed
+                } else {
+                    CheckStatus::Failed
+                };
+                if check.status != expected {
+                    bail!("host heading status differs from observations");
+                }
+            }
+        }
         let mut word_count = 0usize;
         let mut start = 0usize;
         if let Some(value) = object.get("block_ends") {
@@ -1781,8 +1839,11 @@ pub fn verify_draft_passing_candidate_with_content<
         .as_ref()
         .and_then(|value| value.links.as_ref())
         .or(legacy_links.as_ref());
-    let host_projection_verified =
-        verify_host_candidate_counts(&envelope.verdict, context.decision.preset, context.after)?;
+    let host_projection_verified = verify_host_candidate_projection(
+        &envelope.verdict,
+        context.decision.preset,
+        context.after,
+    )?;
     verify_candidate_policy_coverage_with_evidence(
         &envelope.verdict,
         context.decision.change,
@@ -9290,12 +9351,14 @@ mod tests {
             links: None,
         };
         assert!(
-            verify_host_candidate_counts(&verdict, &policy, std::slice::from_ref(&item)).unwrap()
+            verify_host_candidate_projection(&verdict, &policy, std::slice::from_ref(&item))
+                .unwrap()
         );
         let mut forged = verdict.clone();
         forged.checks[0].status = CheckStatus::Failed;
         assert!(
-            verify_host_candidate_counts(&forged, &policy, std::slice::from_ref(&item)).is_err()
+            verify_host_candidate_projection(&forged, &policy, std::slice::from_ref(&item))
+                .is_err()
         );
         for source in [
             r#"{"schema":"aexeo.content-adapter/v1","text":null}"#,
@@ -9304,7 +9367,7 @@ mod tests {
         ] {
             let mut invalid = item.clone();
             invalid.source = source.into();
-            assert!(verify_host_candidate_counts(&verdict, &policy, &[invalid]).is_err());
+            assert!(verify_host_candidate_projection(&verdict, &policy, &[invalid]).is_err());
         }
         let boundary_source =
             r#"{"schema":"aexeo.content-adapter/v1","text":"éx","block_ends":[2]}"#;
@@ -9324,7 +9387,7 @@ mod tests {
         let mut boundary_item = item.clone();
         boundary_item.source = boundary_source.into();
         assert!(
-            verify_host_candidate_counts(
+            verify_host_candidate_projection(
                 &boundary_verdict,
                 &policy,
                 std::slice::from_ref(&boundary_item)
@@ -9333,13 +9396,55 @@ mod tests {
         );
         boundary_item.source = boundary_source.replace("[2]", "[1]");
         assert!(
-            verify_host_candidate_counts(&boundary_verdict, &policy, &[boundary_item]).is_err()
+            verify_host_candidate_projection(&boundary_verdict, &policy, &[boundary_item]).is_err()
         );
         let unsupported = ContentPreset::from_toml(
             "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n",
         )
         .unwrap();
-        assert!(verify_host_candidate_counts(&verdict, &unsupported, &[item]).is_err());
+        assert!(verify_host_candidate_projection(&verdict, &unsupported, &[item]).is_err());
+    }
+
+    #[test]
+    fn portable_host_heading_status_is_recomputed() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='host-headings'\n[[gates]]\nid='head'\nkind='required_headings'\nheadings=['Intro','Fin']\nblocking=true\n").unwrap();
+        let source =
+            r#"{"schema":"aexeo.content-adapter/v1","text":"x","headings":["Intro","Fin"]}"#;
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let verdict = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        let mut item = crate::content_candidate::CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: crate::content_adapter::MEDIA_TYPE.into(),
+            revision: None,
+            sha256: format!("{:x}", Sha256::digest(source.as_bytes())),
+            source: source.into(),
+            links: None,
+        };
+        assert!(
+            verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                .unwrap()
+        );
+        item.source = source.replace(r#"["Intro","Fin"]"#, r#"["Intro"]"#);
+        assert!(
+            verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                .is_err()
+        );
+        item.source = r#"{"schema":"aexeo.content-adapter/v1","text":"x"}"#.into();
+        assert!(verify_host_candidate_projection(&verdict, &preset, &[item]).is_err());
     }
 
     #[test]
