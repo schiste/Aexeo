@@ -105,6 +105,14 @@ class PortableComparison(unittest.TestCase):
         for level in (None, 1, 6):
             validate_heading_gate(dict(gates[2], initial_level=level))
 
+    def test_comparator_rejects_invalid_gate_kinds_cleanly(self):
+        for invalid in (None, [], {}, {'kind': []}):
+            policy = json.loads(self.artifacts['resolved_policy'])
+            policy['gates'] = [invalid]
+            self.artifacts['resolved_policy'] = self.encoded(policy)
+            with self.subTest(gate=invalid), self.assertRaisesRegex(VerificationError, 'invalid resolved gate'):
+                self.check()
+
     def test_heading_policy_validation_applies_when_not_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])
         change = json.loads(self.artifacts['change'])

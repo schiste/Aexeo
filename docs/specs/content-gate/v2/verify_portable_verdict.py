@@ -652,8 +652,9 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     policy = parse(artifacts['resolved_policy'])
     if isinstance(policy, dict) and isinstance(policy.get('gates'), list):
         for gate in policy['gates']:
-            if isinstance(gate, dict):
-                validate_heading_gate(gate)
+            if not isinstance(gate, dict) or not isinstance(gate.get('kind'), str):
+                raise VerificationError('invalid resolved gate')
+            validate_heading_gate(gate)
     if not isinstance(policy, dict) or 'name' not in policy:
         raise VerificationError('resolved policy name is unavailable')
     text(policy['name'], empty=False)
