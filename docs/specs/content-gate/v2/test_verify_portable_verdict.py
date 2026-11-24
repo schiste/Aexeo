@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import compare, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import compare, plain_text_word_count, verify_plain_word_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -200,6 +200,48 @@ class PortableComparison(unittest.TestCase):
         policy['gates'] = [dict(base, kind='character_count', ignore_whitespace=1)]
         with self.assertRaises(VerificationError):
             require_policy_coverage(policy, change, False, verdict)
+
+    def test_plain_word_count_uses_rust_whitespace_boundaries(self):
+        self.assertEqual(plain_text_word_count(''), 0)
+        self.assertEqual(plain_text_word_count('é\u00a0word\u0085next'), 3)
+        self.assertEqual(plain_text_word_count('a\x1cb'), 1)
+
+    def test_plain_word_status_checks_bounds_and_preserves_unavailable(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        gate = policy['gates'][0]
+        verdict = self.previous['verdict']
+        check = verdict['checks'][0]
+        after = self.fixture['after']
+        for minimum, maximum, status in [(1, 1, 'passed'), (2, None, 'failed'),
+                                         (None, 0, 'failed'), (None, 2, 'passed')]:
+            gate.update(min=minimum, max=maximum)
+            check['status'] = status
+            verify_plain_word_count_statuses(policy, verdict, after, {})
+            check['status'] = 'passed' if status == 'failed' else 'failed'
+            with self.assertRaisesRegex(VerificationError, 'word count status differs'):
+                verify_plain_word_count_statuses(policy, verdict, after, {})
+            check['status'] = 'not_checked'
+            verify_plain_word_count_statuses(policy, verdict, after, {})
+        # Rich content uses a projection the comparator does not reconstruct.
+        after[0]['media_type'] = 'text/markdown'
+        check['status'] = 'failed'
+        verify_plain_word_count_statuses(policy, verdict, after, {})
+
+    def test_rebound_plain_text_word_count_cannot_claim_a_false_pass(self):
+        # A matching binding and two matching verdicts are insufficient if
+        # the supplied one-word content cannot satisfy the bound minimum.
+        policy = json.loads(self.artifacts['resolved_policy'])
+        policy['gates'][0]['min'] = 2
+        self.artifacts['resolved_policy'] = self.encoded(policy)
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        with self.assertRaisesRegex(VerificationError, 'word count status differs'):
+            self.check()
 
     def test_policy_coverage_rejects_rebound_omitted_gate(self):
         # Both verdicts agree and the binding matches the expanded policy; a
