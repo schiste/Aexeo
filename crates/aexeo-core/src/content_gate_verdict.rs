@@ -1444,6 +1444,7 @@ fn verify_host_candidate_counts(
         bail!("host adapter portable verification only supports count gates");
     }
     let mut plain = Vec::with_capacity(host.len());
+    let mut word_counts = std::collections::BTreeMap::new();
     for item in host {
         let value = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(
             item.source.as_bytes(),
@@ -1451,7 +1452,7 @@ fn verify_host_candidate_counts(
         let object = value
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("invalid portable host projection"))?;
-        if object.len() != 2
+        if !(object.len() == 2 || (object.len() == 3 && object.contains_key("block_ends")))
             || object.get("schema").and_then(|v| v.as_str()) != Some("aexeo.content-adapter/v1")
         {
             bail!("unsupported portable host projection");
@@ -1460,6 +1461,29 @@ fn verify_host_candidate_counts(
             .get("text")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("host text is unavailable"))?;
+        let mut word_count = 0usize;
+        let mut start = 0usize;
+        if let Some(value) = object.get("block_ends") {
+            let ends = value
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("invalid block boundaries"))?;
+            if ends.len() > 100_000 {
+                bail!("adapter observation limit exceeded");
+            }
+            for (index, end) in ends.iter().enumerate() {
+                let end = end
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .ok_or_else(|| anyhow::anyhow!("invalid block boundaries"))?;
+                if end > text.len() || !text.is_char_boundary(end) || (index > 0 && end <= start) {
+                    bail!("invalid block boundaries");
+                }
+                word_count += text[start..end].split_whitespace().count();
+                start = end;
+            }
+        }
+        word_count += text[start..].split_whitespace().count();
+        word_counts.insert(item.entity_id.clone(), word_count);
         if verdict.findings.iter().any(|finding| {
             (finding.entity_id.is_none() || finding.entity_id.as_deref() == Some(&item.entity_id))
                 && finding.location.is_some()
@@ -1471,7 +1495,7 @@ fn verify_host_candidate_counts(
         projected.source = text.into();
         plain.push(projected);
     }
-    verify_candidate_plain_counts(verdict, preset, &plain, false)?;
+    verify_candidate_plain_counts_with_words(verdict, preset, &plain, false, Some(&word_counts))?;
     Ok(true)
 }
 
@@ -1480,6 +1504,16 @@ fn verify_candidate_plain_counts(
     preset: &ContentPreset,
     after: &[crate::content_candidate::CandidateItem],
     plain_text_paragraphs: bool,
+) -> Result<()> {
+    verify_candidate_plain_counts_with_words(verdict, preset, after, plain_text_paragraphs, None)
+}
+
+fn verify_candidate_plain_counts_with_words(
+    verdict: &Verdict,
+    preset: &ContentPreset,
+    after: &[crate::content_candidate::CandidateItem],
+    plain_text_paragraphs: bool,
+    word_counts: Option<&std::collections::BTreeMap<String, usize>>,
 ) -> Result<()> {
     use crate::content_gate::ContentGate;
     if !preset.gates.iter().any(|gate| {
@@ -1516,9 +1550,11 @@ fn verify_candidate_plain_counts(
                 continue;
             }
             let count = match gate {
-                ContentGate::WordCount { .. } => {
-                    *words.get_or_insert_with(|| item.source.split_whitespace().count())
-                }
+                ContentGate::WordCount { .. } => *words.get_or_insert_with(|| {
+                    word_counts
+                        .and_then(|counts| counts.get(&item.entity_id).copied())
+                        .unwrap_or_else(|| item.source.split_whitespace().count())
+                }),
                 ContentGate::CharacterCount {
                     ignore_whitespace, ..
                 } => *chars[usize::from(*ignore_whitespace)].get_or_insert_with(|| {
@@ -9263,13 +9299,42 @@ mod tests {
         );
         for source in [
             r#"{"schema":"aexeo.content-adapter/v1","text":null}"#,
-            r#"{"schema":"aexeo.content-adapter/v1","text":"one two","block_ends":[3]}"#,
+            r#"{"schema":"aexeo.content-adapter/v1","text":"one two","block_ends":[999]}"#,
             r#"{"schema":"aexeo.content-adapter/v1","text":"one","text":"two"}"#,
         ] {
             let mut invalid = item.clone();
             invalid.source = source.into();
             assert!(verify_host_candidate_counts(&verdict, &policy, &[invalid]).is_err());
         }
+        let boundary_source =
+            r#"{"schema":"aexeo.content-adapter/v1","text":"éx","block_ends":[2]}"#;
+        let mut boundary_change = change.clone();
+        let state = boundary_change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(boundary_source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(boundary_source.as_bytes()));
+        let boundary_verdict = evaluate_change(
+            &boundary_change,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        let mut boundary_item = item.clone();
+        boundary_item.source = boundary_source.into();
+        assert!(
+            verify_host_candidate_counts(
+                &boundary_verdict,
+                &policy,
+                std::slice::from_ref(&boundary_item)
+            )
+            .is_ok()
+        );
+        boundary_item.source = boundary_source.replace("[2]", "[1]");
+        assert!(
+            verify_host_candidate_counts(&boundary_verdict, &policy, &[boundary_item]).is_err()
+        );
         let unsupported = ContentPreset::from_toml(
             "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n",
         )
