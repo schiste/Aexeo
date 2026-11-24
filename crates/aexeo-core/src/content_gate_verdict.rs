@@ -1162,8 +1162,14 @@ fn verify_candidate_policy_coverage(
         has_collection,
         has_link_observations,
         None,
-        false,
+        ProjectionVerification::default(),
     )
+}
+
+#[derive(Default)]
+struct ProjectionVerification {
+    plain_text_paragraphs: bool,
+    host_projection_verified: bool,
 }
 
 fn verify_candidate_policy_coverage_with_evidence(
@@ -1173,8 +1179,12 @@ fn verify_candidate_policy_coverage_with_evidence(
     has_collection: bool,
     has_link_observations: bool,
     sources: Option<&ChangeEvidenceInventory>,
-    plain_text_paragraphs: bool,
+    projection: ProjectionVerification,
 ) -> Result<()> {
+    let ProjectionVerification {
+        plain_text_paragraphs,
+        host_projection_verified,
+    } = projection;
     preset.validate()?;
     let checks: std::collections::BTreeMap<_, _> = verdict
         .checks
@@ -1215,7 +1225,8 @@ fn verify_candidate_policy_coverage_with_evidence(
             !matches!(
                 entry.media_type.as_str(),
                 "text/plain" | "text/markdown" | "text/html"
-            )
+            ) && !(host_projection_verified
+                && entry.media_type == crate::content_adapter::MEDIA_TYPE)
         })
     {
         bail!("item media type is not supported by this evaluator");
@@ -1409,6 +1420,61 @@ fn verify_candidate_final_newlines(
 
 // Recompute the simple plain-text projections from the already bound source.
 // Rich formats can alter the projected text and are deliberately excluded.
+// Deliberately narrow portable host profile. Neither a digest nor an asserted
+// capability proves that arbitrary host observations correspond to content.
+fn verify_host_candidate_counts(
+    verdict: &Verdict,
+    preset: &ContentPreset,
+    after: &[crate::content_candidate::CandidateItem],
+) -> Result<bool> {
+    use crate::content_gate::ContentGate;
+    let host: Vec<_> = after
+        .iter()
+        .filter(|item| item.media_type == crate::content_adapter::MEDIA_TYPE)
+        .collect();
+    if host.is_empty() {
+        return Ok(false);
+    }
+    if preset.gates.iter().any(|gate| {
+        !matches!(
+            gate,
+            ContentGate::WordCount { .. } | ContentGate::CharacterCount { .. }
+        )
+    }) {
+        bail!("host adapter portable verification only supports count gates");
+    }
+    let mut plain = Vec::with_capacity(host.len());
+    for item in host {
+        let value = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(
+            item.source.as_bytes(),
+        )?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("invalid portable host projection"))?;
+        if object.len() != 2
+            || object.get("schema").and_then(|v| v.as_str()) != Some("aexeo.content-adapter/v1")
+        {
+            bail!("unsupported portable host projection");
+        }
+        let text = object
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("host text is unavailable"))?;
+        if verdict.findings.iter().any(|finding| {
+            (finding.entity_id.is_none() || finding.entity_id.as_deref() == Some(&item.entity_id))
+                && finding.location.is_some()
+        }) {
+            bail!("host finding cannot claim a source position");
+        }
+        let mut projected = item.clone();
+        projected.media_type = "text/plain".into();
+        projected.source = text.into();
+        plain.push(projected);
+    }
+    verify_candidate_plain_counts(verdict, preset, &plain, false)?;
+    Ok(true)
+}
+
 fn verify_candidate_plain_counts(
     verdict: &Verdict,
     preset: &ContentPreset,
@@ -1679,6 +1745,8 @@ pub fn verify_draft_passing_candidate_with_content<
         .as_ref()
         .and_then(|value| value.links.as_ref())
         .or(legacy_links.as_ref());
+    let host_projection_verified =
+        verify_host_candidate_counts(&envelope.verdict, context.decision.preset, context.after)?;
     verify_candidate_policy_coverage_with_evidence(
         &envelope.verdict,
         context.decision.change,
@@ -1686,7 +1754,10 @@ pub fn verify_draft_passing_candidate_with_content<
         context.decision.collection.is_some(),
         snapshots.is_some(),
         sources,
-        context.decision.plain_text_paragraphs,
+        ProjectionVerification {
+            plain_text_paragraphs: context.decision.plain_text_paragraphs,
+            host_projection_verified,
+        },
     )?;
     verify_candidate_metadata_statuses(
         &envelope.verdict,
@@ -4221,7 +4292,7 @@ mod tests {
                             false,
                             false,
                             Some(&sources),
-                            false,
+                            ProjectionVerification::default(),
                         )
                         .is_ok()
                     );
@@ -4408,7 +4479,16 @@ mod tests {
                     for media in ["text/plain", "text/markdown", "text/html"] {
                         change.entries[0].media_type = media.into();
                         let result = verify_candidate_policy_coverage_with_evidence(
-                            &verdict, &change, &policy, false, false, None, enabled,
+                            &verdict,
+                            &change,
+                            &policy,
+                            false,
+                            false,
+                            None,
+                            ProjectionVerification {
+                                plain_text_paragraphs: enabled,
+                                ..Default::default()
+                            },
                         );
                         assert_eq!(
                             result.is_ok(),
@@ -9143,6 +9223,58 @@ mod tests {
             location(":links"),
             vec![Some(protocol::Location { line: 5, column: 1 })]
         );
+    }
+
+    #[test]
+    fn portable_host_counts_are_recomputed_and_unverified_shapes_are_rejected() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml("version=1\nname='host'\n[[gates]]\nid='words'\nkind='word_count'\nmin=2\nblocking=true\n").unwrap();
+        let source = r#"{"schema":"aexeo.content-adapter/v1","text":"one two"}"#;
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let verdict = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        let item = crate::content_candidate::CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: crate::content_adapter::MEDIA_TYPE.into(),
+            revision: None,
+            sha256: format!("{:x}", Sha256::digest(source.as_bytes())),
+            source: source.into(),
+            links: None,
+        };
+        assert!(
+            verify_host_candidate_counts(&verdict, &policy, std::slice::from_ref(&item)).unwrap()
+        );
+        let mut forged = verdict.clone();
+        forged.checks[0].status = CheckStatus::Failed;
+        assert!(
+            verify_host_candidate_counts(&forged, &policy, std::slice::from_ref(&item)).is_err()
+        );
+        for source in [
+            r#"{"schema":"aexeo.content-adapter/v1","text":null}"#,
+            r#"{"schema":"aexeo.content-adapter/v1","text":"one two","block_ends":[3]}"#,
+            r#"{"schema":"aexeo.content-adapter/v1","text":"one","text":"two"}"#,
+        ] {
+            let mut invalid = item.clone();
+            invalid.source = source.into();
+            assert!(verify_host_candidate_counts(&verdict, &policy, &[invalid]).is_err());
+        }
+        let unsupported = ContentPreset::from_toml(
+            "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n",
+        )
+        .unwrap();
+        assert!(verify_host_candidate_counts(&verdict, &unsupported, &[item]).is_err());
     }
 
     #[test]

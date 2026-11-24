@@ -843,6 +843,10 @@ registry before considering the release delivered.
   Ambiguous, hidden or malformed markup remains unmapped; this does not assert
   rendered visibility or assess the meaning of code examples.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  Experimental v2 verification now recomputes word and character count outcomes
+  for strictly bounded text-only host projections in both Rust and the Python
+  comparator. Additional host observations and gates remain unsupported; this
+  does not establish freshness, host provenance, or publication authority.
   The conservative HTML source mapper preserves positions through explicitly
   nested bidirectional inline elements, including Arabic text and links
   ([PR #705](https://github.com/schiste/Aexeo/pull/705)). Hidden or malformed

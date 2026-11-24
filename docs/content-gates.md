@@ -2043,8 +2043,14 @@ inventory; embedded host metadata is rejected when these gates are selected.
 The v1 `content-change` evaluator also accepts this explicit media type and
 binds the whole JSON as content. It does not currently attach source positions
 for these findings, and rejects embedded metadata when metadata gates are
-selected. The experimental v2 independent verifier does not yet accept this
-media type. Neither flow establishes source freshness or authorizes publication.
+selected. The experimental v2 Rust verifier and independent Python comparator
+accept only a narrow host subset: the JSON object must contain exactly the
+schema and string text fields, and the preset must contain only word-count or
+character-count gates. They independently recompute those outcomes, reject
+claimed source positions for host findings, and bind the complete snapshot
+bytes. Other host capabilities remain unsupported and fail closed. These checks
+do not establish host observation completeness, source freshness, or authorize
+publication.
 
 ### Experimental incremental batches
 

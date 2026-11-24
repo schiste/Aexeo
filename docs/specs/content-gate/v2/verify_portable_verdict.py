@@ -373,7 +373,35 @@ def collection_uniqueness_status(projection, field, group):
     return 'failed' if duplicate else 'passed'
 
 
-def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None, plain_text_paragraphs=False, collection_projection=None):
+def verify_host_candidate_counts(policy, verdict, after):
+    """Recompute a deliberately narrow host profile; reject all other observations."""
+    media = 'application/vnd.aexeo.content-adapter+json'
+    host = [item for item in after if item['media_type'] == media]
+    if not host:
+        return False
+    if (not isinstance(policy, dict) or not isinstance(policy.get('gates'), list)
+            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count'}
+                   for gate in policy['gates'])):
+        raise VerificationError('host adapter portable verification only supports count gates')
+    plain = []
+    for item in host:
+        projection = parse(item['source'].encode('utf-8'))
+        if (not isinstance(projection, dict) or set(projection) != {'schema', 'text'}
+                or projection['schema'] != 'aexeo.content-adapter/v1'
+                or not isinstance(projection['text'], str)):
+            raise VerificationError('unsupported portable host projection')
+        text(projection['text'])
+        if any((finding.get('entity_id') is None or finding.get('entity_id') == item['entity_id'])
+               and finding.get('location') is not None
+               for finding in verdict.get('findings', [])):
+            raise VerificationError('host finding cannot claim a source position')
+        plain.append(dict(item, media_type='text/plain', source=projection['text']))
+    verify_plain_word_count_statuses(policy, verdict, plain, {})
+    verify_plain_character_count_statuses(policy, verdict, plain, {})
+    return True
+
+
+def require_policy_coverage(policy, change, has_collection, verdict, has_link_observations=False, sources=None, plain_text_paragraphs=False, collection_projection=None, host_projection_verified=False):
     """Reject a verdict omitting a configured gate instance or its blocking flag."""
     if (not isinstance(policy, dict) or set(policy) != {'version', 'name', 'gates'}
             or type(policy['version']) is not int or policy['version'] != 1
@@ -430,7 +458,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
     needs_items = any(not (gate['kind'] == 'unique_collection_metadata' and has_collection)
                       for gate in policy['gates'])
     if needs_items and any(entry.get('after') is not None and entry['media_type'] not in
-                           {'text/plain', 'text/markdown', 'text/html'} for entry in change['entries']):
+                           ({'text/plain', 'text/markdown', 'text/html'} | ({'application/vnd.aexeo.content-adapter+json'} if host_projection_verified else set())) for entry in change['entries']):
         raise VerificationError('item media type is not supported by this evaluator')
     collection_cache = {}
     collection_work = 0
@@ -571,7 +599,8 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (links is not None) or source_bound != (sources is not None):
             raise VerificationError('external evidence does not match the verdict profile')
         validate_verdict(verdict)
-        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'], collection_projection)
+        host_verified = verify_host_candidate_counts(policy, verdict, after)
+        coverage_counts = require_policy_coverage(policy, change, collection is not None, verdict, links is not None, sources, host_options['plain_text_paragraphs'], collection_projection, host_verified)
         verify_plain_word_count_statuses(policy, verdict, after, word_counts)
         verify_plain_character_count_statuses(policy, verdict, after, character_counts)
         verify_plain_paragraph_count_statuses(policy, verdict, after, paragraph_counts)
