@@ -1125,6 +1125,15 @@ missing fields retain observed prose but make body capabilities unavailable.
   correspondence to the exact revision.
 
 
+### Incremental parity and local performance investigation
+
+A regression compares incremental and full item reports with an unsorted base
+and a mixed create, update, delete and rename change, including report reuse.
+This synthetic fixture does not establish parity for all gates or host data.
+A local 256-item, 16-proposal comparison of a proposed baseline-index cache
+produced identical reports but did not establish a performance gain; the cache
+was not retained. These measurements are not a production performance claim.
+
 ### Incremental report source locations
 
 The experimental incremental CLI offers opt-in source locations for supported
