@@ -852,7 +852,14 @@ registry before considering the release delivered.
   comparator. A real cross-process check on 2026-11-24 found that the installed
   Aethyme native comparator rejects the host adapter media type as
   `not_matched`; the Python comparator accepted the same generated candidate.
-  Native support and cross-process parity for these host gates remain open.
+  On 2026-11-26, the full 22-test interoperation suite passed without skips
+  against Aexeo 0.0.26 and a native Aethyme binary built from the synchronized
+  candidate `fb0fe26744ed`, including all eight supported host gates and
+  rejection of modified candidate bytes. The Aexeo test is merged in
+  [#998](https://github.com/schiste/Aexeo/pull/998); native support remains
+  pending merge of [Aethyme #2004](https://github.com/schiste/Aethyme/pull/2004)
+  and delivery in an installed Aethyme release. This offline test does not
+  establish provenance or authorize publication.
   Additional host observations and gates remain unsupported; this does not
   establish freshness, host provenance, or publication authority.
   The conservative HTML source mapper preserves positions through explicitly
