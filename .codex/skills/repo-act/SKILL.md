@@ -436,6 +436,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For EmDash gate report tests, an empty `measurements` map may be omitted
   entirely in serialized JSON. Assert the absence of individual measurements
   with the containing map optional, and separately check observed values.
+  The report `preset` is the preset display name, which can differ from the
+  lookup key. For packaged preset smoke tests, assert the expected gate,
+  capability and status instead of assuming those names are identical.
 - Test unknown fields inside every tagged enum variant, including unit variants:
   Serde may ignore extra fields on an internally tagged unit variant even with
   `deny_unknown_fields`; an empty struct variant can enforce rejection.
