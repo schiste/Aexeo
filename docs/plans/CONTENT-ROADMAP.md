@@ -856,9 +856,9 @@ registry before considering the release delivered.
   against Aexeo 0.0.26 and a native Aethyme binary built from the synchronized
   candidate `fb0fe26744ed`, including all eight supported host gates and
   rejection of modified candidate bytes. The Aexeo test is merged in
-  [#998](https://github.com/schiste/Aexeo/pull/998); native support remains
-  pending merge of [Aethyme #2004](https://github.com/schiste/Aethyme/pull/2004)
-  and delivery in an installed Aethyme release. This offline test does not
+  [#998](https://github.com/schiste/Aexeo/pull/998); native support was merged
+  in [Aethyme #2004](https://github.com/schiste/Aethyme/pull/2004) and remains
+  pending delivery in an installed Aethyme release. This offline test does not
   establish provenance or authorize publication.
   Additional host observations and gates remain unsupported; this does not
   establish freshness, host provenance, or publication authority.
