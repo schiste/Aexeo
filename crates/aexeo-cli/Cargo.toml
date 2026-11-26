@@ -15,8 +15,8 @@ csv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ring = "0.17.14"
-aexeo-core = { version = "0.0.26", path = "../aexeo-core" }
-aexeo-contracts = { version = "0.0.26", path = "../aexeo-contracts" }
+aexeo-core = { version = "0.0.27", path = "../aexeo-core" }
+aexeo-contracts = { version = "0.0.27", path = "../aexeo-contracts" }
 
 [dev-dependencies]
-tempfile = { version = "0.0.26", path = "../tempfile" }
+tempfile = { version = "0.0.27", path = "../tempfile" }

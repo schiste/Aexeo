@@ -101,6 +101,15 @@ independent final-newline checks. Mapping identifies the supplied snapshot; it
 does not establish source freshness or authorize publication. The experimental
 portable protocol and npm package remain separate from the CLI release.
 
+### Upgrading from 0.0.26 to 0.0.27
+
+Regenerate offline input and observed-link bound verdicts with the new engine;
+retain earlier verdicts as historical evidence. This CLI includes independent
+verification of supported host-adapter word, character, paragraph and heading
+checks. Host projections are assertions, not evidence of provenance or
+freshness, and verification does not authorize publication. The portable v2
+protocol remains experimental. The EmDash npm package is versioned separately.
+
 ## CLI Release Artifacts
 
 Package release assets:
