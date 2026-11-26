@@ -119,6 +119,16 @@ publishing 0.9.5 and host-side validation remain open.
   revision access on the target host, then verify its connected MCP actions and
   permissions against a real revision. Repository support alone does not expose
   an action through an already connected host.
+  - Release update, 2026-11-26: npm `@aeptus/aexeo-emdash@0.9.6`
+    is published and is the `latest` dist-tag. Its registry integrity matches
+    the locally built archive from the `v0.0.27` source tree. The package
+    built successfully; its real-WASM integration suite and a packaged
+    `readability-paragraphs` smoke test passed. Publication alone does not
+    establish installation, preset activation, MCP consent or revision access
+    on any host. The CLI [v0.0.27 release](https://github.com/schiste/Aexeo/releases/tag/v0.0.27)
+    and [Homebrew formula](https://github.com/schiste/homebrew-tap/pull/7)
+    are also published; all release asset checksums and the macOS binary
+    version were independently checked after download.
   - Preview deployment update, 2026-11-24: the published 0.9.5 archive's
     registry integrity matched the tested archive. Aeptus installed the exact
     version and enabled article and glossary presets plus revision-audit
