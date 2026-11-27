@@ -1,0 +1,1 @@
+{"name":"aexeo-configured-plugin-regression","main":"configured-plugin-worker.mjs","compatibility_date":"2026-11-01","compatibility_flags":["nodejs_compat"],"alias":{"emdash":"./emdash-stub.mjs"}}

@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.7]
 
+- Fix configured-mode WASM loading in bundled Workers, including revision audits; validate the real plugin bundle in workerd.
+
 - Add composable advisory review of structural patterns and French register, including configurable list candidates. These are editorial prompts, not assessments of authorship or factual accuracy.
 - Return a sanitized not-checked result when revision evaluation or audit storage fails. Other audit failures may still need host-side diagnosis.
 
