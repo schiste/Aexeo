@@ -1931,6 +1931,24 @@ make affected checks `not_checked`. Other scripts and unusual Arabic marks may
 remain unassessed. Rust callers constructing these gate variants must supply
 this new field; serialized presets omitting it keep the previous behavior.
 
+### Adjacent sentence length review
+
+The optional `sentence-asymmetry-review` preset compares adjacent eligible
+sentences within each paragraph. Its advisory starting threshold is 30%; it
+flags a pair when `(longer - shorter) / longer * 100` is **less** than the
+configured percentage. Equality passes. This is an exact integer comparison;
+no random seed or floating-point rounding affects it. A single eligible
+sentence cannot establish a result and is reported `not_checked`.
+
+Compose the preset or configure `similar_sentence_lengths` with
+`run_length = 2`, `tolerance_words = 0`, and `min_difference_percent` from
+1 to 100. Omitting the percentage preserves the existing word-tolerance mode.
+Quotation handling, sentence delimiters, abbreviations and language limitations
+remain the same as the other rhythm checks. Customize the threshold for the
+content or omit the gate altogether: uniform sentence lengths may be deliberate,
+and this measurement does not identify authorship, accuracy, or quality. Rust
+callers constructing this gate variant must supply the optional field.
+
 ### English trailing clause review
 
 `trailing-ing-review-en` flags a sentence whose last comma is followed by an
