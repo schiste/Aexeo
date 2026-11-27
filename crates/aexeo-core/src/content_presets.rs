@@ -218,6 +218,14 @@ impl GateAccumulator {
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "style-structure-review".into(),
+            include_str!("../presets/style-structure-review.toml").into(),
+        ),
+        (
+            "style-register-review-fr".into(),
+            include_str!("../presets/style-register-review-fr.toml").into(),
+        ),
+        (
             "news-pacing".into(),
             include_str!("../presets/news-pacing.toml").into(),
         ),

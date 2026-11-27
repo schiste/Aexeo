@@ -1794,6 +1794,66 @@ observations per gate, so the same list is counted once for each gate. These
 aggregates contain no content, paths, gate identifiers or configured terms.
 
 To opt in through the configured EmDash plugin, set `contentPreset.listStructureCompleteByCollection = ["blog_posts"]` only after verifying that the host projects every list block in those collections in order, including any custom components. A missing body or incomplete existing body capabilities still reports `not_checked`. This assertion defaults to off. Direct WASM hosts can set `list_structure_complete: true` on the document under the same condition.
+### Composable structural and language-specific style review
+
+`style-structure-review` combines advisory sentence-length runs, prose-only
+variance and repeated openings without embedding a language-specific phrase
+list. It is a starting point for any language, not a guarantee that its
+sentence and word segmentation works for every script. Unsupported boundaries,
+missing paragraph or list observations and short windows remain unchecked.
+Override its thresholds or compose only the checks suited to the publication.
+
+`style-register-review-fr` adds French inline enumeration candidates and a
+small literal list of phrases to review in context. These examples can be
+perfectly appropriate: the underlying `forbidden_terms` gate uses
+`review_only = true` to label matches as phrases to review. That mode requires
+`blocking = false` and does not prescribe removal; the default mode retains
+the existing forbidden-term wording. The Rust `ContentGate::ForbiddenTerms`
+variant gains a `review_only` field, so downstream exhaustive constructors must
+supply it; older serialized configurations continue to default to `false`.
+Publishers can override the list, disable its gate, or use separate
+profiles for formal, conversational and other brand voices. Other languages
+can inherit the structural profile and add their own expressions and list
+conjunctions. Never assume the French list applies to another locale.
+
+These checks cannot infer whether abstract phrasing is necessary, whether a
+phrase is translationese, whether a parallel construction is intentional, or
+whether a proposed rewrite preserves meaning. They do not measure originality
+or identify authorship. An editor should consider concrete details, register
+and meaning in context; no check removes list items, punctuation or claims.
+
+For writing agents, start with the brief, intended reader, locale and chosen
+brand voice. Identify the propositions and evidence that must survive an edit.
+Consider whether an abstract expression can be made more specific **using facts
+already provided**, or whether a long enumeration can be recast without losing
+any item. Review sentence openings and rhythm as a whole; parallel phrasing and
+short fragments can be intentional. Offer alternatives that match the requested
+register, then re-run the selected preset. Do not add unverified constraints,
+experience, imagery or claims merely to make a passage sound concrete. A clean
+report does not verify the text or predict a detector's result.
+
+For another language, inherit the structural profile and define a local
+review list; these literals are examples of a publisher's policy, not a
+translation or a universal rule:
+
+```toml
+version = 1
+name = "Publisher style review"
+extends = ["style-structure-review"]
+
+[[gates]]
+id = "editorial.publisher_phrases"
+kind = "forbidden_terms"
+terms = ["a phrase this publisher wants reviewed"]
+case_insensitive = true
+review_only = true
+blocking = false
+```
+
+The phrase list uses literal matching, not grammatical or semantic analysis.
+To review possible inline enumerations, compose the appropriate
+`inline-triples-*` preset or configure its conjunction for the language.
+
 ### Repeated transition openings
 
 The opt-in `transition-review-en`, `transition-review-fr`, `transition-review-de`,

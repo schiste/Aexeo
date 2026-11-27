@@ -1255,6 +1255,47 @@ mod tests {
     };
 
     #[test]
+    fn french_register_review_maps_portable_text_and_withholds_missing_text() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/fr","title":"T","body":[{"children":[{"_type":"span","text":"Leur ambition est "},{"_type":"span","text":"simple : aider."}]}]}"#).unwrap();
+        let preset =
+            resolve_content_preset("style-register-review-fr", &builtin_content_presets()).unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        let gate = report
+            .gates
+            .iter()
+            .find(|gate| gate.gate_id == "editorial.fr_phrasing_review")
+            .unwrap();
+        assert_eq!(gate.status, GateStatus::Failed);
+        assert!(!gate.blocking);
+        assert!(
+            gate.findings[0]
+                .message
+                .starts_with("Phrase to review in context:")
+        );
+        let locations = source_locations(&document, &preset, &report);
+        let location = locations
+            .iter()
+            .find(|location| location.gate_id == "editorial.fr_phrasing_review")
+            .unwrap();
+        assert_eq!(
+            (
+                location.block_index,
+                location.span_index,
+                location.utf16_offset
+            ),
+            (0, 0, 0)
+        );
+        let missing =
+            evaluate_content_with_body_capabilities(&document, &preset, None, [false; 4]).unwrap();
+        let gate = missing
+            .gates
+            .iter()
+            .find(|gate| gate.gate_id == "editorial.fr_phrasing_review")
+            .unwrap();
+        assert_eq!(gate.status, GateStatus::NotChecked);
+    }
+
+    #[test]
     fn literal_markdown_review_uses_rich_text_and_preserves_positions() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"children":[{"_type":"span","text":"é "},{"_type":"span","text":"[Help]("},{"_type":"span","text":"https://example.com)"},{"_type":"span","text":" and `code [ignore](https://example.com)`"},{"_type":"span","text":" [also ignore](https://example.com)","marks":["code"]}]},{"children":[{"_type":"span","text":"native link","marks":["link"]}],"markDefs":[{"_key":"link","_type":"link","href":"https://example.com"}]}]}"#).unwrap();
         let preset = ContentPreset::from_toml(
