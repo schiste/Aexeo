@@ -99,7 +99,8 @@ class SyntaxReleaseTests(unittest.TestCase):
                 self.assertEqual(set(bundle.getnames()), {
                     "LICENSE", "adapters/syntax/README.md", "adapters/syntax/example.toml",
                     "adapters/syntax/example-parameters.json", "adapters/syntax/review.py",
-                    "adapters/syntax/test_review.py",
+                    "adapters/syntax/test_review.py", "adapters/syntax/opening-pos-example.toml",
+                    "adapters/syntax/opening-pos-parameters.json",
                 })
                 for member in bundle.getmembers():
                     self.assertTrue(member.isfile())
@@ -115,10 +116,33 @@ class SyntaxReleaseTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertRegex(result.stderr, r"Ran [1-9][0-9]* tests?")
 
+    def test_revision_archive_contains_runnable_adapter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "dist"
+            subprocess.run(["sh", str(ROOT / "scripts/build-revision-release.sh"), str(output)], check=True, capture_output=True, text=True)
+            version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
+            with tarfile.open(output / f"aexeo-revision-adapter-v{version}.tar.gz", "r:gz") as bundle:
+                self.assertEqual(set(bundle.getnames()), {
+                    "LICENSE", "adapters/revision/README.md", "adapters/revision/example.toml",
+                    "adapters/revision/example-parameters.json", "adapters/revision/example-fr.toml",
+                    "adapters/revision/example-fr-parameters.json", "adapters/revision/review.py",
+                    "adapters/revision/test_review.py",
+                })
+                for member in bundle.getmembers():
+                    self.assertTrue(member.isfile())
+                    destination = root / member.name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(bundle.extractfile(member).read())
+            result = subprocess.run([sys.executable, "-S", "-m", "unittest", "discover", "-s", str(root / "adapters/revision"), "-v"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertRegex(result.stderr, r"Ran [1-9][0-9]* tests?")
+
     def test_release_workflow_includes_archive_in_checksum_manifest(self):
         workflow = WORKFLOWS[1].read_text()
         self.assertIn("sh scripts/build-syntax-release.sh release", workflow)
-        self.assertIn("shasum -a 256 aexeo-cli-* aexeo-syntax-adapter-v*.tar.gz > SHA256SUMS.txt", workflow)
+        self.assertIn("sh scripts/build-revision-release.sh release", workflow)
+        self.assertIn("shasum -a 256 aexeo-cli-* aexeo-syntax-adapter-v*.tar.gz aexeo-revision-adapter-v*.tar.gz > SHA256SUMS.txt", workflow)
 
 
 class PinTests(unittest.TestCase):
