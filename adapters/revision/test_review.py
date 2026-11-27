@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 import review
@@ -29,6 +30,14 @@ class ReviewTests(unittest.TestCase):
         self.input["text"] = "x" * (review.MAX_TEXT_BYTES + 1)
         with self.assertRaises(review.Unavailable):
             review.evaluate(self.input, self.config)
+
+    def test_example_parameters_match_each_policy(self):
+        root = Path(review.__file__).parent
+        for suffix in ("", "-fr"):
+            preset = tomllib.loads((root / f"example{suffix}.toml").read_text(encoding="utf-8"))
+            params = json.loads((root / f"example{suffix}-parameters.json").read_text(encoding="utf-8"))
+            self.assertEqual(preset["gates"][0]["parameters"], params)
+            review.parameters(params)
 
     def test_cli_requires_explicit_coverage_attestation(self):
         with tempfile.TemporaryDirectory() as directory:
