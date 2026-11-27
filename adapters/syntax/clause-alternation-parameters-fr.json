@@ -1,0 +1,1 @@
+{"analysis":"clause_alternation","model":"fr_core_news_sm","model_version":"3.8.0","language":"fr","min_sentences":"2","max_tokens":"80","subordinate_labels":"advcl,acl:relcl,ccomp","short_max_words":"11"}
