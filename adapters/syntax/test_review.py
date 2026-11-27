@@ -78,6 +78,9 @@ class TestSyntaxAdapter(unittest.TestCase):
         second[1].dep_ = "nsubj"
         result = review.evaluate({"text": "First. Second."}, {**params, "short_max_words": "1"}, model)
         self.assertEqual(result[0]["diagnostics"], [])
+        long_second = Sentence(7, 21, 2)
+        result = review.evaluate({"text": "First. Second phrase."}, {**params, "short_max_words": "1"}, Model([first, long_second]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
         first[1].dep_ = "nsubj"
         second[1].dep_ = "advcl"
         result = review.evaluate({"text": "First. Second."}, params, model)
