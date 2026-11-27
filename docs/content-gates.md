@@ -1931,6 +1931,27 @@ make affected checks `not_checked`. Other scripts and unusual Arabic marks may
 remain unassessed. Rust callers constructing these gate variants must supply
 this new field; serialized presets omitting it keep the previous behavior.
 
+### Long inline list candidates
+
+The optional `long-inline-list-review-en` and `long-inline-list-review-fr`
+presets configure `inline_triple_candidates` to look for four or more items.
+Other locales can configure their own conjunction and item separator. This is a
+surface-form heuristic; it cannot establish that items are abstract nouns or
+share a grammatical form, and it may miss or flag legitimate lists. Review
+candidates in context instead of deleting items mechanically.
+
+### Configured framing expressions before a colon
+
+The optional `framing-colon-review-en` and `framing-colon-review-fr` presets
+flag explicitly configured sentence openings when a colon immediately follows
+them, allowing intervening whitespace. Set `require_colon = true` on
+`sentence_opening_terms` to use your own phrases in another language. Matching
+uses Unicode normalization and lowercasing. It does not identify abstract nouns,
+grammatical categories, meaning or all formulaic claims. The supplied English
+and French phrases are illustrative, not universal bans; review each finding
+in context. When `require_colon` is absent, previous opening-term behavior is
+unchanged. Rust callers constructing this variant must supply the new field.
+
 ### Adjacent sentence length review
 
 The optional `sentence-asymmetry-review` preset compares adjacent eligible

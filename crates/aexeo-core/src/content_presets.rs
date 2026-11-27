@@ -234,12 +234,28 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/opinion-pacing.toml").into(),
         ),
         (
+            "long-inline-list-review-en".into(),
+            include_str!("../presets/long-inline-list-review-en.toml").into(),
+        ),
+        (
+            "long-inline-list-review-fr".into(),
+            include_str!("../presets/long-inline-list-review-fr.toml").into(),
+        ),
+        (
             "inline-triples-en".into(),
             include_str!("../presets/inline-triples-en.toml").into(),
         ),
         (
             "inline-triples-fr".into(),
             include_str!("../presets/inline-triples-fr.toml").into(),
+        ),
+        (
+            "framing-colon-review-en".into(),
+            include_str!("../presets/framing-colon-review-en.toml").into(),
+        ),
+        (
+            "framing-colon-review-fr".into(),
+            include_str!("../presets/framing-colon-review-fr.toml").into(),
         ),
         (
             "sentence-asymmetry-review".into(),
@@ -565,6 +581,53 @@ mod tests {
                 .to_string()
                 .contains("maximum depth")
         );
+    }
+
+    #[test]
+    fn french_starters_review_user_sample_without_changing_content() {
+        use crate::content_gate::{ContentContext, ContentInput, ContentParagraph, GateStatus};
+        let text = "Ils y apportent leur expérience de la technologie, des données, de la sécurité et de la conformité, ainsi que leur connaissance des difficultés que rencontrent les petites équipes.\n\nLeur ambition est simple : que la taille de votre organisation ne vous empêche pas de prendre soin de sa sécurité.";
+        let input = ContentInput {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(
+                text.split("\n\n")
+                    .map(|part| ContentParagraph {
+                        text: part.into(),
+                        line: 1,
+                        column: 1,
+                    })
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        let sources = builtin_content_presets();
+        for name in ["framing-colon-review-fr", "long-inline-list-review-fr"] {
+            let report = resolve_content_preset(name, &sources)
+                .unwrap()
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap();
+            assert_eq!(report.gates[0].status, GateStatus::Failed, "{name}");
+        }
+        assert_eq!(input.text.as_deref(), Some(text));
+    }
+
+    #[test]
+    fn new_writing_starters_resolve_and_are_advisory() {
+        let sources = builtin_content_presets();
+        for name in [
+            "sentence-asymmetry-review",
+            "framing-colon-review-en",
+            "framing-colon-review-fr",
+            "long-inline-list-review-en",
+            "long-inline-list-review-fr",
+        ] {
+            let preset = resolve_content_preset(name, &sources).unwrap();
+            assert_eq!(preset.gates.len(), 1, "{name}");
+            assert!(!preset.gates[0].blocking(), "{name}");
+        }
     }
 
     #[test]

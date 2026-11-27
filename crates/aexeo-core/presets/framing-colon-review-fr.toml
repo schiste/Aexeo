@@ -1,0 +1,10 @@
+version = 1
+name = "Configured framing expressions before a colon (fr)"
+
+[[gates]]
+id = "editorial.framing_colon"
+kind = "sentence_opening_terms"
+terms = ["leur ambition est simple", "notre ambition est simple", "notre objectif est simple", "notre mission est simple"]
+require_colon = true
+max_per_paragraph = 0
+blocking = false

@@ -659,6 +659,9 @@ pub enum ContentGate {
         #[serde(default)]
         blocking: bool,
         terms: Vec<String>,
+        /// Match an opening only when its configured text is followed by a colon.
+        #[serde(default, skip_serializing_if = "is_false")]
+        require_colon: bool,
         #[serde(default)]
         max_per_paragraph: usize,
         #[serde(default = "default_sentence_delimiters")]
@@ -3837,6 +3840,7 @@ impl ContentPreset {
                 }
                 ContentGate::SentenceOpeningTerms {
                     terms,
+                    require_colon,
                     max_per_paragraph,
                     delimiters,
                     abbreviations,
@@ -3882,9 +3886,13 @@ impl ContentPreset {
                                         segment.nfc().flat_map(char::to_lowercase).nfc().collect();
                                     if normalized.iter().any(|term| {
                                         folded.strip_prefix(term).is_some_and(|tail| {
-                                            tail.chars()
-                                                .next()
-                                                .is_none_or(|ch| !ch.is_alphanumeric() && ch != '_')
+                                            if *require_colon {
+                                                tail.trim_start().starts_with(':')
+                                            } else {
+                                                tail.chars().next().is_none_or(|ch| {
+                                                    !ch.is_alphanumeric() && ch != '_'
+                                                })
+                                            }
                                         })
                                     }) {
                                         matches += 1;
@@ -3892,7 +3900,7 @@ impl ContentPreset {
                                         if in_paragraph > *max_per_paragraph {
                                             emit(
                                                 format!(
-                                                    "Configured sentence-opening expression occurs {in_paragraph} times in this paragraph; review the transition in context"
+                                                    "Configured sentence-opening expression occurs {in_paragraph} times in this paragraph; review the wording in context"
                                                 ),
                                                 line,
                                                 column,
@@ -8505,6 +8513,56 @@ terms = ["bad"]
         assert_eq!(
             preset.evaluate(&input).unwrap().gates[0].status,
             GateStatus::NotChecked
+        );
+    }
+
+    #[test]
+    fn configured_colon_openings_require_the_colon_and_skip_quotations() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='colon'\nkind='sentence_opening_terms'\nterms=['leur ambition est simple']\nrequire_colon=true\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "Leur ambition est simple : protéger les équipes.".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        context.paragraphs.as_mut().unwrap()[0].text =
+            "Leur ambition est simplement de protéger les équipes.".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
+        );
+        context.paragraphs.as_mut().unwrap()[0].text = "Leur ambition est simple et utile.".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
+        );
+        context.paragraphs.as_mut().unwrap()[0].text =
+            "« Leur ambition est simple : protéger les équipes. »".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
         );
     }
 
