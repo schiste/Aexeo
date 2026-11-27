@@ -169,6 +169,8 @@ jobs:
         run: npm run build:wasm --prefix packages/aexeo-crawl-worker
       - name: Test the worker in workerd with the real WASM
         run: npm test --prefix packages/aexeo-crawl-worker
+      - name: Test the configured plugin revision audit in workerd
+        run: npm run test:configured-plugin --prefix packages/aexeo-crawl-worker
 
   jev-adapter:
     name: Jev adapter (offline tests)

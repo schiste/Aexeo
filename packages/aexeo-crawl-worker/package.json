@@ -11,6 +11,7 @@
     "dev": "npm run build:wasm && wrangler dev",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/worker.test.mjs",
+    "test:configured-plugin": "node --test test/configured-plugin.test.mjs",
     "check:dts": "cmp src/wasm/aexeo_emdash_bridge_bg.d.ts ../aexeo-emdash/wasm/aexeo_emdash_bridge_bg.d.ts"
   },
   "devDependencies": {
