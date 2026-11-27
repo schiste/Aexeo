@@ -17,6 +17,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Verify answer candidates before concluding when trust_policy is not answer-safe.
 - Identify the nearest fast test or validation command before editing.
 - Inspect caution zones before changing generated or vendored areas.
+- For parser-backed sentence comparisons, test paragraph separators included in
+  the preceding or following sentence span, not only between spans. Confirm
+  cross-paragraph pairs are not compared and insufficient observations are
+  `not_checked`; verify finding positions after leading whitespace.
 
 ## Validation Checklist
 
