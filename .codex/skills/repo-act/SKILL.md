@@ -126,6 +126,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   script directly with Node to verify its entrypoint as well as its tests.
 - Inspect caution zones before changing generated or vendored areas.
 
+- For EmDash WASM import or bundling changes, test the built configured plugin
+  with real WASM in workerd as well as Node; a sidecar-only Workers test
+  does not exercise the host bundle. When reproducing a regression, verify
+  the test also fails with the previous import and passes with the fix.
+
 ## Validation Checklist
 
 - For JavaScript arrays received from runtime providers, test sparse arrays as
