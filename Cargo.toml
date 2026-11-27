@@ -9,7 +9,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.27"
+version = "0.0.28"
 edition = "2024"
 # Minimum supported Rust version, checked by the msrv job in ci.yml. The code
 # uses let chains and `as_chunks`, both stable since 1.88. Stating it explicitly

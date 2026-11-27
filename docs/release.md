@@ -110,6 +110,14 @@ checks. Host projections are assertions, not evidence of provenance or
 freshness, and verification does not authorize publication. The portable v2
 protocol remains experimental. The EmDash npm package is versioned separately.
 
+### Upgrading from 0.0.27 to 0.0.28
+
+Regenerate bound verdicts with the new engine and retain prior verdicts as
+historical evidence. Editorial pattern checks are advisory and do not establish
+authorship or factual accuracy. The configurable inline-list gate adds fields to
+the Rust enum variant; downstream exhaustive constructors must be updated.
+The EmDash package is versioned separately.
+
 ## CLI Release Artifacts
 
 Package release assets:

@@ -4,6 +4,11 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.7]
+
+- Add composable advisory review of structural patterns and French register, including configurable list candidates. These are editorial prompts, not assessments of authorship or factual accuracy.
+- Return a sanitized not-checked result when revision evaluation or audit storage fails. Other audit failures may still need host-side diagnosis.
+
 ## [0.9.6]
 
 - Ship the opt-in `readability-paragraphs` preset. Its advisory sentence-length check assesses observed paragraphs rather than headings; unavailable paragraph observations remain not checked. Compose it with other presets when additional checks are needed.
