@@ -192,6 +192,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   prose, test lowercase, uppercase and mixed-case HTTP(S) schemes, malformed
   or embedded non-URLs, and the next sentence's position; link parsing and
   sentence segmentation may use different recognizers.
+- For parser-backed sentence comparisons, test paragraph separators included in
+  the preceding or following sentence span, not only between spans. Confirm
+  cross-paragraph pairs are not compared and insufficient observations are
+  `not_checked`; verify finding positions after leading whitespace.
 - For structural adapter classifications, test source blocks that yield no
   projected paragraph (such as an empty list item), not just classifications of
   visible paragraphs. An omitted block can hide a boundary; withhold completeness
