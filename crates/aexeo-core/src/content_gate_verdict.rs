@@ -1446,6 +1446,7 @@ fn verify_host_candidate_projection(
                 | ContentGate::RequiredHeadings { .. }
                 | ContentGate::HeadingLength { .. }
                 | ContentGate::HeadingHierarchy { .. }
+                | ContentGate::DuplicateHeadings { .. }
         )
     }) {
         bail!("host adapter portable verification does not support this gate");
@@ -1593,7 +1594,8 @@ fn verify_host_candidate_projection(
             let id = match gate {
                 ContentGate::RequiredHeadings { id, .. }
                 | ContentGate::HeadingLength { id, .. }
-                | ContentGate::HeadingHierarchy { id, .. } => id,
+                | ContentGate::HeadingHierarchy { id, .. }
+                | ContentGate::DuplicateHeadings { id, .. } => id,
                 _ => continue,
             };
             let check_id = format!("gate:{}:{}:{}", item.entity_id.len(), item.entity_id, id);
@@ -1621,6 +1623,21 @@ fn verify_host_candidate_projection(
                 ContentGate::HeadingLength { max_chars, .. } => actual
                     .iter()
                     .any(|heading| heading.trim().chars().count() > *max_chars),
+                ContentGate::DuplicateHeadings { case_sensitive, .. } => {
+                    let mut seen = std::collections::HashSet::new();
+                    actual
+                        .iter()
+                        .map(|heading| heading.trim())
+                        .filter(|heading| !heading.is_empty())
+                        .any(|heading| {
+                            let key = if *case_sensitive {
+                                heading.to_owned()
+                            } else {
+                                heading.to_lowercase()
+                            };
+                            !seen.insert(key)
+                        })
+                }
                 ContentGate::HeadingHierarchy { initial_level, .. } => {
                     let levels = levels
                         .as_ref()
@@ -9550,6 +9567,44 @@ mod tests {
         )
         .unwrap();
         assert!(verify_host_candidate_projection(&verdict, &unsupported, &[item]).is_err());
+    }
+
+    #[test]
+    fn portable_host_duplicate_headings_are_recomputed() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='headings'\n[[gates]]\nid='dup'\nkind='duplicate_headings'\ncase_sensitive=false\n").unwrap();
+        let source =
+            r#"{"schema":"aexeo.content-adapter/v1","text":"","headings":[" Alpha ","","alpha"]}"#;
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let verdict = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        let item = crate::content_candidate::CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: crate::content_adapter::MEDIA_TYPE.into(),
+            revision: None,
+            sha256: format!("{:x}", Sha256::digest(source.as_bytes())),
+            source: source.into(),
+            links: None,
+        };
+        assert!(
+            verify_host_candidate_projection(&verdict, &preset, std::slice::from_ref(&item))
+                .unwrap()
+        );
+        let mut forged = verdict.clone();
+        forged.checks[0].status = CheckStatus::Passed;
+        assert!(verify_host_candidate_projection(&forged, &preset, &[item]).is_err());
     }
 
     #[test]

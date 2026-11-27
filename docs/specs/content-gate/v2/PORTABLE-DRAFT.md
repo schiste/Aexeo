@@ -409,3 +409,5 @@ checks UTF-8 validity and byte length, not full Unicode alphabetic equivalence
 with the producer. Separator character classification uses Python Unicode
 properties and may differ from the producer. This does not independently verify
 list-review findings.
+
+Host projection comparison can also recompute duplicate-heading outcomes from the supplied heading list. The Python comparator rejects non-ASCII headings when case-insensitive comparison is requested, because Unicode case conversion may differ across runtime versions. This verifies consistency with supplied observations, not that the host supplied all rendered headings.
