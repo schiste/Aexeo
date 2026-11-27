@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import validate_forbidden_terms_gate, validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -561,6 +561,32 @@ class PortableComparison(unittest.TestCase):
         with patch('verify_portable_verdict._PUNCTUATION_MAX_WORK_BYTES', 3):
             with self.assertRaisesRegex(VerificationError, 'work limit'):
                 verify_plain_punctuation_statuses({'gates': [gate]}, verdict, after, {})
+
+    def test_forbidden_terms_policy_shape_is_validated(self):
+        gate = dict(kind='forbidden_terms', id='terms', severity='warning', blocking=False,
+                    terms=['leur ambition est simple'], whole_words=True, case_insensitive=True,
+                    review_only=True)
+        validate_forbidden_terms_gate(gate)
+        legacy = dict(gate, blocking=True)
+        del legacy['review_only']
+        validate_forbidden_terms_gate(legacy)
+        for invalid in ({'blocking': True}, {'review_only': 1}, {'terms': []},
+                        {'terms': ['  ']}, {'terms': [None]}, {'terms': ['\ud800']}, {'whole_words': 1},
+                        {'case_insensitive': None}, {'severity': 'info'}, {'extra': 1}):
+            with self.subTest(invalid=invalid), self.assertRaises(VerificationError):
+                validate_forbidden_terms_gate(dict(gate, **invalid))
+        for field in gate:
+            incomplete = dict(gate)
+            del incomplete[field]
+            if field in ('kind', 'review_only'):
+                continue
+            with self.subTest(missing=field), self.assertRaises(VerificationError):
+                validate_forbidden_terms_gate(incomplete)
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        policy['gates'] = [dict(gate, id='words', blocking=True)]
+        with self.assertRaisesRegex(VerificationError, 'invalid resolved forbidden terms gate'):
+            require_policy_coverage(policy, change, False, self.previous['verdict'])
 
     def test_repeated_punctuation_policy_shape_is_validated(self):
         policy = json.loads(self.artifacts['resolved_policy'])
