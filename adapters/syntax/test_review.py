@@ -65,6 +65,35 @@ class TestSyntaxAdapter(unittest.TestCase):
         self.assertEqual(result[0]["diagnostics"][0]["column"], 6)
         self.assertEqual(len(result[0]["diagnostics"]), 2)
 
+    def test_opening_pos_compares_only_observed_adjacent_categories(self):
+        params = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        data = {"text": "First. Second. Third."}
+        first, second, third = Sentence(0, 6, 0), Sentence(7, 14, 2), Sentence(15, 21, 4)
+        third[0].pos_ = "NOUN"
+        result = review.evaluate(data, params, Model([first, second, third]))
+        self.assertEqual(result[0]["extension"], "syntax.opening_pos")
+        self.assertEqual(result[0]["parameters"], params)
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        self.assertEqual(result[0]["diagnostics"][0]["column"], 8)
+        first[0].pos_ = "PUNCT"
+        second[0].pos_ = "PUNCT"
+        third[0].pos_ = "VERB"
+        result = review.evaluate(data, params, Model([first, second, third]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        self.assertIn("NOUN", result[0]["diagnostics"][0]["message"])
+        first[0].pos_ = "VERB"
+        second[0].pos_ = "NOUN"
+        third[0].pos_ = "NOUN"
+        result = review.evaluate(data, params, Model([first, second, third]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        with self.assertRaises(review.Unavailable):
+            review.evaluate({"text": "First.\n\nSecond."}, params, Model([Sentence(0, 6, 0), Sentence(8, 15, 2)]))
+        second[0].pos_ = ""
+        with self.assertRaises(review.Unavailable):
+            review.evaluate(data, params, Model([first, second, third]))
+        with self.assertRaises(ValueError):
+            review.parameters({**params, "max_distance": "0.2"})
+
     def test_incompatible_or_incomplete_means_unavailable(self):
         model = Model([Sentence(0, 2, 0), Sentence(3, 5, 2)])
         for changed in ({**PARAMS, "language": "fr"}, {**PARAMS, "model_version": "0"}, {**PARAMS, "min_sentences": "3"}, {**PARAMS, "max_tokens": "1"}):

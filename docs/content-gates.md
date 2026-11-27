@@ -1931,6 +1931,45 @@ make affected checks `not_checked`. Other scripts and unusual Arabic marks may
 remain unassessed. Rust callers constructing these gate variants must supply
 this new field; serialized presets omitting it keep the previous behavior.
 
+### Long inline list candidates
+
+The optional `long-inline-list-review-en` and `long-inline-list-review-fr`
+presets configure `inline_triple_candidates` to look for four or more items.
+Other locales can configure their own conjunction and item separator. This is a
+surface-form heuristic; it cannot establish that items are abstract nouns or
+share a grammatical form, and it may miss or flag legitimate lists. Review
+candidates in context instead of deleting items mechanically.
+
+### Configured framing expressions before a colon
+
+The optional `framing-colon-review-en` and `framing-colon-review-fr` presets
+flag explicitly configured sentence openings when a colon immediately follows
+them, allowing intervening whitespace. Set `require_colon = true` on
+`sentence_opening_terms` to use your own phrases in another language. Matching
+uses Unicode normalization and lowercasing. It does not identify abstract nouns,
+grammatical categories, meaning or all formulaic claims. The supplied English
+and French phrases are illustrative, not universal bans; review each finding
+in context. When `require_colon` is absent, previous opening-term behavior is
+unchanged. Rust callers constructing this variant must supply the new field.
+
+### Adjacent sentence length review
+
+The optional `sentence-asymmetry-review` preset compares adjacent eligible
+sentences within each paragraph. Its advisory starting threshold is 30%; it
+flags a pair when `(longer - shorter) / longer * 100` is **less** than the
+configured percentage. Equality passes. This is an exact integer comparison;
+no random seed or floating-point rounding affects it. A single eligible
+sentence cannot establish a result and is reported `not_checked`.
+
+Compose the preset or configure `similar_sentence_lengths` with
+`run_length = 2`, `tolerance_words = 0`, and `min_difference_percent` from
+1 to 100. Omitting the percentage preserves the existing word-tolerance mode.
+Quotation handling, sentence delimiters, abbreviations and language limitations
+remain the same as the other rhythm checks. Customize the threshold for the
+content or omit the gate altogether: uniform sentence lengths may be deliberate,
+and this measurement does not identify authorship, accuracy, or quality. Rust
+callers constructing this gate variant must supply the optional field.
+
 ### English trailing clause review
 
 `trailing-ing-review-en` flags a sentence whose last comma is followed by an
