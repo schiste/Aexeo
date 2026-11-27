@@ -1796,6 +1796,17 @@ aggregates contain no content, paths, gate identifiers or configured terms.
 To opt in through the configured EmDash plugin, set `contentPreset.listStructureCompleteByCollection = ["blog_posts"]` only after verifying that the host projects every list block in those collections in order, including any custom components. A missing body or incomplete existing body capabilities still reports `not_checked`. This assertion defaults to off. Direct WASM hosts can set `list_structure_complete: true` on the document under the same condition.
 ### Composable structural and language-specific style review
 
+For a single opt-in review, `writing-review` composes the structural checks
+with the adjacent sentence-length comparison. `writing-review-en` adds English
+framing and long-enumeration candidates; `writing-review-fr` adds the French
+register and enumeration starter and French framing candidates. Each gate is
+advisory, and projects can inherit the preset and override or disable gates.
+These profiles do not assess factual accuracy, semantic equivalence, grammatical
+opening categories, or idiomatic translation. The optional syntax adapter must
+be configured separately. A threshold or literal match is a review prompt, not
+a proof of style or authorship; short and unsupported inputs may be not checked.
+
+
 `style-structure-review` combines advisory sentence-length runs, prose-only
 variance and repeated openings without embedding a language-specific phrase
 list. It is a starting point for any language, not a guarantee that its

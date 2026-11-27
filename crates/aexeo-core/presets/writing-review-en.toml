@@ -1,0 +1,3 @@
+version = 1
+name = "English writing review starter"
+extends = ["writing-review", "framing-colon-review-en", "long-inline-list-review-en"]

@@ -218,6 +218,18 @@ impl GateAccumulator {
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "writing-review".into(),
+            include_str!("../presets/writing-review.toml").into(),
+        ),
+        (
+            "writing-review-en".into(),
+            include_str!("../presets/writing-review-en.toml").into(),
+        ),
+        (
+            "writing-review-fr".into(),
+            include_str!("../presets/writing-review-fr.toml").into(),
+        ),
+        (
             "style-structure-review".into(),
             include_str!("../presets/style-structure-review.toml").into(),
         ),
@@ -611,7 +623,67 @@ mod tests {
                 .unwrap();
             assert_eq!(report.gates[0].status, GateStatus::Failed, "{name}");
         }
+        let report = resolve_content_preset("writing-review-fr", &sources)
+            .unwrap()
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        for id in [
+            "editorial.framing_colon",
+            "editorial.fr_long_enumeration_review",
+        ] {
+            assert_eq!(
+                report
+                    .gates
+                    .iter()
+                    .find(|gate| gate.gate_id == id)
+                    .unwrap_or_else(|| panic!(
+                        "missing {id}: {:?}",
+                        report
+                            .gates
+                            .iter()
+                            .map(|gate| &gate.gate_id)
+                            .collect::<Vec<_>>()
+                    ))
+                    .status,
+                GateStatus::Failed,
+                "{id}"
+            );
+        }
         assert_eq!(input.text.as_deref(), Some(text));
+    }
+
+    #[test]
+    fn composed_writing_reviews_expose_configured_advisory_checks() {
+        let sources = builtin_content_presets();
+        for (name, expected) in [
+            ("writing-review", vec!["editorial.sentence_asymmetry"]),
+            (
+                "writing-review-en",
+                vec![
+                    "editorial.sentence_asymmetry",
+                    "editorial.framing_colon",
+                    "editorial.long_inline_list",
+                ],
+            ),
+            (
+                "writing-review-fr",
+                vec![
+                    "editorial.sentence_asymmetry",
+                    "editorial.framing_colon",
+                    "editorial.fr_long_enumeration_review",
+                    "editorial.fr_phrasing_review",
+                ],
+            ),
+        ] {
+            let preset = resolve_content_preset(name, &sources).unwrap();
+            assert!(preset.gates.iter().all(|gate| !gate.blocking()), "{name}");
+            for id in expected {
+                assert!(
+                    preset.gates.iter().any(|gate| gate.id() == id),
+                    "{name}: {id}"
+                );
+            }
+        }
     }
 
     #[test]

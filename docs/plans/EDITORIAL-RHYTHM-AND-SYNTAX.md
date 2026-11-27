@@ -14,6 +14,8 @@ Verification: variance and opening rules passed their individual full CI and Aet
 
 ## Configurable multilingual writing review — in progress
 
+- [x] Compose opt-in writing review starters for general, French and English use from the existing advisory gates; document what the resulting checks cannot establish.
+
 - [x] Add an opt-in adjacent-length percentage comparison with exact integer arithmetic, configurable threshold, explicit insufficient-input status, and an advisory starter.
 - [x] Add configured colon-framing review and long-list starters for French and English; make phrases, conjunctions, separators and thresholds composable for other locales. Preserve the text and identify these as surface heuristics.
 - [x] Add an optional local model-backed part-of-speech opening review with bounded input and unavailable results when observations are missing. Update the writing skill.

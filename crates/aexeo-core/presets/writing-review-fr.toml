@@ -1,0 +1,3 @@
+version = 1
+name = "French writing review starter"
+extends = ["style-register-review-fr", "sentence-asymmetry-review", "framing-colon-review-fr"]
