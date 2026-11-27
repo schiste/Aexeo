@@ -10,3 +10,11 @@ terms = ["leur ambition est simple", "prendre soin de sa sécurité", "la taille
 case_insensitive = true
 review_only = true
 blocking = false
+
+# Advisory surface-form candidates; editorial judgment is required.
+[[gates]]
+id = "editorial.fr_long_enumeration_review"
+kind = "inline_triple_candidates"
+conjunction = "et"
+min_items = 4
+blocking = false

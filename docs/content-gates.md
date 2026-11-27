@@ -1815,6 +1815,15 @@ Publishers can override the list, disable its gate, or use separate
 profiles for formal, conversational and other brand voices. Other languages
 can inherit the structural profile and add their own expressions and list
 conjunctions. Never assume the French list applies to another locale.
+The French starter also opts into `inline_triple_candidates` with `min_items = 4`
+for longer enumerations. Publishers may configure `conjunction`, `min_items`
+(3–8), and `item_separator` (a single punctuation character; default `,`).
+The default three-item behavior remains unchanged. Longer-list matching is a
+bounded surface heuristic, not a syntactic parser: nested lists, conjunctions
+or punctuation may be missed or misidentified. It assumes space-separated
+conjunctions and cannot establish coverage for every language or script. Its
+results are prompts for human review, never instructions to remove items.
+The Rust enum gains two optional fields; exhaustive constructors must supply them.
 
 These checks cannot infer whether abstract phrasing is necessary, whether a
 phrase is translationese, whether a parallel construction is intentional, or

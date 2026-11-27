@@ -103,6 +103,14 @@ fn structural_and_french_register_presets_compose_without_cross_locale_terms() {
             .all(|finding| finding.message.starts_with("Phrase to review in context:"))
     );
     assert!(gate.findings.iter().all(|finding| finding.suggestion.as_deref() == Some("Review this phrase in context; keep it when it fits the meaning and intended voice.")));
+    let enumeration = report
+        .gates
+        .iter()
+        .find(|gate| gate.gate_id == "editorial.fr_long_enumeration_review")
+        .unwrap();
+    assert_eq!(enumeration.status, GateStatus::Failed);
+    assert!(!enumeration.blocking);
+    assert_eq!(enumeration.measurements["candidate_enumerations"], 1);
     let no_text = french.evaluate(&ContentInput::default()).unwrap();
     let gate = no_text
         .gates

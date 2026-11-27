@@ -767,6 +767,12 @@ pub enum ContentGate {
         #[serde(default)]
         blocking: bool,
         conjunction: String,
+        /// Opt in to reviewing enumerations of at least this many items.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_items: Option<usize>,
+        /// Separator used between items; defaults to a comma.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_separator: Option<char>,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1999,9 +2005,15 @@ impl ContentPreset {
                 }
                 ContentGate::InlineTripleCandidates {
                     conjunction,
+                    min_items,
+                    item_separator,
                     delimiters,
                     ..
-                } if conjunction.is_empty()
+                } if min_items.is_some_and(|n| !(3..=8).contains(&n))
+                    || item_separator.is_some_and(|c| {
+                        c.is_alphanumeric() || c.is_whitespace() || delimiters.contains(c)
+                    })
+                    || conjunction.is_empty()
                     || conjunction.len() > 32
                     || !conjunction.chars().all(char::is_alphabetic)
                     || delimiters.is_empty() =>
@@ -3294,6 +3306,8 @@ impl ContentPreset {
                 }
                 ContentGate::InlineTripleCandidates {
                     conjunction,
+                    min_items,
+                    item_separator,
                     delimiters,
                     abbreviations,
                     ..
@@ -3332,21 +3346,52 @@ impl ContentPreset {
                                     let Some((left, right)) = folded.rsplit_once(&marker) else {
                                         return;
                                     };
-                                    let left = left.trim_end_matches(',').trim_end();
-                                    let Some((first, second)) = left.rsplit_once(',') else {
-                                        return;
-                                    };
-                                    let valid_item = |part: &str| {
+                                    let separator = item_separator.unwrap_or(',');
+                                    let left = left.trim_end_matches(separator).trim_end();
+                                    let valid_item = |part: &str, max_words: usize| {
                                         let part = part.trim();
                                         !part.is_empty()
-                                            && part.split_whitespace().count() <= 6
-                                            && !part.contains(',')
+                                            && part.split_whitespace().count() <= max_words
+                                            && !part.contains(separator)
                                             && part.chars().any(char::is_alphabetic)
                                     };
-                                    if valid_item(first) && valid_item(second) && valid_item(right)
-                                    {
-                                        candidates += 1;
-                                        emit("Possible three-item inline enumeration; review whether the repetition is intentional".into(), line, column);
+                                    let minimum = min_items.unwrap_or(3);
+                                    if minimum == 3 {
+                                        // Keep legacy triple matching and diagnostics unchanged.
+                                        let Some((first, second)) = left.rsplit_once(separator)
+                                        else {
+                                            return;
+                                        };
+                                        if valid_item(first, 6)
+                                            && valid_item(second, 6)
+                                            && valid_item(right, 6)
+                                        {
+                                            candidates += 1;
+                                            emit("Possible three-item inline enumeration; review whether the repetition is intentional".into(), line, column);
+                                        }
+                                    } else {
+                                        // The first item may include the preceding clause. This is
+                                        // a bounded surface heuristic, not grammatical parsing.
+                                        let parts: Vec<_> =
+                                            left.rsplit(separator).take(minimum - 1).collect();
+                                        let last = right.split(separator).next().unwrap_or("");
+                                        if parts.len() == minimum - 1
+                                            && parts
+                                                .iter()
+                                                .take(parts.len() - 1)
+                                                .all(|part| valid_item(part, 6))
+                                            && valid_item(parts[parts.len() - 1], 40)
+                                            && valid_item(last, 6)
+                                        {
+                                            candidates += 1;
+                                            emit(
+                                                format!(
+                                                    "Possible inline enumeration of at least {minimum} items; review whether the repetition is intentional"
+                                                ),
+                                                line,
+                                                column,
+                                            );
+                                        }
                                     }
                                 },
                             );
@@ -7910,6 +7955,104 @@ terms = ["bad"]
             GateStatus::NotChecked
         );
         assert!(ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='and or'\n").is_err());
+    }
+
+    #[test]
+    fn longer_enumerations_are_configurable_and_advisory() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='list'\nkind='inline_triple_candidates'\nconjunction='and'\nmin_items=4\n").unwrap();
+        let evaluate = |text: &str| {
+            let input = ContentInput {
+                text: Some(text.into()),
+                ..Default::default()
+            };
+            let context = ContentContext {
+                paragraphs: Some(vec![ContentParagraph {
+                    text: text.into(),
+                    line: 1,
+                    column: 1,
+                }]),
+                ..Default::default()
+            };
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let candidate = evaluate(
+            "Our team works on technology, data, safety and compliance, as well as training.",
+        );
+        assert_eq!(candidate.status, GateStatus::Failed);
+        assert!(!candidate.blocking);
+        assert_eq!(candidate.measurements["candidate_enumerations"], 1);
+        assert_eq!(
+            evaluate("We review apples, pears, peaches, cherries and plums.").status,
+            GateStatus::Failed
+        );
+        assert_eq!(
+            evaluate("Our team uses apples, pears and plums.").status,
+            GateStatus::Passed
+        );
+        assert_eq!(
+            evaluate("“Our team uses apples, pears, peaches and plums.”").status,
+            GateStatus::Passed
+        );
+        assert_eq!(
+            preset.evaluate(&ContentInput::default()).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        for invalid in ["min_items=2", "min_items=9", "item_separator='.'"] {
+            assert!(ContentPreset::from_toml(&format!("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='and'\n{invalid}\n")).is_err());
+        }
+        let custom = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='and'\nmin_items=4\nitem_separator=';'\n").unwrap();
+        let text = "Apples; pears; peaches and plums.";
+        let input = ContentInput {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        assert_eq!(
+            custom
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Failed
+        );
+    }
+
+    #[test]
+    fn enumeration_separator_accepts_unicode_and_legacy_serialization_is_stable() {
+        let legacy = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='and'\n").unwrap();
+        let serialized = serde_json::to_value(&legacy).unwrap();
+        assert!(serialized["gates"][0].get("min_items").is_none());
+        assert!(serialized["gates"][0].get("item_separator").is_none());
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='و'\nmin_items=4\nitem_separator='،'\n").unwrap();
+        let text = "تفاح، كمثرى، خوخ و برقوق.";
+        let input = ContentInput {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["candidate_enumerations"], 1);
     }
 
     #[test]
