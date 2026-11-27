@@ -115,6 +115,12 @@ publishing 0.9.5 and host-side validation remain open.
 - [x] Record CMS metadata projection coverage with save and refresh assessments;
   both editor views distinguish supplied description values from observed source
   mappings without copying metadata values or claiming rendered-page coverage.
+- [x] Release CLI 0.0.28 and update the Homebrew tap after validating the merged
+  tree and both published binary checksums. EmDash 0.9.7 was built and its WASM
+  tests passed from the same tree; its npm publication and host installation are
+  separate steps. The independent portable comparator also validates inline-list
+  policy shapes ([#1011](https://github.com/schiste/Aexeo/pull/1011)); it does
+  not independently establish the resulting editorial findings.
 - [ ] Publish and install the tested npm package, enable the desired presets and
   revision access on the target host, then verify its connected MCP actions and
   permissions against a real revision. Repository support alone does not expose

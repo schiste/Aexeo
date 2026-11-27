@@ -163,3 +163,21 @@ contained 6 errors and 6,960 warnings; 2,215 contextual findings had no missing
 source page. The audit step returned failure for the findings, as intended.
 This archived candidate is not proof of current Preview deployment, CMS
 inventory completeness, freshness, factual accuracy or publication readiness.
+
+## Connected revision audit observation, 27 November 2026
+
+The connected Preview MCP exposed Aexeo revision-audit and audit-retrieval
+actions. Content and revision reads succeeded for representative English and
+French records. Invoking the connected revision audit for both records returned
+a generic internal error; specifying the English content field also failed.
+A nonexistent revision returned `revision_unavailable`, an unconfigured fragment
+returned `fragment_preset_not_configured`, and a nonexistent audit returned
+`audit_unavailable`. These controls show that some dispatch and unavailable-data
+paths respond, but do not isolate the later failure to evaluation or storage.
+No content was edited or published.
+
+Aexeo [PR #1009](https://github.com/schiste/Aexeo/pull/1009) adds sanitized
+`not_checked` diagnostics for caught evaluation and audit-storage failures.
+Other failures may remain generic; this does not fix or identify the observed
+Preview failure. The fix must be published, installed and exercised against the
+actual host before the connected workflow can be considered validated.
