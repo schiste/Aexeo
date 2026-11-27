@@ -102,6 +102,10 @@ class SyntaxReleaseTests(unittest.TestCase):
                     "adapters/syntax/test_review.py", "adapters/syntax/opening-pos-example.toml",
                     "adapters/syntax/opening-pos-parameters.json", "adapters/syntax/opening-pos-example-fr.toml",
                     "adapters/syntax/opening-pos-parameters-fr.json",
+                    "adapters/syntax/clause-alternation-example.toml",
+                    "adapters/syntax/clause-alternation-parameters.json",
+                    "adapters/syntax/clause-alternation-example-fr.toml",
+                    "adapters/syntax/clause-alternation-parameters-fr.json",
                 })
                 for member in bundle.getmembers():
                     self.assertTrue(member.isfile())

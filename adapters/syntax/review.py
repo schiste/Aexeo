@@ -25,6 +25,8 @@ def parameters(raw):
     required = {"model", "model_version", "language", "min_sentences", "max_tokens"}
     if mode == "similarity":
         required.add("max_distance")
+    elif mode == "clause_alternation":
+        required.update({"subordinate_labels", "short_max_words"})
     elif mode != "opening_pos":
         raise ValueError("unsupported analysis")
     if "analysis" in raw:
@@ -35,10 +37,15 @@ def parameters(raw):
         threshold = float(raw["max_distance"]) if mode == "similarity" else None
         minimum = int(raw["min_sentences"])
         max_tokens = int(raw["max_tokens"])
+        short_max_words = int(raw["short_max_words"]) if mode == "clause_alternation" else None
     except ValueError as exc:
         raise ValueError("invalid numeric parameters") from exc
     if (threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 1)) or not 2 <= minimum <= MAX_SENTENCES or not 1 <= max_tokens <= 100:
         raise ValueError("numeric parameters are out of range")
+    if mode == "clause_alternation":
+        labels = raw["subordinate_labels"].split(",")
+        if not 1 <= short_max_words <= 100 or len(labels) > 32 or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:.-]{0,63}", label) for label in labels) or len(set(labels)) != len(labels):
+            raise ValueError("invalid clause alternation parameters")
     return threshold, minimum, max_tokens
 
 
@@ -140,6 +147,15 @@ def evaluate(input_data, raw_parameters, nlp):
             if opening is None or not opening.pos_:
                 raise Unavailable("sentence opening has no part-of-speech annotation")
             opening_pos.append(opening.pos_)
+    clause_shapes = []
+    if mode == "clause_alternation":
+        labels = set(raw_parameters["subordinate_labels"].split(","))
+        for sentence, (start, end) in zip(sentences, bounds):
+            marked = any(token.dep_ in labels for token in sentence)
+            words = len(re.findall(r"\b\w+(?:[\u2019'-]\w+)*\b", text[start:end], re.UNICODE))
+            if words == 0:
+                raise Unavailable("sentence has no countable words")
+            clause_shapes.append((marked, words))
     compared = 0
     for i in range(1, len(sentences)):
         previous_end = bounds[i - 1][1]
@@ -152,6 +168,13 @@ def evaluate(input_data, raw_parameters, nlp):
             if opening_pos[i - 1] != opening_pos[i]:
                 continue
             message = f"Adjacent sentences start with the same part-of-speech label ({opening_pos[i]}); review the opening in context."
+        elif mode == "clause_alternation":
+            left, right = clause_shapes[i - 1], clause_shapes[i]
+            limit = int(raw_parameters["short_max_words"])
+            if (left[0] and not right[0] and right[1] <= limit) or (right[0] and not left[0] and left[1] <= limit):
+                continue
+            message = ("Adjacent sentences do not alternate a configured subordinate-dependency marker "
+                       f"with an unmarked sentence of at most {limit} words; review the rhythm in context.")
         else:
             score = distance(trees[i - 1], trees[i])
             if score > threshold:
@@ -163,7 +186,7 @@ def evaluate(input_data, raw_parameters, nlp):
         raise Unavailable("no adjacent sentences within a paragraph")
     if len(findings) > 1000:
         raise Unavailable("too many diagnostics")
-    extension = "syntax.opening_pos" if mode == "opening_pos" else EXTENSION
+    extension = {"opening_pos": "syntax.opening_pos", "clause_alternation": "syntax.clause_alternation"}.get(mode, EXTENSION)
     return [{"extension": extension, "parameters": raw_parameters, "input": input_data, "diagnostics": findings}]
 
 

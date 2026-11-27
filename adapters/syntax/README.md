@@ -33,3 +33,19 @@ parser includes surrounding whitespace in a sentence span; a sentence spanning
 paragraphs is not assessed. As above, missing annotations, model mismatch,
 partial coverage or no comparable pair results in `not_checked`; do not treat
 a missing result as a pass. No content is rewritten.
+
+## Optional clause-pattern alternation review
+
+The `clause-alternation-example` and `clause-alternation-parameters` files
+provide English and `-fr` French examples. The adapter compares adjacent
+sentences in the same paragraph. A pair meets the example pattern if one
+sentence contains a configured dependency label and the other contains none
+and has at most `short_max_words` words. Other pairs receive an advisory
+finding. Labels are exact, comma-separated model-specific strings; validate
+them for the installed model and your editorial context. Word counting is a
+Unicode lexical approximation, not a language-aware tokenizer. The example
+limits and labels are uncalibrated. Parser tags do not prove the presence or
+absence of a subordinate clause, and legitimate parallelism should be retained
+when appropriate. These checks do not establish writing quality, authorship,
+meaning preservation, or translation quality. The same coverage, version and
+`not_checked` requirements described above apply.

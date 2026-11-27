@@ -25,5 +25,8 @@ COPYFILE_DISABLE=1 tar -czf "$archive" -C "$root" LICENSE \
   adapters/syntax/README.md adapters/syntax/example.toml \
   adapters/syntax/example-parameters.json adapters/syntax/opening-pos-example.toml \
   adapters/syntax/opening-pos-parameters.json adapters/syntax/opening-pos-example-fr.toml \
-  adapters/syntax/opening-pos-parameters-fr.json adapters/syntax/review.py adapters/syntax/test_review.py
+  adapters/syntax/opening-pos-parameters-fr.json \
+  adapters/syntax/clause-alternation-example.toml adapters/syntax/clause-alternation-parameters.json \
+  adapters/syntax/clause-alternation-example-fr.toml adapters/syntax/clause-alternation-parameters-fr.json \
+  adapters/syntax/review.py adapters/syntax/test_review.py
 printf '%s\n' "$archive"

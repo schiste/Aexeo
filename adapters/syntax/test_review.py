@@ -57,6 +57,43 @@ class TestSyntaxAdapter(unittest.TestCase):
             self.assertEqual(config["gates"][0]["parameters"], params)
             review.parameters(params)
 
+    def test_clause_alternation_examples_and_results(self):
+        root = Path(review.__file__).parent
+        for suffix in ("", "-fr"):
+            config = tomllib.loads((root / f"clause-alternation-example{suffix}.toml").read_text(encoding="utf-8"))
+            params = json.loads((root / f"clause-alternation-parameters{suffix}.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["gates"][0]["parameters"], params)
+            review.parameters(params)
+        params = json.loads((root / "clause-alternation-parameters.json").read_text(encoding="utf-8"))
+        first, second = Sentence(0, 6, 0), Sentence(7, 14, 2)
+        first[1].dep_ = "advcl"
+        model = Model([first, second])
+        result = review.evaluate({"text": "First. Second."}, params, model)
+        self.assertEqual(result[0]["extension"], "syntax.clause_alternation")
+        self.assertEqual(result[0]["diagnostics"], [])
+        second[1].dep_ = "advcl"
+        result = review.evaluate({"text": "First. Second."}, params, model)
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        self.assertEqual(result[0]["diagnostics"][0]["column"], 8)
+        second[1].dep_ = "nsubj"
+        result = review.evaluate({"text": "First. Second."}, {**params, "short_max_words": "1"}, model)
+        self.assertEqual(result[0]["diagnostics"], [])
+        long_second = Sentence(7, 21, 2)
+        result = review.evaluate({"text": "First. Second phrase."}, {**params, "short_max_words": "1"}, Model([first, long_second]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        first[1].dep_ = "nsubj"
+        second[1].dep_ = "advcl"
+        result = review.evaluate({"text": "First. Second."}, params, model)
+        self.assertEqual(result[0]["diagnostics"], [])
+        with self.assertRaises(review.Unavailable):
+            review.evaluate({"text": "First.\n\nSecond."}, params, Model([Sentence(0, 8, 0), Sentence(8, 15, 2)]))
+        for invalid in ("", "advcl,,ccomp", "advcl,advcl", "advcl, ccomp"):
+            with self.subTest(labels=invalid), self.assertRaises(ValueError):
+                review.parameters({**params, "subordinate_labels": invalid})
+        for invalid in ("0", "101", "foo"):
+            with self.subTest(limit=invalid), self.assertRaises(ValueError):
+                review.parameters({**params, "short_max_words": invalid})
+
     def test_ordered_subtree_distance(self):
         leaf = (("NOUN", "nsubj"), ())
         root = (("VERB", "ROOT"), (leaf,))
