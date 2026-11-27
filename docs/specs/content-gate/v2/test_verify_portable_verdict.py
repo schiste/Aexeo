@@ -230,6 +230,35 @@ class PortableComparison(unittest.TestCase):
             with self.subTest(source=value), self.assertRaises(VerificationError):
                 verify_host_candidate_projection(policy, verdict, [dict(item, source=value)])
 
+    def test_duplicate_heading_policy_requires_boolean_case_option(self):
+        gate = {'kind': 'duplicate_headings', 'id': 'd', 'severity': 'warning', 'blocking': False, 'case_sensitive': True}
+        validate_heading_gate(gate)
+        for value in (None, 0, 'false'):
+            with self.subTest(value=value), self.assertRaises(VerificationError):
+                validate_heading_gate(dict(gate, case_sensitive=value))
+        with self.assertRaises(VerificationError):
+            validate_heading_gate(dict(gate, extra=True))
+
+    def test_host_duplicate_headings_are_recomputed(self):
+        policy = {'gates': [{'kind': 'duplicate_headings', 'id': 'd', 'case_sensitive': False}]}
+        verdict = {'checks': [{'id': 'gate:1:a:d', 'status': 'failed'}], 'findings': []}
+        projection = {'schema': 'aexeo.content-adapter/v1', 'text': '', 'headings': [' Alpha ', '', 'alpha']}
+        item = {'entity_id': 'a', 'media_type': 'application/vnd.aexeo.content-adapter+json', 'source': json.dumps(projection)}
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [item]))
+        verdict['checks'][0]['status'] = 'passed'
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_projection(policy, verdict, [item])
+        projection['headings'] = ['é', 'É']
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_projection(policy, verdict, [dict(item, source=json.dumps(projection))])
+        policy['gates'][0]['case_sensitive'] = True
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [dict(item, source=json.dumps(projection))]))
+        del projection['headings']
+        with self.assertRaises(VerificationError):
+            verify_host_candidate_projection(policy, verdict, [dict(item, source=json.dumps(projection))])
+        verdict['checks'][0]['status'] = 'not_checked'
+        self.assertTrue(verify_host_candidate_projection(policy, verdict, [dict(item, source=json.dumps(projection))]))
+
     def test_bound_host_projection_accepts_only_recomputed_counts(self):
         import hashlib
         source = '{"schema":"aexeo.content-adapter/v1","text":"abc","block_ends":[1],"headings":["Intro"],"heading_levels":[2],"paragraphs":[{"start":0,"end":3}]}'
@@ -1200,10 +1229,11 @@ class PortableComparison(unittest.TestCase):
         for kind in ('list_item_count', 'link_count', 'link_destinations',
                      'required_headings', 'heading_length', 'heading_hierarchy',
                      'duplicate_headings', 'prose_sentence_length_variance'):
-            if kind in ('required_headings', 'heading_length', 'heading_hierarchy'):
+            if kind in ('required_headings', 'heading_length', 'heading_hierarchy', 'duplicate_headings'):
                 parameter = {'required_headings': ('headings', ['Intro']),
                              'heading_length': ('max_chars', 12),
-                             'heading_hierarchy': ('initial_level', None)}[kind]
+                             'heading_hierarchy': ('initial_level', None),
+                             'duplicate_headings': ('case_sensitive', True)}[kind]
                 policy['gates'][0] = {'kind': kind, 'id': 'words', 'severity': 'warning',
                                       'blocking': True, parameter[0]: parameter[1]}
             else:

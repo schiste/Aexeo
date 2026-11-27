@@ -136,6 +136,7 @@ def validate_heading_gate(gate):
         'required_headings': 'headings',
         'heading_length': 'max_chars',
         'heading_hierarchy': 'initial_level',
+        'duplicate_headings': 'case_sensitive',
     }
     if not isinstance(kind, str) or kind not in fields:
         return
@@ -153,6 +154,9 @@ def validate_heading_gate(gate):
         limit = gate['max_chars']
         if type(limit) is not int or not 1 <= limit <= (1 << 64) - 1:
             raise VerificationError('invalid heading length')
+    elif kind == 'duplicate_headings':
+        if type(gate['case_sensitive']) is not bool:
+            raise VerificationError('invalid duplicate headings case policy')
     else:
         level = gate['initial_level']
         if level is not None and (type(level) is not int or not 1 <= level <= 6):
@@ -476,7 +480,7 @@ def verify_host_candidate_projection(policy, verdict, after):
     if not host:
         return False
     if (not isinstance(policy, dict) or not isinstance(policy.get('gates'), list)
-            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'paragraph_count', 'paragraph_length', 'paragraph_character_length', 'required_headings', 'heading_length', 'heading_hierarchy'}
+            or any(not isinstance(gate, dict) or gate.get('kind') not in {'word_count', 'character_count', 'paragraph_count', 'paragraph_length', 'paragraph_character_length', 'required_headings', 'heading_length', 'heading_hierarchy', 'duplicate_headings'}
                    for gate in policy['gates'])):
         raise VerificationError('host adapter portable verification does not support this gate')
     checks = {check['id']: check for check in verdict['checks']}
@@ -551,7 +555,7 @@ def verify_host_candidate_projection(policy, verdict, after):
                     or any(type(level) is not int or not 1 <= level <= 6 for level in levels)):
                 raise VerificationError('invalid host heading levels')
         for gate in policy['gates']:
-            if gate['kind'] not in {'required_headings', 'heading_length', 'heading_hierarchy'}:
+            if gate['kind'] not in {'required_headings', 'heading_length', 'heading_hierarchy', 'duplicate_headings'}:
                 continue
             entity = item['entity_id']
             check_id = f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}'
@@ -579,6 +583,28 @@ def verify_host_candidate_projection(policy, verdict, after):
                         end -= 1
                     return end - start
                 failed = any(trimmed_length(heading) > maximum for heading in headings)
+            elif gate['kind'] == 'duplicate_headings':
+                if type(gate.get('case_sensitive')) is not bool:
+                    raise VerificationError('invalid duplicate headings case policy')
+                seen = set()
+                failed = False
+                for heading in headings:
+                    start, end = 0, len(heading)
+                    while start < end and _rust_blank(heading[start]):
+                        start += 1
+                    while end > start and _rust_blank(heading[end - 1]):
+                        end -= 1
+                    value = heading[start:end]
+                    if not value:
+                        continue
+                    if not gate['case_sensitive']:
+                        if not value.isascii():
+                            raise VerificationError('non-ASCII case-insensitive headings are not independently supported')
+                        value = value.lower()
+                    if value in seen:
+                        failed = True
+                        break
+                    seen.add(value)
             else:
                 initial = gate.get('initial_level')
                 if initial is not None and (type(initial) is not int or not 1 <= initial <= 6):
