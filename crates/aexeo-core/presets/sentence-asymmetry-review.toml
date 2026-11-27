@@ -1,0 +1,10 @@
+version = 1
+name = "Adjacent sentence length review"
+
+[[gates]]
+id = "editorial.sentence_asymmetry"
+kind = "similar_sentence_lengths"
+run_length = 2
+tolerance_words = 0
+min_difference_percent = 30
+blocking = false
