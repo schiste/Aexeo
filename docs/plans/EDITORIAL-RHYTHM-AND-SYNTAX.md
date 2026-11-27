@@ -11,3 +11,13 @@ These checks are advisory by default. They help authors review repetition; they 
 The standalone variance and opening presets and the news/opinion profiles are advisory starting points, not calibrated thresholds. Real-model syntax smoke testing covered English; the general parser contract does not establish accuracy in any language. Human editorial calibration on representative content remains future work.
 
 Verification: variance and opening rules passed their individual full CI and Aethyme gates, including shared CLI/WASM fixtures; syntax adapter passed offline CI and a real-model English CLI smoke test. The composed profiles have focused tests for parameters, observed findings and an insufficient variance window. The integration PR still requires its own CI before merge.
+
+## Configurable multilingual writing review — in progress
+
+- [x] Add an opt-in adjacent-length percentage comparison with exact integer arithmetic, configurable threshold, explicit insufficient-input status, and an advisory starter.
+- [x] Add configured colon-framing review and long-list starters for French and English; make phrases, conjunctions, separators and thresholds composable for other locales. Preserve the text and identify these as surface heuristics.
+- [x] Add an optional local model-backed part-of-speech opening review with bounded input and unavailable results when observations are missing. Update the writing skill.
+- [x] Exercise the supplied French sample, the core library suite, and offline syntax-adapter cases. These checks do not validate detection claims or grammar-model accuracy.
+- [ ] Run the opening-category adapter with a real compatible model and the full Aexeo extension workflow, including an unavailable-model case. Evaluate representative human-reviewed content in each supported language and calibrate defaults.
+- [ ] Design and evaluate explicit, version-bound prior-draft comparison and language-specific idiom/register review. A configured literal match cannot establish semantic equivalence, correct translation, concrete truth or an improvement in style. Until an appropriate assessment is supplied, do not claim that these requirements were checked.
+- [ ] Review CI, validate the current merge candidate, and publish through the repository's normal release process.
