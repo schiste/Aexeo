@@ -159,6 +159,23 @@ def validate_heading_gate(gate):
             raise VerificationError('invalid initial heading level')
 
 
+def validate_forbidden_terms_gate(gate):
+    """Validate the serialized shape and constraints of a forbidden-terms gate."""
+    if gate.get('kind') != 'forbidden_terms':
+        return
+    required = {'kind', 'id', 'severity', 'blocking', 'terms', 'whole_words', 'case_insensitive'}
+    if (not required <= set(gate) or set(gate) - required - {'review_only'}
+            or gate['severity'] not in ('warning', 'error')
+            or type(gate['blocking']) is not bool
+            or type(gate['whole_words']) is not bool
+            or type(gate['case_insensitive']) is not bool
+            or ('review_only' in gate and type(gate['review_only']) is not bool)
+            or (gate.get('review_only', False) and gate['blocking'])
+            or not isinstance(gate['terms'], list) or not gate['terms']
+            or any(not isinstance(term, str) or _rust_blank(term) for term in gate['terms'])):
+        raise VerificationError('invalid resolved forbidden terms gate')
+
+
 def validate_paragraph_length_gate(gate):
     """Validate exact resolved fields and producer bounds before checking outcomes."""
     kind = gate.get('kind')
@@ -600,6 +617,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
         validate_count_gate(gate)
         validate_heading_gate(gate)
         validate_paragraph_length_gate(gate)
+        validate_forbidden_terms_gate(gate)
         if kind == 'unique_collection_metadata':
             required = {'kind', 'id', 'severity', 'blocking', 'field'}
             if (not required <= set(gate) or set(gate) - required - {'group_by'}
