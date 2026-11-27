@@ -178,6 +178,38 @@ def validate_forbidden_terms_gate(gate):
         text(term, empty=False)
 
 
+def validate_inline_list_gate(gate):
+    """Validate portable serialized list-review parameters without evaluating prose."""
+    if gate.get('kind') != 'inline_triple_candidates':
+        return
+    required = {'kind', 'id', 'severity', 'blocking', 'conjunction', 'delimiters'}
+    optional = {'min_items', 'item_separator', 'abbreviations'}
+    if (not required <= set(gate) or set(gate) - required - optional
+            or gate['severity'] not in ('warning', 'error')
+            or type(gate['blocking']) is not bool):
+        raise VerificationError('invalid resolved inline list gate')
+    conjunction, delimiters = gate['conjunction'], gate['delimiters']
+    text(conjunction, empty=False)
+    text(delimiters, empty=False)
+    if (len(conjunction.encode('utf-8')) > 32
+            or any(ord(char) < 128 and not char.isalpha() for char in conjunction)):
+        raise VerificationError('invalid inline list conjunction')
+    if 'min_items' in gate and (type(gate['min_items']) is not int or not 3 <= gate['min_items'] <= 8):
+        raise VerificationError('invalid inline list minimum')
+    if 'item_separator' in gate:
+        separator = gate['item_separator']
+        text(separator, empty=False)
+        if (len(separator) != 1 or separator in delimiters
+                or separator.isalnum() or _rust_blank(separator)):
+            raise VerificationError('invalid inline list separator')
+    if 'abbreviations' in gate:
+        abbreviations = gate['abbreviations']
+        if not isinstance(abbreviations, list) or not abbreviations:
+            raise VerificationError('invalid inline list abbreviations')
+        for abbreviation in abbreviations:
+            text(abbreviation)
+
+
 def validate_paragraph_length_gate(gate):
     """Validate exact resolved fields and producer bounds before checking outcomes."""
     kind = gate.get('kind')
@@ -620,6 +652,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
         validate_heading_gate(gate)
         validate_paragraph_length_gate(gate)
         validate_forbidden_terms_gate(gate)
+        validate_inline_list_gate(gate)
         if kind == 'unique_collection_metadata':
             required = {'kind', 'id', 'severity', 'blocking', 'field'}
             if (not required <= set(gate) or set(gate) - required - {'group_by'}

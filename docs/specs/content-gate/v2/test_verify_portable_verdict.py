@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import validate_forbidden_terms_gate, validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import validate_inline_list_gate, validate_forbidden_terms_gate, validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -562,6 +562,28 @@ class PortableComparison(unittest.TestCase):
             with self.assertRaisesRegex(VerificationError, 'work limit'):
                 verify_plain_punctuation_statuses({'gates': [gate]}, verdict, after, {})
 
+    def test_inline_list_policy_shape_is_validated(self):
+        gate = dict(kind='inline_triple_candidates', id='list', severity='warning',
+                    blocking=False, conjunction='et', delimiters='.!?', min_items=4,
+                    item_separator=',', abbreviations=['Dr.'])
+        validate_inline_list_gate(gate)
+        for update in ({'min_items': 2}, {'min_items': 9}, {'min_items': True},
+                       {'item_separator': '.'}, {'item_separator': 'a'}, {'item_separator': '  '},
+                       {'conjunction': 'a1'}, {'conjunction': 'x' * 33}, {'delimiters': ''},
+                       {'abbreviations': []}, {'abbreviations': [None]}, {'extra': 1},
+                       {'severity': 'info'}, {'blocking': 1}):
+            with self.subTest(update=update), self.assertRaises(VerificationError):
+                validate_inline_list_gate(dict(gate, **update))
+        legacy = {key: value for key, value in gate.items()
+                  if key not in {'min_items', 'item_separator', 'abbreviations'}}
+        validate_inline_list_gate(legacy)
+        validate_inline_list_gate(dict(legacy, conjunction='و', item_separator='،'))
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        policy['gates'] = [dict(gate, id='words', blocking=True, min_items=2)]
+        with self.assertRaisesRegex(VerificationError, 'invalid inline list minimum'):
+            require_policy_coverage(policy, change, False, self.previous['verdict'])
+
     def test_forbidden_terms_policy_shape_is_validated(self):
         gate = dict(kind='forbidden_terms', id='terms', severity='warning', blocking=False,
                     terms=['leur ambition est simple'], whole_words=True, case_insensitive=True,
@@ -1019,6 +1041,8 @@ class PortableComparison(unittest.TestCase):
                 policy['gates'][0].update(max_chars=10)
             elif kind == 'repeated_punctuation':
                 policy['gates'][0].update(mark='—', max_per_paragraph=1)
+            elif kind == 'inline_triple_candidates':
+                policy['gates'][0].update(conjunction='and', delimiters='.!?')
             for status in ('passed', 'failed', 'not_checked'):
                 verdict['checks'][0]['status'] = status
                 with self.subTest(kind=kind, status=status):
