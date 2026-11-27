@@ -21,11 +21,15 @@ Run `python3 -m unittest discover -s adapters/syntax -v` for offline contract te
 
 ## Optional opening part-of-speech review
 
-Use `opening-pos-example.toml` and `opening-pos-parameters.json` with the same
+Use `opening-pos-example.toml` and `opening-pos-parameters.json`, or the French
+`opening-pos-example-fr.toml` and `opening-pos-parameters-fr.json`, with the same
 three-command workflow to review consecutive sentences whose first non-punctuation
 tokens have the same model-supplied universal part-of-speech label. Change the
 model, version and language together for your content. This is not a comparison
 of full grammatical openings or a guarantee that the model's tags are correct.
-Parallelism can be intentional. As above, missing annotations, model mismatch,
+Parallelism can be intentional. Only sentences in the same observed paragraph
+are compared. Blank-line separators remain paragraph boundaries even if the
+parser includes surrounding whitespace in a sentence span; a sentence spanning
+paragraphs is not assessed. As above, missing annotations, model mismatch,
 partial coverage or no comparable pair results in `not_checked`; do not treat
 a missing result as a pass. No content is rewritten.

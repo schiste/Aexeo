@@ -100,7 +100,8 @@ class SyntaxReleaseTests(unittest.TestCase):
                     "LICENSE", "adapters/syntax/README.md", "adapters/syntax/example.toml",
                     "adapters/syntax/example-parameters.json", "adapters/syntax/review.py",
                     "adapters/syntax/test_review.py", "adapters/syntax/opening-pos-example.toml",
-                    "adapters/syntax/opening-pos-parameters.json",
+                    "adapters/syntax/opening-pos-parameters.json", "adapters/syntax/opening-pos-example-fr.toml",
+                    "adapters/syntax/opening-pos-parameters-fr.json",
                 })
                 for member in bundle.getmembers():
                     self.assertTrue(member.isfile())
