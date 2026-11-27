@@ -147,9 +147,15 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
   // A runtime provider replaces static evidence in the ordinary evaluator.
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;
-  let report = options.onContentEvaluationTelemetry
-    ? await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence, options.onContentEvaluationTelemetry)
-    : await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
+  let report: Awaited<ReturnType<RevisionAuditOptions["evaluate"]>>;
+  try {
+    report = options.onContentEvaluationTelemetry
+      ? await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence, options.onContentEvaluationTelemetry)
+      : await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
+  } catch {
+    // Runtime diagnostics can include private source content or configuration.
+    return { status: "not_checked", reason: "revision_evaluation_failed", revision } as const;
+  }
   let revisionObserverInvoked = false;
   if (candidate === undefined && options.revisionLinkObservations && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
     const started = options.onLinkProviderTelemetry ? performance.now() : 0;
@@ -233,7 +239,11 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
       rendered_page: "not_observed" as const,
     },
     source_paths: { blocks: adapted.meta.bodySourcePaths ?? null, spans: adapted.meta.bodySourceSpanPaths ?? null }, report };
-  await ctx.kv.set(reportKey(auditId), result);
+  try {
+    await ctx.kv.set(reportKey(auditId), result);
+  } catch {
+    return { status: "not_checked", reason: "revision_audit_storage_failed", revision } as const;
+  }
   return { ...result, revision_status: revisionStatus(latest, revision), locale_status: localeStatus(result.locale_at_audit, latest) };
 }
 

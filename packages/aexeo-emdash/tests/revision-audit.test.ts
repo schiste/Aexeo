@@ -13,6 +13,21 @@ function host() {
 const report = { preset: "article", input_id: "/revision/one", gates: [], applied_fixes: [] };
 
 describe("revision audits", () => {
+  it("reports evaluation and storage failures without exposing private diagnostics", async () => {
+    const request = { collection: "posts", id: "one", revision: "rev1" };
+    const { ctx } = host();
+    const evaluate = vi.fn(async () => { throw new Error("private evaluator details"); });
+    const result = await auditRevision(ctx as never, request, { preset: { name: "article" }, evaluate });
+    expect(result).toEqual({ status: "not_checked", reason: "revision_evaluation_failed", revision: "rev1" });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(await ctx.kv.get("anything")).toBeUndefined();
+    const storage = host();
+    storage.ctx.kv.set = vi.fn(async () => { throw new Error("private storage details"); });
+    const failedSave = await auditRevision(storage.ctx as never, request, { preset: { name: "article" }, evaluate: async () => report });
+    expect(failedSave).toEqual({ status: "not_checked", reason: "revision_audit_storage_failed", revision: "rev1" });
+    expect(JSON.stringify(failedSave)).not.toContain("private");
+  });
+
   it("requires separate historical attestations for whole documents and fields", async () => {
     const { ctx, revision } = host();
     (revision.data as Record<string, unknown>).intro = "Historical introduction.";
