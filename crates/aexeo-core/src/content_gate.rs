@@ -891,6 +891,9 @@ pub enum ContentGate {
         severity: Severity,
         #[serde(default = "default_blocking")]
         blocking: bool,
+        /// Present matches as candidates for contextual review.
+        #[serde(default, skip_serializing_if = "is_false")]
+        review_only: bool,
         terms: Vec<String>,
         #[serde(default = "default_whole_words")]
         whole_words: bool,
@@ -1304,6 +1307,11 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ),
         ContentGate::RequiredTerms { .. } => Some(
             "Check whether the required term belongs in this content or the configured policy needs adjustment.",
+        ),
+        ContentGate::ForbiddenTerms {
+            review_only: true, ..
+        } => Some(
+            "Review this phrase in context; keep it when it fits the meaning and intended voice.",
         ),
         ContentGate::ForbiddenTerms { .. } => Some(
             "Review the matched term in context and replace it if the configured policy applies.",
@@ -2176,6 +2184,13 @@ impl ContentPreset {
                         "required terms must contain 1 to 256 nonempty, distinct literals for {}",
                         gate.id()
                     )
+                }
+                ContentGate::ForbiddenTerms {
+                    review_only: true,
+                    blocking: true,
+                    ..
+                } => {
+                    bail!("review-only terms must be non-blocking for {}", gate.id())
                 }
                 ContentGate::ForbiddenTerms { terms, .. }
                     if terms.is_empty() || terms.iter().any(|s| s.trim().is_empty()) =>
@@ -4329,6 +4344,7 @@ impl ContentPreset {
                     terms,
                     whole_words,
                     case_insensitive,
+                    review_only,
                     ..
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
@@ -4354,7 +4370,12 @@ impl ContentPreset {
                                                 column += 1;
                                             }
                                         }
-                                        emit(format!("Forbidden term: {term}"), line, column);
+                                        let message = if *review_only {
+                                            format!("Phrase to review in context: {term}")
+                                        } else {
+                                            format!("Forbidden term: {term}")
+                                        };
+                                        emit(message, line, column);
                                         cursor = offset;
                                     }
                                     false

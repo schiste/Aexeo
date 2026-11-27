@@ -1,0 +1,3 @@
+version = 1
+name = "Structural style review starter"
+extends = ["sentence-rhythm-review", "prose-variance-review", "sentence-opening-window-review"]

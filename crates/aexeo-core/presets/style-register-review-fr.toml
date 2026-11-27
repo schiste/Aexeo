@@ -1,0 +1,12 @@
+version = 1
+name = "French register and phrasing review starter"
+extends = ["style-structure-review", "inline-triples-fr"]
+
+# Examples for contextual editorial review, not prohibited wording.
+[[gates]]
+id = "editorial.fr_phrasing_review"
+kind = "forbidden_terms"
+terms = ["leur ambition est simple", "prendre soin de sa sécurité", "la taille de votre organisation"]
+case_insensitive = true
+review_only = true
+blocking = false
