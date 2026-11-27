@@ -402,3 +402,10 @@ Do not use this procedure as publication authorization.
 ### Optional native CLI interoperability test
 
 `test_portable_cli_interop.py` always tests Aexeo against the Python comparator. Set `AETHYME_CLI_BIN` to an independently built Aethyme binary supporting `content-gate compare-v2` to additionally compare fresh envelopes produced by the actual Aexeo CLI with the native Aethyme CLI and reject changed policy bytes and unsuccessful or missing fresh process status. Set `AEXEO_CLI_BIN` to a trusted built Aexeo executable to avoid a Cargo build. The test exercises offline comparison only; caller-supplied process status, input provenance, freshness, and publication atomicity remain outside its scope.
+
+The independent comparator checks the serialized shape, minimum item count and
+separator constraints of inline-list review gates. For non-ASCII conjunctions it
+checks UTF-8 validity and byte length, not full Unicode alphabetic equivalence
+with the producer. Separator character classification uses Python Unicode
+properties and may differ from the producer. This does not independently verify
+list-review findings.
