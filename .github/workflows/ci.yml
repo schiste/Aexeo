@@ -169,6 +169,8 @@ jobs:
         run: npm run build:wasm --prefix packages/aexeo-crawl-worker
       - name: Test the worker in workerd with the real WASM
         run: npm test --prefix packages/aexeo-crawl-worker
+      - name: Test the configured plugin revision audit in workerd
+        run: npm run test:configured-plugin --prefix packages/aexeo-crawl-worker
 
   jev-adapter:
     name: Jev adapter (offline tests)
@@ -180,6 +182,8 @@ jobs:
         run: python3 -m unittest discover -s adapters/jev -v
       - name: Run optional syntax adapter offline tests
         run: python3 -m unittest discover -s adapters/syntax -v
+      - name: Run optional revision adapter offline tests
+        run: python3 -m unittest discover -s adapters/revision -v
 
   # `rust-version` in Cargo.toml is a promise nothing else checks: every other
   # job builds with the newer pin from rust-toolchain.toml. If a dependency bump

@@ -659,6 +659,9 @@ pub enum ContentGate {
         #[serde(default)]
         blocking: bool,
         terms: Vec<String>,
+        /// Match an opening only when its configured text is followed by a colon.
+        #[serde(default, skip_serializing_if = "is_false")]
+        require_colon: bool,
         #[serde(default)]
         max_per_paragraph: usize,
         #[serde(default = "default_sentence_delimiters")]
@@ -697,6 +700,9 @@ pub enum ContentGate {
         blocking: bool,
         run_length: usize,
         tolerance_words: usize,
+        /// Minimum adjacent length difference as a percentage of the longer sentence.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_difference_percent: Option<usize>,
         /// Opt in to whitespace-token counting for recognized Arabic script characters.
         #[serde(default, skip_serializing_if = "is_false")]
         allow_arabic_word_boundaries: bool,
@@ -2061,11 +2067,19 @@ impl ContentPreset {
                 }
                 ContentGate::SimilarSentenceLengths {
                     run_length,
+                    tolerance_words,
+                    min_difference_percent,
                     delimiters,
                     ..
-                } if *run_length < 2 || *run_length > 64 || delimiters.is_empty() => {
+                } if *run_length < 2
+                    || *run_length > 64
+                    || delimiters.is_empty()
+                    || min_difference_percent.is_some_and(|percent| {
+                        !(1..=100).contains(&percent) || *run_length != 2 || *tolerance_words != 0
+                    }) =>
+                {
                     bail!(
-                        "sentence rhythm needs a run of 2 to 64 sentences and delimiters for {}",
+                        "sentence rhythm needs a run of 2 to 64 sentences and delimiters; percentage mode requires a run of 2, tolerance 0 and a threshold from 1 to 100 for {}",
                         gate.id()
                     );
                 }
@@ -3610,12 +3624,16 @@ impl ContentPreset {
                 ContentGate::SimilarSentenceLengths {
                     run_length,
                     tolerance_words,
+                    min_difference_percent,
                     delimiters,
                     abbreviations,
                     allow_arabic_word_boundaries,
                     ..
                 } => {
                     measurements.insert("run_length".into(), *run_length);
+                    if let Some(percent) = min_difference_percent {
+                        measurements.insert("min_difference_percent".into(), *percent);
+                    }
                     measurements.insert("tolerance_words".into(), *tolerance_words);
                     if let Some(paragraphs) =
                         context.and_then(|context| context.paragraphs.as_ref())
@@ -3623,6 +3641,7 @@ impl ContentPreset {
                         let mut bytes_seen = 0usize;
                         let mut flagged = 0usize;
                         let mut uncertain = 0usize;
+                        let mut pairs_assessed = 0usize;
                         for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
                             bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
                             if bytes_seen > MAX_CONTENT_INPUT_BYTES {
@@ -3663,7 +3682,16 @@ impl ContentPreset {
                                     if lengths.len() == *run_length {
                                         let min = lengths.iter().copied().min().unwrap_or(0);
                                         let max = lengths.iter().copied().max().unwrap_or(0);
-                                        if max - min <= *tolerance_words {
+                                        pairs_assessed += 1;
+                                        let similar = match min_difference_percent {
+                                            Some(percent) => {
+                                                max > 0
+                                                    && ((max - min) as u128) * 100
+                                                        < (*percent as u128) * (max as u128)
+                                            }
+                                            None => max - min <= *tolerance_words,
+                                        };
+                                        if similar {
                                             flagged += 1;
                                             emit(
                                                 format!(
@@ -3685,6 +3713,14 @@ impl ContentPreset {
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("similar_runs".into(), flagged);
+                        if min_difference_percent.is_some() {
+                            measurements.insert("pairs_assessed".into(), pairs_assessed);
+                            if pairs_assessed == 0 && reason.is_none() {
+                                reason = Some(
+                                    "not enough eligible adjacent sentences to compare".into(),
+                                );
+                            }
+                        }
                         if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
                             reason = Some("too many paragraphs to assess completely".into());
                         }
@@ -3804,6 +3840,7 @@ impl ContentPreset {
                 }
                 ContentGate::SentenceOpeningTerms {
                     terms,
+                    require_colon,
                     max_per_paragraph,
                     delimiters,
                     abbreviations,
@@ -3849,9 +3886,13 @@ impl ContentPreset {
                                         segment.nfc().flat_map(char::to_lowercase).nfc().collect();
                                     if normalized.iter().any(|term| {
                                         folded.strip_prefix(term).is_some_and(|tail| {
-                                            tail.chars()
-                                                .next()
-                                                .is_none_or(|ch| !ch.is_alphanumeric() && ch != '_')
+                                            if *require_colon {
+                                                tail.trim_start().starts_with(':')
+                                            } else {
+                                                tail.chars().next().is_none_or(|ch| {
+                                                    !ch.is_alphanumeric() && ch != '_'
+                                                })
+                                            }
                                         })
                                     }) {
                                         matches += 1;
@@ -3859,7 +3900,7 @@ impl ContentPreset {
                                         if in_paragraph > *max_per_paragraph {
                                             emit(
                                                 format!(
-                                                    "Configured sentence-opening expression occurs {in_paragraph} times in this paragraph; review the transition in context"
+                                                    "Configured sentence-opening expression occurs {in_paragraph} times in this paragraph; review the wording in context"
                                                 ),
                                                 line,
                                                 column,
@@ -8473,6 +8514,109 @@ terms = ["bad"]
             preset.evaluate(&input).unwrap().gates[0].status,
             GateStatus::NotChecked
         );
+    }
+
+    #[test]
+    fn configured_colon_openings_require_the_colon_and_skip_quotations() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='colon'\nkind='sentence_opening_terms'\nterms=['leur ambition est simple']\nrequire_colon=true\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "Leur ambition est simple : protéger les équipes.".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        context.paragraphs.as_mut().unwrap()[0].text =
+            "Leur ambition est simplement de protéger les équipes.".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
+        );
+        context.paragraphs.as_mut().unwrap()[0].text = "Leur ambition est simple et utile.".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
+        );
+        context.paragraphs.as_mut().unwrap()[0].text =
+            "« Leur ambition est simple : protéger les équipes. »".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
+        );
+    }
+
+    #[test]
+    fn adjacent_sentence_length_percent_is_exact_and_requires_observations() {
+        let config = "version=1\nname='t'\n[[gates]]\nid='rhythm'\nkind='similar_sentence_lengths'\nrun_length=2\ntolerance_words=0\nmin_difference_percent=30\n";
+        let preset = ContentPreset::from_toml(config).unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "One two three four five six seven. One two three four five six seven eight nine ten.".into(),
+                line: 1, column: 1,
+            }]), ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[0].measurements["pairs_assessed"], 1);
+        context.paragraphs.as_mut().unwrap()[0].text = "One two three four five six seven eight. One two three four five six seven eight nine ten.".into();
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        context.paragraphs.as_mut().unwrap()[0].text = "Only one sentence.".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        context.paragraphs.as_mut().unwrap()[0].text = "你好世界。".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        for invalid in [
+            config.replace("percent=30", "percent=0"),
+            config.replace("percent=30", "percent=101"),
+            config.replace("run_length=2", "run_length=3"),
+            config.replace("tolerance_words=0", "tolerance_words=1"),
+        ] {
+            assert!(ContentPreset::from_toml(&invalid).is_err());
+        }
     }
 
     #[test]

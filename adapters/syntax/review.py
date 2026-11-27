@@ -19,17 +19,33 @@ class Unavailable(Exception):
 
 
 def parameters(raw):
-    required = {"model", "model_version", "language", "max_distance", "min_sentences", "max_tokens"}
-    if not isinstance(raw, dict) or set(raw) != required or not all(isinstance(v, str) and v for v in raw.values()):
-        raise ValueError("parameters must contain exactly the six documented nonempty string fields")
+    if not isinstance(raw, dict):
+        raise ValueError("parameters must be an object")
+    mode = raw.get("analysis", "similarity")
+    required = {"model", "model_version", "language", "min_sentences", "max_tokens"}
+    if mode == "similarity":
+        required.add("max_distance")
+    elif mode == "clause_alternation":
+        required.update({"subordinate_labels", "short_max_words"})
+    elif mode != "opening_pos":
+        raise ValueError("unsupported analysis")
+    if "analysis" in raw:
+        required.add("analysis")
+    if set(raw) != required or not all(isinstance(v, str) and v for v in raw.values()):
+        raise ValueError("parameters must contain exactly the documented nonempty string fields")
     try:
-        threshold = float(raw["max_distance"])
+        threshold = float(raw["max_distance"]) if mode == "similarity" else None
         minimum = int(raw["min_sentences"])
         max_tokens = int(raw["max_tokens"])
+        short_max_words = int(raw["short_max_words"]) if mode == "clause_alternation" else None
     except ValueError as exc:
         raise ValueError("invalid numeric parameters") from exc
-    if not math.isfinite(threshold) or not 0 <= threshold <= 1 or not 2 <= minimum <= MAX_SENTENCES or not 1 <= max_tokens <= 100:
+    if (threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 1)) or not 2 <= minimum <= MAX_SENTENCES or not 1 <= max_tokens <= 100:
         raise ValueError("numeric parameters are out of range")
+    if mode == "clause_alternation":
+        labels = raw["subordinate_labels"].split(",")
+        if not 1 <= short_max_words <= 100 or len(labels) > 32 or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:.-]{0,63}", label) for label in labels) or len(set(labels)) != len(labels):
+            raise ValueError("invalid clause alternation parameters")
     return threshold, minimum, max_tokens
 
 
@@ -82,6 +98,20 @@ def distance(first, second):
     return compare(first, second) / (size(first) + size(second))
 
 
+def sentence_bounds(text, sentence):
+    """Exclude boundary whitespace so paragraph separators cannot hide in a span."""
+    start, end = sentence.start_char, sentence.end_char
+    if not 0 <= start < end <= len(text):
+        raise Unavailable("invalid sentence offsets")
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    if start == end or re.search(r"\n\s*\n", text[start:end]):
+        raise Unavailable("sentence crosses a paragraph boundary")
+    return start, end
+
+
 def evaluate(input_data, raw_parameters, nlp):
     threshold, minimum, max_tokens = parameters(raw_parameters)
     if not isinstance(input_data, dict) or not isinstance(input_data.get("text"), str):
@@ -105,23 +135,59 @@ def evaluate(input_data, raw_parameters, nlp):
     if any(len(sentence) > max_tokens for sentence in sentences):
         raise Unavailable("sentence exceeds configured token limit")
     trees = [tree_for(sentence) for sentence in sentences]
+    bounds = [sentence_bounds(text, sentence) for sentence in sentences]
+    if any(bounds[i - 1][1] > bounds[i][0] for i in range(1, len(bounds))):
+        raise Unavailable("overlapping sentence offsets")
     findings = []
+    mode = raw_parameters.get("analysis", "similarity")
+    opening_pos = []
+    if mode == "opening_pos":
+        for sentence in sentences:
+            opening = next((token for token in sentence if token.pos_ not in {"PUNCT", "SPACE"}), None)
+            if opening is None or not opening.pos_:
+                raise Unavailable("sentence opening has no part-of-speech annotation")
+            opening_pos.append(opening.pos_)
+    clause_shapes = []
+    if mode == "clause_alternation":
+        labels = set(raw_parameters["subordinate_labels"].split(","))
+        for sentence, (start, end) in zip(sentences, bounds):
+            marked = any(token.dep_ in labels for token in sentence)
+            words = len(re.findall(r"\b\w+(?:[\u2019'-]\w+)*\b", text[start:end], re.UNICODE))
+            if words == 0:
+                raise Unavailable("sentence has no countable words")
+            clause_shapes.append((marked, words))
     compared = 0
     for i in range(1, len(sentences)):
-        previous, current = sentences[i - 1], sentences[i]
-        # Compare only within paragraphs. Do not infer a grammar across blocks.
-        if re.search(r"\n[\s]*\n", text[previous.end_char:current.start_char]):
+        previous_end = bounds[i - 1][1]
+        current_start = bounds[i][0]
+        # spaCy can include blank-line whitespace in either sentence span.
+        if re.search(r"\n\s*\n", text[previous_end:current_start]):
             continue
         compared += 1
-        score = distance(trees[i - 1], trees[i])
-        if score <= threshold:
-            prefix = text[:current.start_char]
-            findings.append({"message": f"Adjacent sentences have similar dependency structures (distance {score:.3f}, threshold {threshold:.3f}); review whether the parallelism is intentional.", "line": prefix.count("\n") + 1, "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
+        if mode == "opening_pos":
+            if opening_pos[i - 1] != opening_pos[i]:
+                continue
+            message = f"Adjacent sentences start with the same part-of-speech label ({opening_pos[i]}); review the opening in context."
+        elif mode == "clause_alternation":
+            left, right = clause_shapes[i - 1], clause_shapes[i]
+            limit = int(raw_parameters["short_max_words"])
+            if (left[0] and not right[0] and right[1] <= limit) or (right[0] and not left[0] and left[1] <= limit):
+                continue
+            message = ("Adjacent sentences do not alternate a configured subordinate-dependency marker "
+                       f"with an unmarked sentence of at most {limit} words; review the rhythm in context.")
+        else:
+            score = distance(trees[i - 1], trees[i])
+            if score > threshold:
+                continue
+            message = f"Adjacent sentences have similar dependency structures (distance {score:.3f}, threshold {threshold:.3f}); review whether the parallelism is intentional."
+        prefix = text[:current_start]
+        findings.append({"message": message, "line": prefix.count("\n") + 1, "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
     if not compared:
         raise Unavailable("no adjacent sentences within a paragraph")
     if len(findings) > 1000:
         raise Unavailable("too many diagnostics")
-    return [{"extension": EXTENSION, "parameters": raw_parameters, "input": input_data, "diagnostics": findings}]
+    extension = {"opening_pos": "syntax.opening_pos", "clause_alternation": "syntax.clause_alternation"}.get(mode, EXTENSION)
+    return [{"extension": extension, "parameters": raw_parameters, "input": input_data, "diagnostics": findings}]
 
 
 def load_json(path, limit):

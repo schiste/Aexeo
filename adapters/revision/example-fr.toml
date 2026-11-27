@@ -1,0 +1,13 @@
+version = 1
+name = "Exemple de comparaison littérale de versions"
+
+[[gates]]
+id = "editorial.literal_revision_pairs"
+kind = "custom"
+extension = "revision.literal_pairs"
+severity = "warning"
+blocking = false
+[gates.parameters]
+source = "prior"
+pairs = '[{"before":"difficultés","after":"manquent de temps"},{"before":"prendre soin de sa sécurité","after":"protéger leur activité"}]'
+minimum = "2"

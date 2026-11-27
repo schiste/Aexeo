@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -48,6 +49,51 @@ class Model:
 
 
 class TestSyntaxAdapter(unittest.TestCase):
+    def test_opening_example_parameters_match_their_policies(self):
+        root = Path(review.__file__).parent
+        for suffix in ("", "-fr"):
+            config = tomllib.loads((root / f"opening-pos-example{suffix}.toml").read_text(encoding="utf-8"))
+            params = json.loads((root / f"opening-pos-parameters{suffix}.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["gates"][0]["parameters"], params)
+            review.parameters(params)
+
+    def test_clause_alternation_examples_and_results(self):
+        root = Path(review.__file__).parent
+        for suffix in ("", "-fr"):
+            config = tomllib.loads((root / f"clause-alternation-example{suffix}.toml").read_text(encoding="utf-8"))
+            params = json.loads((root / f"clause-alternation-parameters{suffix}.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["gates"][0]["parameters"], params)
+            review.parameters(params)
+        params = json.loads((root / "clause-alternation-parameters.json").read_text(encoding="utf-8"))
+        first, second = Sentence(0, 6, 0), Sentence(7, 14, 2)
+        first[1].dep_ = "advcl"
+        model = Model([first, second])
+        result = review.evaluate({"text": "First. Second."}, params, model)
+        self.assertEqual(result[0]["extension"], "syntax.clause_alternation")
+        self.assertEqual(result[0]["diagnostics"], [])
+        second[1].dep_ = "advcl"
+        result = review.evaluate({"text": "First. Second."}, params, model)
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        self.assertEqual(result[0]["diagnostics"][0]["column"], 8)
+        second[1].dep_ = "nsubj"
+        result = review.evaluate({"text": "First. Second."}, {**params, "short_max_words": "1"}, model)
+        self.assertEqual(result[0]["diagnostics"], [])
+        long_second = Sentence(7, 21, 2)
+        result = review.evaluate({"text": "First. Second phrase."}, {**params, "short_max_words": "1"}, Model([first, long_second]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        first[1].dep_ = "nsubj"
+        second[1].dep_ = "advcl"
+        result = review.evaluate({"text": "First. Second."}, params, model)
+        self.assertEqual(result[0]["diagnostics"], [])
+        with self.assertRaises(review.Unavailable):
+            review.evaluate({"text": "First.\n\nSecond."}, params, Model([Sentence(0, 8, 0), Sentence(8, 15, 2)]))
+        for invalid in ("", "advcl,,ccomp", "advcl,advcl", "advcl, ccomp"):
+            with self.subTest(labels=invalid), self.assertRaises(ValueError):
+                review.parameters({**params, "subordinate_labels": invalid})
+        for invalid in ("0", "101", "foo"):
+            with self.subTest(limit=invalid), self.assertRaises(ValueError):
+                review.parameters({**params, "short_max_words": invalid})
+
     def test_ordered_subtree_distance(self):
         leaf = (("NOUN", "nsubj"), ())
         root = (("VERB", "ROOT"), (leaf,))
@@ -64,6 +110,49 @@ class TestSyntaxAdapter(unittest.TestCase):
         self.assertEqual(result[0]["parameters"], PARAMS)
         self.assertEqual(result[0]["diagnostics"][0]["column"], 6)
         self.assertEqual(len(result[0]["diagnostics"]), 2)
+
+    def test_opening_pos_compares_only_observed_adjacent_categories(self):
+        params = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        data = {"text": "First. Second. Third."}
+        first, second, third = Sentence(0, 6, 0), Sentence(7, 14, 2), Sentence(15, 21, 4)
+        third[0].pos_ = "NOUN"
+        result = review.evaluate(data, params, Model([first, second, third]))
+        self.assertEqual(result[0]["extension"], "syntax.opening_pos")
+        self.assertEqual(result[0]["parameters"], params)
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        self.assertEqual(result[0]["diagnostics"][0]["column"], 8)
+        first[0].pos_ = "PUNCT"
+        second[0].pos_ = "PUNCT"
+        third[0].pos_ = "VERB"
+        result = review.evaluate(data, params, Model([first, second, third]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        self.assertIn("NOUN", result[0]["diagnostics"][0]["message"])
+        first[0].pos_ = "VERB"
+        second[0].pos_ = "NOUN"
+        third[0].pos_ = "NOUN"
+        result = review.evaluate(data, params, Model([first, second, third]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        with self.assertRaises(review.Unavailable):
+            review.evaluate({"text": "First.\n\nSecond."}, params, Model([Sentence(0, 6, 0), Sentence(8, 15, 2)]))
+        second[0].pos_ = ""
+        with self.assertRaises(review.Unavailable):
+            review.evaluate(data, params, Model([first, second, third]))
+        with self.assertRaises(ValueError):
+            review.parameters({**params, "max_distance": "0.2"})
+
+    def test_sentence_spans_cannot_hide_paragraph_boundaries(self):
+        text = "A.\n\nB."
+        opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        for params in (PARAMS, opening):
+            for spans in (((0, 4), (4, 6)), ((0, 2), (2, 6)), ((0, 3), (3, 6))):
+                with self.subTest(params=params, spans=spans), self.assertRaises(review.Unavailable):
+                    review.evaluate({"text": text}, params, Model([Sentence(*spans[0], 0), Sentence(*spans[1], 2)]))
+        with self.assertRaises(review.Unavailable):
+            review.evaluate({"text": "A.\n\nB. C."}, PARAMS, Model([Sentence(0, 6, 0), Sentence(7, 9, 2)]))
+
+    def test_finding_location_skips_leading_sentence_whitespace(self):
+        result = review.evaluate({"text": "A. B."}, PARAMS, Model([Sentence(0, 2, 0), Sentence(2, 5, 2)]))
+        self.assertEqual(result[0]["diagnostics"][0]["column"], 4)
 
     def test_incompatible_or_incomplete_means_unavailable(self):
         model = Model([Sentence(0, 2, 0), Sentence(3, 5, 2)])

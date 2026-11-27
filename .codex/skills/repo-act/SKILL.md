@@ -126,6 +126,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   script directly with Node to verify its entrypoint as well as its tests.
 - Inspect caution zones before changing generated or vendored areas.
 
+- For EmDash WASM import or bundling changes, test the built configured plugin
+  with real WASM in workerd as well as Node; a sidecar-only Workers test
+  does not exercise the host bundle. When reproducing a regression, verify
+  the test also fails with the previous import and passes with the fix.
+
 ## Validation Checklist
 
 - For JavaScript arrays received from runtime providers, test sparse arrays as
@@ -192,6 +197,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   prose, test lowercase, uppercase and mixed-case HTTP(S) schemes, malformed
   or embedded non-URLs, and the next sentence's position; link parsing and
   sentence segmentation may use different recognizers.
+- For parser-backed sentence comparisons, test paragraph separators included in
+  the preceding or following sentence span, not only between spans. Confirm
+  cross-paragraph pairs are not compared and insufficient observations are
+  `not_checked`; verify finding positions after leading whitespace.
 - For structural adapter classifications, test source blocks that yield no
   projected paragraph (such as an empty list item), not just classifications of
   visible paragraphs. An omitted block can hide a boundary; withhold completeness
