@@ -54,7 +54,9 @@ async function loadBridgeModule(): Promise<WebAssembly.Module> {
   // ESM (Astro dev) this rejects at await time with a SyntaxError;
   // the catch falls through to Path B.
   try {
-    const mod = (await import(WASM_SPECIFIER)) as { default?: unknown };
+    // Consumer bundlers need the literal to resolve the precompiled module.
+    // Node falls back to the filesystem when its WASM import is unavailable.
+    const mod = (await import("../wasm/aexeo_emdash_bridge_bg.wasm")) as { default?: unknown };
     if (mod.default instanceof WebAssembly.Module) {
       cachedModule = mod.default;
       return cachedModule;
