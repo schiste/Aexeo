@@ -23,5 +23,6 @@ fi
 archive="$out/aexeo-syntax-adapter-v$version.tar.gz"
 COPYFILE_DISABLE=1 tar -czf "$archive" -C "$root" LICENSE \
   adapters/syntax/README.md adapters/syntax/example.toml \
-  adapters/syntax/example-parameters.json adapters/syntax/review.py adapters/syntax/test_review.py
+  adapters/syntax/example-parameters.json adapters/syntax/opening-pos-example.toml \
+  adapters/syntax/opening-pos-parameters.json adapters/syntax/review.py adapters/syntax/test_review.py
 printf '%s\n' "$archive"

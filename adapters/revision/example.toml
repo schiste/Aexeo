@@ -1,0 +1,13 @@
+version = 1
+name = "Literal draft comparison example"
+
+[[gates]]
+id = "editorial.literal_revision_pairs"
+kind = "custom"
+extension = "revision.literal_pairs"
+severity = "warning"
+blocking = false
+[gates.parameters]
+source = "prior"
+pairs = '[{"before":"difficulties","after":"limited time"},{"before":"assistance","after":"help"}]'
+minimum = "2"
