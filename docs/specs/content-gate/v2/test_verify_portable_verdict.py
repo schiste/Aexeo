@@ -571,7 +571,7 @@ class PortableComparison(unittest.TestCase):
         del legacy['review_only']
         validate_forbidden_terms_gate(legacy)
         for invalid in ({'blocking': True}, {'review_only': 1}, {'terms': []},
-                        {'terms': ['  ']}, {'terms': [None]}, {'whole_words': 1},
+                        {'terms': ['  ']}, {'terms': [None]}, {'terms': ['\ud800']}, {'whole_words': 1},
                         {'case_insensitive': None}, {'severity': 'info'}, {'extra': 1}):
             with self.subTest(invalid=invalid), self.assertRaises(VerificationError):
                 validate_forbidden_terms_gate(dict(gate, **invalid))

@@ -174,6 +174,8 @@ def validate_forbidden_terms_gate(gate):
             or not isinstance(gate['terms'], list) or not gate['terms']
             or any(not isinstance(term, str) or _rust_blank(term) for term in gate['terms'])):
         raise VerificationError('invalid resolved forbidden terms gate')
+    for term in gate['terms']:
+        text(term, empty=False)
 
 
 def validate_paragraph_length_gate(gate):
