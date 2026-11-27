@@ -8029,6 +8029,33 @@ terms = ["bad"]
     }
 
     #[test]
+    fn enumeration_separator_accepts_unicode_and_legacy_serialization_is_stable() {
+        let legacy = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='and'\n").unwrap();
+        let serialized = serde_json::to_value(&legacy).unwrap();
+        assert!(serialized["gates"][0].get("min_items").is_none());
+        assert!(serialized["gates"][0].get("item_separator").is_none());
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='و'\nmin_items=4\nitem_separator='،'\n").unwrap();
+        let text = "تفاح، كمثرى، خوخ و برقوق.";
+        let input = ContentInput {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["candidate_enumerations"], 1);
+    }
+
+    #[test]
     fn sentence_variance_windows_are_reproducible_and_partial_inputs_are_unchecked() {
         let fixed = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size=4\nmin_stddev_words=2\n").unwrap();
         assert!(
