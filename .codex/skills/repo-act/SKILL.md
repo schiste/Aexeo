@@ -271,6 +271,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Exercise the configured hook and real WASM; a missing peer import tests the
   fixture setup rather than package behavior. Do not confuse a CMS snapshot
   and mocked host with an end-to-end rendered-site validation.
+  To isolate a connected revision-audit failure, compare the same revision and
+  host configuration using both the published archive and candidate archive,
+  with private snapshots in session scratch and aggregate-only output. A
+  successful simulated host does not establish the deployed host version,
+  permissions, storage or runtime; verify those separately.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
 - When EmDash produces data consumed by Rust, use a shared synthetic fixture:
