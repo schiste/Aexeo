@@ -18,3 +18,14 @@ Use exactly the same parameter strings in the preset and adapter JSON. Any input
 The distance is a normalized, ordered **subtree-edit** cost using dependency and part-of-speech labels, with subtree insertion/deletion and relabeling; it is not general tree-edit distance and is not comparable to another algorithm's threshold. The output points to the second sentence in projected Unicode-scalar coordinates. Whitespace blank lines separate paragraphs. Inputs are read with a 32 MiB JSON limit and a 16 KiB parameter-file limit; output is capped at 32 MiB. Up to 200,000 UTF-8 text bytes, 1,000 sentences, 100 tokens per sentence, and 1,000 findings are allowed; lower token bounds may be set in the preset. No output is published automatically.
 
 Run `python3 -m unittest discover -s adapters/syntax -v` for offline contract tests. For an end-to-end check, explicitly provision a compatible spaCy model and execute the three commands above; the offline tests do not assess parser accuracy.
+
+## Optional opening part-of-speech review
+
+Use `opening-pos-example.toml` and `opening-pos-parameters.json` with the same
+three-command workflow to review consecutive sentences whose first non-punctuation
+tokens have the same model-supplied universal part-of-speech label. Change the
+model, version and language together for your content. This is not a comparison
+of full grammatical openings or a guarantee that the model's tags are correct.
+Parallelism can be intentional. As above, missing annotations, model mismatch,
+partial coverage or no comparable pair results in `not_checked`; do not treat
+a missing result as a pass. No content is rewritten.
