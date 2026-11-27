@@ -181,3 +181,22 @@ Aexeo [PR #1009](https://github.com/schiste/Aexeo/pull/1009) adds sanitized
 Other failures may remain generic; this does not fix or identify the observed
 Preview failure. The fix must be published, installed and exercised against the
 actual host before the connected workflow can be considered validated.
+
+### Local comparison against the same revision, 27 November 2026
+
+Read the current record and its historical snapshot through the Preview MCP,
+then ran a copy locally with the real configured plugin and WASM, an in-memory
+content API and KV, and the editorial mappings and presets in the website's
+`main` source. No content was changed. Both the published npm 0.9.6 package and
+the locally built 0.9.7 archive evaluated the whole record and its configured
+`content` fragment: each reported complete body coverage with 18 projected
+blocks, and returned three and one gate respectively. The 0.9.6 JSON responses
+were approximately 2.9 KB and 2.6 KB. The copies were kept in session scratch for removal when the session closes.
+
+This local test used Node 26.7.0 and EmDash 1.4.0 dependencies with a simulated
+host; the website source at the time referenced EmDash 1.6.0 and Aexeo 0.9.6.
+Neither source configuration nor the simulated host establishes the actual
+Preview deployment or reproduces its permissions, runtime or KV implementation.
+The test narrows the investigation but does not identify the connected error or
+prove that 0.9.7 fixes it. Re-run the connected audit after the package is
+published and installed, and inspect its sanitized reason or host logs if needed.
