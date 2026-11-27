@@ -91,6 +91,20 @@ def distance(first, second):
     return compare(first, second) / (size(first) + size(second))
 
 
+def sentence_bounds(text, sentence):
+    """Exclude boundary whitespace so paragraph separators cannot hide in a span."""
+    start, end = sentence.start_char, sentence.end_char
+    if not 0 <= start < end <= len(text):
+        raise Unavailable("invalid sentence offsets")
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    if start == end or re.search(r"\n\s*\n", text[start:end]):
+        raise Unavailable("sentence crosses a paragraph boundary")
+    return start, end
+
+
 def evaluate(input_data, raw_parameters, nlp):
     threshold, minimum, max_tokens = parameters(raw_parameters)
     if not isinstance(input_data, dict) or not isinstance(input_data.get("text"), str):
@@ -114,6 +128,9 @@ def evaluate(input_data, raw_parameters, nlp):
     if any(len(sentence) > max_tokens for sentence in sentences):
         raise Unavailable("sentence exceeds configured token limit")
     trees = [tree_for(sentence) for sentence in sentences]
+    bounds = [sentence_bounds(text, sentence) for sentence in sentences]
+    if any(bounds[i - 1][1] > bounds[i][0] for i in range(1, len(bounds))):
+        raise Unavailable("overlapping sentence offsets")
     findings = []
     mode = raw_parameters.get("analysis", "similarity")
     opening_pos = []
@@ -125,9 +142,10 @@ def evaluate(input_data, raw_parameters, nlp):
             opening_pos.append(opening.pos_)
     compared = 0
     for i in range(1, len(sentences)):
-        previous, current = sentences[i - 1], sentences[i]
-        # Compare only within paragraphs. Do not infer a grammar across blocks.
-        if re.search(r"\n[\s]*\n", text[previous.end_char:current.start_char]):
+        previous_end = bounds[i - 1][1]
+        current_start = bounds[i][0]
+        # spaCy can include blank-line whitespace in either sentence span.
+        if re.search(r"\n\s*\n", text[previous_end:current_start]):
             continue
         compared += 1
         if mode == "opening_pos":
@@ -139,7 +157,7 @@ def evaluate(input_data, raw_parameters, nlp):
             if score > threshold:
                 continue
             message = f"Adjacent sentences have similar dependency structures (distance {score:.3f}, threshold {threshold:.3f}); review whether the parallelism is intentional."
-        prefix = text[:current.start_char]
+        prefix = text[:current_start]
         findings.append({"message": message, "line": prefix.count("\n") + 1, "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
     if not compared:
         raise Unavailable("no adjacent sentences within a paragraph")
