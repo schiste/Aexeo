@@ -1,5 +1,9 @@
 import json
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 import review
 
 
@@ -25,6 +29,18 @@ class ReviewTests(unittest.TestCase):
         self.input["text"] = "x" * (review.MAX_TEXT_BYTES + 1)
         with self.assertRaises(review.Unavailable):
             review.evaluate(self.input, self.config)
+
+    def test_cli_requires_explicit_coverage_attestation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / "input.json").write_text(json.dumps(self.input), encoding="utf-8")
+            (path / "params.json").write_text(json.dumps(self.config), encoding="utf-8")
+            command = [sys.executable, str(Path(review.__file__)), str(path / "input.json"), str(path / "params.json")]
+            unavailable = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(unavailable.stdout), [])
+            self.assertIn("not checked", unavailable.stderr)
+            observed = subprocess.run(command + ["--drafts-complete"], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(observed.stdout)[0]["diagnostics"], [])
 
     def test_configuration_and_case_sensitive_matching(self):
         for value in ("0", "3", "-1", "NaN"):
