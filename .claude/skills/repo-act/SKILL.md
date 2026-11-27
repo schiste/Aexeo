@@ -22,6 +22,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   cross-paragraph pairs are not compared and insufficient observations are
   `not_checked`; verify finding positions after leading whitespace.
 
+- For EmDash WASM import or bundling changes, test the built configured plugin
+  with real WASM in workerd as well as Node; a sidecar-only Workers test
+  does not exercise the host bundle. When reproducing a regression, verify
+  the test also fails with the previous import and passes with the fix.
+
 ## Validation Checklist
 
 - Run the fastest relevant test command first.
