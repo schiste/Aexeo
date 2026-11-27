@@ -253,7 +253,11 @@ EmDash host; this capability requires host approval. Revision access
 requires a host that implements `content.getRevision`; otherwise the result is
 `not_checked`. The first tool evaluates the requested immutable revision and
 stores a report in plugin KV; the second retrieves it and checks whether the
-revision is still the current draft or publication. A stale or unknown status
+revision is still the current draft or publication. Evaluation and report-storage
+failures return `not_checked` with `revision_evaluation_failed` or
+`revision_audit_storage_failed` respectively, without exposing exception details.
+No audit ID is returned for those failures; inspect host-side diagnostics before
+retrying. These outcomes do not identify the underlying failure cause. A stale or unknown status
 is not evidence of current content. Source paths refer only to the revision
 snapshot. Historical rendered HTML and SEO-panel fields are unavailable, and
 runtime evidence and external-gate providers are not invoked. The ordinary
