@@ -319,13 +319,36 @@ def evaluate_batch(data, configs, spacy):
     return results
 
 
+def strict_json(data):
+    """Reject ambiguous objects and numbers that cannot be represented finitely."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite JSON number")
+        return number
+
+    def invalid_constant(_):
+        raise ValueError("non-JSON constant")
+
+    return json.loads(data, object_pairs_hook=unique_object,
+                      parse_float=finite_float, parse_constant=invalid_constant)
+
+
 def load_json(path, limit):
     """Read at most the accepted limit plus one byte, then decode JSON."""
     with open(path, "rb") as handle:
         data = handle.read(limit + 1)
     if len(data) > limit:
         raise ValueError("JSON input exceeds configured size limit")
-    return json.loads(data)
+    return strict_json(data)
 
 
 def main():

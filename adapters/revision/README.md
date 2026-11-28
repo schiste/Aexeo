@@ -57,3 +57,5 @@ voice, register and translation with an editor. For other languages copy the
 example and replace its locale-specific parents, phrases, model, labels and
 parameters with independently evaluated local choices. Unsupported languages
 and missing observations remain unchecked.
+
+Input and parameter JSON reject duplicate object keys at every nesting level and non-finite numbers. Invalid files exit nonzero without emitting a result; they do not establish a passing gate.
