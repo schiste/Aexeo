@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     time::{Duration, Instant},
 };
@@ -70,7 +70,7 @@ fn start(draft: &str, preset: &str, format: &str, extra: &[&str]) -> Session {
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     let input = child.stdin.take().unwrap();
@@ -302,6 +302,10 @@ fn telemetry_is_aggregate_and_does_not_include_draft() {
     let draft = dir.path().join("draft");
     let policy = dir.path().join("policy");
     let private_text = "private-handover-sentinel";
+    let evidence = dir.path().join("private-source-path");
+    let private_source = "private-source-sentinel";
+    fs::write(&evidence, private_source).unwrap();
+    let evidence_arg = format!("reference={}", evidence.display());
     fs::write(&draft, private_text).unwrap();
     fs::write(&policy, preset(3)).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
@@ -315,6 +319,8 @@ fn telemetry_is_aggregate_and_does_not_include_draft() {
             &format!("test={}", policy.display()),
             "--input-format",
             "text",
+            "--evidence-source",
+            &evidence_arg,
             "--max-revisions",
             "0",
             "--telemetry",
@@ -324,10 +330,13 @@ fn telemetry_is_aggregate_and_does_not_include_draft() {
     assert_eq!(output.status.code(), Some(1));
     let telemetry = String::from_utf8(output.stderr).unwrap();
     assert!(!telemetry.contains(private_text));
+    assert!(!telemetry.contains(private_source));
+    assert!(!telemetry.contains(evidence.to_str().unwrap()));
     let event: Value = serde_json::from_str(&telemetry).unwrap();
     assert_eq!(event["event"], "content_revision_loop");
     assert_eq!(event["evaluations"], 1);
     assert_eq!(event["patch_proposals"], 0);
+    assert_eq!(event["evidence_source_count"], 1);
     assert!(event["evaluation_ms"].as_f64().is_some());
     assert!(event["elapsed_ms"].as_f64().is_some());
 }
@@ -701,5 +710,57 @@ fn python_syntax_session_drives_real_revision_cli() {
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn revision_binds_named_evidence_to_each_evaluation() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft");
+    let policy = dir.path().join("policy.toml");
+    let evidence = dir.path().join("source.txt");
+    fs::write(&draft, "Draft without the claim.").unwrap();
+    fs::write(&evidence, "The source contains 14 participants.").unwrap();
+    fs::write(&policy, "version=1\nname='test'\n[[gates]]\nid='anchors'\nkind='evidence_anchors'\nsource='study'\nclaim='The count is 14.'\nquote='14 participants'\nblocking=true\n").unwrap();
+    let source = format!("test={}", policy.display());
+    let evidence_arg = format!("study={}", evidence.display());
+    let mut absent = start(draft.to_str().unwrap(), &source, "text", &[]);
+    assert_eq!(absent.read()["stop"], "incomplete");
+    assert_eq!(absent.finish(), 2);
+
+    let flags = ["--evidence-source", evidence_arg.as_str()];
+    let mut stable = start(draft.to_str().unwrap(), &source, "text", &flags);
+    let initial = stable.read();
+    assert_eq!(initial["event"], "proposal_requested");
+    assert_eq!(initial["report"]["gates"][0]["status"], "failed");
+    let digest = initial["report"]["input_fingerprint"]["evidence_sources_sha256"].clone();
+    assert_eq!(
+        digest,
+        "e5fbda9e75bd348e5bad5b1eda419b15c8c3da17873c862e439ca8da44df5034"
+    );
+    stable.send(json!({"action":"submit", "candidate":"The count is 14."}));
+    let done = stable.read();
+    assert_eq!(done["stop"], "satisfied", "{done}");
+    assert_eq!(
+        done["report"]["input_fingerprint"]["evidence_sources_sha256"],
+        digest
+    );
+    assert_eq!(stable.finish(), 0);
+
+    let mut changed = start(draft.to_str().unwrap(), &source, "text", &flags);
+    assert_eq!(changed.read()["event"], "proposal_requested");
+    fs::write(&evidence, "The source contains 15 participants.").unwrap();
+    changed.send(json!({"action":"submit", "candidate":"The count is 14."}));
+    let mut stderr = changed.child.stderr.take().unwrap();
+    assert_ne!(changed.finish(), 0);
+    let mut diagnostic = String::new();
+    stderr.read_to_string(&mut diagnostic).unwrap();
+    assert!(
+        diagnostic.contains("evidence sources changed during revision"),
+        "{diagnostic}"
+    );
+    assert_eq!(
+        fs::read_to_string(draft).unwrap(),
+        "Draft without the claim."
     );
 }

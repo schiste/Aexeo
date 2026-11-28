@@ -986,6 +986,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 (context.observed_metadata_fields.is_some() || !context.unavailable_metadata_fields.is_empty())
                     .then(|| serde_json::json!({"observed": context.observed_metadata_fields, "unavailable": context.unavailable_metadata_fields}))
             }).map(|coverage| serde_json::to_vec(&coverage).map(|bytes| super::feedback::text_hash(&bytes))).transpose()?;
+            let evidence_sources_sha256 = input
+                .evidence_sources
+                .as_ref()
+                .map(|sources| super::feedback::metadata_hash(&serde_json::to_value(sources)?))
+                .transpose()?;
             output["input_format"] = serde_json::json!(
                 args.get_one::<String>("input-format")
                     .map(String::as_str)
@@ -993,7 +998,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             );
             output["input_fingerprint"] = serde_json::json!({
                 "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256,
-                "metadata_coverage_sha256": metadata_coverage_sha256
+                "metadata_coverage_sha256": metadata_coverage_sha256,
+                "evidence_sources_sha256": evidence_sources_sha256
             });
             if let Some(digest) = &link_observation_sha256 {
                 output["input_fingerprint"]["link_observations_sha256"] = serde_json::json!(digest);
