@@ -486,6 +486,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   and confirm invalid batches and checkpoints cause no provider requests.
   For unlabeled editorial batches, test that benchmark metrics still require
   labels and that resumption binds claims, sources, provider, model and threshold.
+  For report wrappers, test passed, failed and missing-review gates through the
+  real CLI; a successful wrapper exit only establishes that a report was produced.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
 - For EmDash gate report tests, an empty `measurements` map may be omitted
