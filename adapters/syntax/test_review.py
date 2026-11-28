@@ -51,7 +51,10 @@ class Model:
 class TestSyntaxAdapter(unittest.TestCase):
     def test_linguistic_starter_uses_syntax_adapter_contract(self):
         root = Path(review.__file__).resolve().parents[2]
-        preset = tomllib.loads((root / "crates/aexeo-core/presets/linguistic-observations.toml").read_text(encoding="utf-8"))
+        preset_path = root / "crates/aexeo-core/presets/linguistic-observations.toml"
+        if not preset_path.exists():
+            self.skipTest("repository preset is not included in the standalone adapter archive")
+        preset = tomllib.loads(preset_path.read_text(encoding="utf-8"))
         gates = {gate["extension"]: gate for gate in preset["gates"]}
         model = Model([Sentence(0, 6, 0), Sentence(7, 13, 2)])
         for extension in ("syntax.opening_pos", "syntax.clause_alternation"):
