@@ -51,6 +51,29 @@ class ReviewTests(unittest.TestCase):
             observed = subprocess.run(command + ["--drafts-complete"], capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(observed.stdout)[0]["diagnostics"], [])
 
+    def test_cli_rejects_ambiguous_json_at_every_level(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_file, params_file = root / "input.json", root / "params.json"
+            valid_input, valid_params = json.dumps(self.input), json.dumps(self.config)
+            bad_pair = json.dumps({**self.config, "pairs": '[{"before":"x","before":"y","after":"z"}]', "minimum": "1"})
+            cases = [
+                ('{"text":"private","text":"other"}', valid_params),
+                ('{"text":"private","evidence_sources":{"prior":"x","prior":"y"}}', valid_params),
+                ('{"text":"private","extra":NaN}', valid_params),
+                ('{"text":"private","extra":1e999}', valid_params),
+                (valid_input, valid_params[:-1] + ',"source":"other"}'),
+                (valid_input, bad_pair),
+                (valid_input, valid_params[:-1] + ',"extra":Infinity}'),
+            ]
+            for input_data, params in cases:
+                input_file.write_text(input_data, encoding="utf-8")
+                params_file.write_text(params, encoding="utf-8")
+                result = subprocess.run([sys.executable, str(Path(review.__file__)), str(input_file), str(params_file), "--drafts-complete"], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("private", result.stderr)
+
     def test_configuration_and_case_sensitive_matching(self):
         for value in ("0", "3", "-1", "NaN"):
             with self.subTest(value=value), self.assertRaises(ValueError):

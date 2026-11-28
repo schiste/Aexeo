@@ -96,3 +96,5 @@ while other observations may still be returned, so inspect every gate's status.
 Invalid or duplicate configurations reject the batch before any model is run.
 The existing single-object form and coverage attestation remain unchanged. See
 `../revision/README.md` for a composed French workflow.
+
+Input and parameter JSON reject duplicate object keys at every nesting level and non-finite numbers. Invalid files exit nonzero without emitting a result; they do not establish a passing gate.

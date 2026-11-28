@@ -2,6 +2,7 @@
 """Compare configured literal phrase pairs across explicitly supplied drafts."""
 import argparse
 import json
+import math
 import sys
 
 EXTENSION = "revision.literal_pairs"
@@ -18,7 +19,7 @@ def parameters(raw):
     if not isinstance(raw, dict) or set(raw) != {"source", "pairs", "minimum"} or not all(isinstance(value, str) and value for value in raw.values()):
         raise ValueError("expected source, pairs and minimum string parameters")
     try:
-        pairs = json.loads(raw["pairs"])
+        pairs = strict_json(raw["pairs"])
         minimum = int(raw["minimum"])
     except (ValueError, TypeError) as exc:
         raise ValueError("invalid pair list or minimum") from exc
@@ -55,12 +56,35 @@ def evaluate(input_data, config):
     return [{"extension": EXTENSION, "parameters": config, "input": input_data, "diagnostics": diagnostics}]
 
 
+def strict_json(data):
+    """Reject ambiguous objects and numbers that cannot be represented finitely."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    def finite_float(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite JSON number")
+        return number
+
+    def invalid_constant(_):
+        raise ValueError("non-JSON constant")
+
+    return json.loads(data, object_pairs_hook=unique_object,
+                      parse_float=finite_float, parse_constant=invalid_constant)
+
+
 def load_json(path, limit):
     with open(path, "rb") as handle:
         data = handle.read(limit + 1)
     if len(data) > limit:
         raise ValueError("JSON input exceeds configured size limit")
-    return json.loads(data)
+    return strict_json(data)
 
 
 def main():
