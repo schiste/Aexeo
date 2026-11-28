@@ -27,6 +27,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - When an adapter is distributed as a standalone archive, run its tests from
   an extracted archive. Keep cross-adapter checks in the whole-repository
   release suite unless every required fixture is shipped in that archive.
+- Run archive workerd tests with the process working directory in session
+  scratch: Wrangler can create `.wrangler/cache` in the working directory even
+  when `TMPDIR` is set. If it appears in the worktree, inspect ownership before
+  removing only cache files created by this session; untracked files can make
+  broker commit ownership checks fail.
 - For GitHub Actions, check the conclusion of the exact run, job and step
   before reporting a failure: an error annotation can come from an informative
   check while the job succeeds. Preserve and investigate the annotation rather
