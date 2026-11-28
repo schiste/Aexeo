@@ -2189,8 +2189,24 @@ each successfully parsed host projection evaluated with item gates, and makes
 missing maps explicit. Invalid projections, unsupported media, delete-only
 entries and items without applicable gates are not listed in that coverage;
 inspect the verdict checks as well. Host assertions do not authenticate paths,
-CMS revisions, freshness or publication readiness. The CLI and experimental
-portable verifier do not currently expose this companion. With metadata gates, embedded host values must exactly match
+CMS revisions, freshness or publication readiness. The experimental portable
+verifier does not currently expose this companion.
+
+For the CLI, pass `--native-report` to `content-change` with the usual change,
+preset and output environment variables. This opt-in mode writes a single
+`aexeo.native-change-report/v1` object at `CONTENT_GATE_VERDICT_FILE`; its
+`verdict` field contains the v1 verdict and `locations` contains the native
+positions. The usual exit codes still reflect that embedded verdict. Without the
+option, the output remains the ordinary v1 verdict. The report is not accepted
+as a bare `--verify-verdict` or `--baseline-verdict` input: extract its `verdict`
+first. This option cannot be combined with offline receipts or link-observation
+export. `verdict_sha256` is the SHA-256 of the final verdict serialized using
+Rust `serde_json::to_vec`, after any CLI annotations; it is not a hash of the
+pretty-printed report or a cross-language canonical JSON digest. Paths may be
+private; optional telemetry emits aggregate counts only. The report does not
+establish freshness, identity or authority to publish.
+
+With metadata gates, embedded host values must exactly match
 the change entry's metadata; observed-field coverage remains in force. The host
 must independently verify the complete change inputs, including metadata, because
 the v1 verdict subject does not bind all decision inputs. The experimental v2 Rust verifier and independent Python comparator
