@@ -82,7 +82,8 @@ pub struct ObservedPageLinks {
     pub followed_source_pages: usize,
     #[serde(default)]
     pub source_pages_by_rel: std::collections::BTreeMap<String, usize>,
-    /// Whether every observed inbound link has an observed rel attribute state.
+    /// Whether every directly credited inbound link has an observed rel state.
+    /// Redirect-credit links are reported separately and are not included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rel_coverage_complete: Option<bool>,
     /// Observed destinations that differ from this page's URL only by a trailing
