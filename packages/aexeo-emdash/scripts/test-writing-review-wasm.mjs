@@ -1,0 +1,26 @@
+// Verify shipped presets through the public EmDash API and actual WASM bridge.
+import assert from "node:assert/strict";
+import { evaluateContent } from "../dist/content.js";
+
+const paragraph = (text) => ({ _type: "block", children: [{ _type: "span", text }] });
+const document = {
+  route: "/fr/review",
+  title: "Exemple",
+  body: [
+    paragraph("Ils y apportent leur expérience de la technologie, des données, de la sécurité et de la conformité, ainsi que leur connaissance des difficultés que rencontrent les petites équipes."),
+    paragraph("Leur ambition est simple : que la taille de votre organisation ne vous empêche pas de prendre soin de sa sécurité."),
+  ],
+};
+for (const preset of ["writing-review", "writing-review-en", "writing-review-fr"]) {
+  const report = await evaluateContent(document, preset);
+  assert.ok(report.gates.some((gate) => gate.gate_id === "editorial.sentence_asymmetry"), preset);
+  assert.ok(report.gates.every((gate) => gate.blocking === false), preset);
+}
+const report = await evaluateContent(document, "writing-review-fr");
+for (const id of ["editorial.framing_colon", "editorial.fr_long_enumeration_review"]) {
+  const gate = report.gates.find((entry) => entry.gate_id === id);
+  assert.equal(gate?.status, "failed", id);
+}
+const unavailable = await evaluateContent({ route: "/unavailable", title: "Example" }, "writing-review-fr");
+assert.equal(unavailable.gates.find((gate) => gate.gate_id === "editorial.framing_colon")?.status, "not_checked");
+console.log("WASM composed writing review presets passed");
