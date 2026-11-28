@@ -485,7 +485,7 @@ def verify_plain_duplicate_paragraph_statuses(policy, verdict, after, cache):
                         raise VerificationError('duplicate paragraph evaluator limit exceeded')
                     words, current = [], []
                     for char in block:
-                        if _rust_blank(char):
+                        if char.isspace() and char not in '\x1c\x1d\x1e\x1f':
                             if current:
                                 words.append(''.join(current))
                                 current = []
