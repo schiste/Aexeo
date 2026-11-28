@@ -3233,7 +3233,10 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                         continue;
                     }
                 };
+                // Change metadata remains the authoritative input to this path.
+                // Embedded values may supplement it only when they agree exactly.
                 if adapted.input.metadata.is_some()
+                    && adapted.input.metadata != entry.metadata
                     && item_preset.gates.iter().any(|gate| {
                         matches!(
                             gate,
@@ -3248,8 +3251,7 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                         status: CheckStatus::NotChecked,
                         blocking: true,
                         reason: Some(
-                            "Embedded host metadata cannot be combined with change metadata gates"
-                                .into(),
+                            "Embedded host metadata does not match change metadata".into(),
                         ),
                     });
                     continue;
@@ -9851,6 +9853,62 @@ mod tests {
             r#"{"schema":"aexeo.content-adapter/v1","text":"x","text":"y"}"#,
         );
         assert_eq!(report.status, VerdictStatus::NotChecked);
+    }
+
+    #[test]
+    fn host_change_metadata_matches_change_and_respects_observation_coverage() {
+        use sha2::{Digest, Sha256};
+        let preset = ContentPreset::from_toml("version=1\nname='metadata'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n").unwrap();
+        let evaluate =
+            |metadata: serde_json::Value,
+             observed: serde_json::Value,
+             bound: Option<std::collections::BTreeMap<String, String>>| {
+                let mut change = change();
+                change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+                change.entries[0].metadata = bound;
+                let source = serde_json::json!({
+                    "schema":"aexeo.content-adapter/v1", "text":"body",
+                    "metadata":metadata, "observed_metadata_fields":observed
+                })
+                .to_string();
+                let state = change.entries[0].after.as_mut().unwrap();
+                state.inline = Some(source.clone());
+                state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+                evaluate_change(
+                    &change,
+                    &mut NoFiles,
+                    &preset,
+                    "2026-01-01T00:00:00Z",
+                    4096,
+                    4096,
+                )
+                .unwrap()
+            };
+        let present = std::collections::BTreeMap::from([("description".into(), "value".into())]);
+        let passed = evaluate(
+            serde_json::json!({"description":"value"}),
+            serde_json::json!(["description"]),
+            Some(present),
+        );
+        assert_eq!(passed.status, VerdictStatus::Pass);
+        let absent = evaluate(
+            serde_json::json!({}),
+            serde_json::json!(["description"]),
+            Some(Default::default()),
+        );
+        assert_eq!(absent.status, VerdictStatus::Fail);
+        let unknown = evaluate(
+            serde_json::json!({}),
+            serde_json::json!([]),
+            Some(Default::default()),
+        );
+        assert_eq!(unknown.status, VerdictStatus::NotChecked);
+        let unavailable = evaluate(
+            serde_json::json!({}),
+            serde_json::json!(["description"]),
+            None,
+        );
+        assert_eq!(unavailable.status, VerdictStatus::NotChecked);
     }
 
     #[test]
