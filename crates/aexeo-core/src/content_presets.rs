@@ -274,6 +274,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/sentence-asymmetry-review.toml").into(),
         ),
         (
+            "medium-sentence-pairs-review".into(),
+            include_str!("../presets/medium-sentence-pairs-review.toml").into(),
+        ),
+        (
             "sentence-rhythm-review".into(),
             include_str!("../presets/sentence-rhythm-review.toml").into(),
         ),

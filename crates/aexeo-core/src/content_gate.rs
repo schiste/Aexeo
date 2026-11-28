@@ -703,6 +703,11 @@ pub enum ContentGate {
         /// Minimum adjacent length difference as a percentage of the longer sentence.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         min_difference_percent: Option<usize>,
+        /// Inclusive bounds for reviewing adjacent sentences within a configured range.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        range_min_words: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        range_max_words: Option<usize>,
         /// Opt in to whitespace-token counting for recognized Arabic script characters.
         #[serde(default, skip_serializing_if = "is_false")]
         allow_arabic_word_boundaries: bool,
@@ -2069,6 +2074,8 @@ impl ContentPreset {
                     run_length,
                     tolerance_words,
                     min_difference_percent,
+                    range_min_words,
+                    range_max_words,
                     delimiters,
                     ..
                 } if *run_length < 2
@@ -2076,10 +2083,22 @@ impl ContentPreset {
                     || delimiters.is_empty()
                     || min_difference_percent.is_some_and(|percent| {
                         !(1..=100).contains(&percent) || *run_length != 2 || *tolerance_words != 0
-                    }) =>
+                    })
+                    || match (range_min_words, range_max_words) {
+                        (None, None) => false,
+                        (Some(lo), Some(hi)) => {
+                            *lo == 0
+                                || *hi > 1000
+                                || lo > hi
+                                || *run_length != 2
+                                || *tolerance_words != 0
+                                || min_difference_percent.is_some()
+                        }
+                        _ => true,
+                    } =>
                 {
                     bail!(
-                        "sentence rhythm needs a run of 2 to 64 sentences and delimiters; percentage mode requires a run of 2, tolerance 0 and a threshold from 1 to 100 for {}",
+                        "sentence rhythm needs a run of 2 to 64 and delimiters; percentage and range modes are exclusive and require a run of 2 and tolerance 0 with valid bounds for {}",
                         gate.id()
                     );
                 }
@@ -3625,6 +3644,8 @@ impl ContentPreset {
                     run_length,
                     tolerance_words,
                     min_difference_percent,
+                    range_min_words,
+                    range_max_words,
                     delimiters,
                     abbreviations,
                     allow_arabic_word_boundaries,
@@ -3635,6 +3656,10 @@ impl ContentPreset {
                         measurements.insert("min_difference_percent".into(), *percent);
                     }
                     measurements.insert("tolerance_words".into(), *tolerance_words);
+                    if let (Some(lo), Some(hi)) = (range_min_words, range_max_words) {
+                        measurements.insert("range_min_words".into(), *lo);
+                        measurements.insert("range_max_words".into(), *hi);
+                    }
                     if let Some(paragraphs) =
                         context.and_then(|context| context.paragraphs.as_ref())
                     {
@@ -3683,23 +3708,31 @@ impl ContentPreset {
                                         let min = lengths.iter().copied().min().unwrap_or(0);
                                         let max = lengths.iter().copied().max().unwrap_or(0);
                                         pairs_assessed += 1;
-                                        let similar = match min_difference_percent {
-                                            Some(percent) => {
+                                        let similar = match (
+                                            range_min_words,
+                                            range_max_words,
+                                            min_difference_percent,
+                                        ) {
+                                            (Some(lo), Some(hi), _) => min >= *lo && max <= *hi,
+                                            (_, _, Some(percent)) => {
                                                 max > 0
                                                     && ((max - min) as u128) * 100
                                                         < (*percent as u128) * (max as u128)
                                             }
-                                            None => max - min <= *tolerance_words,
+                                            _ => max - min <= *tolerance_words,
                                         };
                                         if similar {
                                             flagged += 1;
-                                            emit(
+                                            let message = if range_min_words.is_some() {
+                                                format!(
+                                                    "Adjacent sentences contain {min} and {max} words within the configured range; review their rhythm in context"
+                                                )
+                                            } else {
                                                 format!(
                                                     "A run of {run_length} sentences has similar word counts; review its rhythm in context"
-                                                ),
-                                                line,
-                                                column,
-                                            );
+                                                )
+                                            };
+                                            emit(message, line, column);
                                         }
                                     }
                                 },
@@ -3713,7 +3746,7 @@ impl ContentPreset {
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("similar_runs".into(), flagged);
-                        if min_difference_percent.is_some() {
+                        if min_difference_percent.is_some() || range_min_words.is_some() {
                             measurements.insert("pairs_assessed".into(), pairs_assessed);
                             if pairs_assessed == 0 && reason.is_none() {
                                 reason = Some(
@@ -8616,6 +8649,70 @@ terms = ["bad"]
             config.replace("tolerance_words=0", "tolerance_words=1"),
         ] {
             assert!(ContentPreset::from_toml(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn adjacent_sentence_range_is_bounded_inclusive_and_requires_comparable_pairs() {
+        let config = "version=1\nname='t'\n[[gates]]\nid='rhythm'\nkind='similar_sentence_lengths'\nrun_length=2\ntolerance_words=0\nrange_min_words=3\nrange_max_words=4\n";
+        let preset = ContentPreset::from_toml(config).unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "One two three. One two three four.".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["pairs_assessed"], 1);
+        assert_eq!(report.gates[0].measurements["range_min_words"], 3);
+        assert_eq!(report.gates[0].measurements["range_max_words"], 4);
+        assert!(!report.gates[0].blocking);
+        context.paragraphs.as_mut().unwrap()[0].text = "One two. One two three four.".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
+        );
+        context.paragraphs.as_mut().unwrap()[0].text = "One sentence.".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        context.paragraphs = None;
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        for invalid in [
+            config.replace("range_min_words=3", "range_min_words=0"),
+            config.replace("range_max_words=4", "range_max_words=1001"),
+            config.replace("range_max_words=4", "range_max_words=2"),
+            config.replace("range_max_words=4\n", ""),
+            config.replace("run_length=2", "run_length=3"),
+            config.replace("tolerance_words=0", "tolerance_words=1"),
+            format!("{config}min_difference_percent=30\n"),
+        ] {
+            assert!(ContentPreset::from_toml(&invalid).is_err(), "{invalid}");
         }
     }
 
