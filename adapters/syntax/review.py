@@ -164,6 +164,21 @@ def sentence_bounds(text, sentence):
     return start, end
 
 
+def sentence_structure(text, sentences):
+    """Validate dependency trees and complete, non-overlapping source spans."""
+    trees = [tree_for(sentence) for sentence in sentences]
+    bounds = [sentence_bounds(text, sentence) for sentence in sentences]
+    if any(bounds[i - 1][1] > bounds[i][0] for i in range(1, len(bounds))):
+        raise Unavailable("overlapping sentence offsets")
+    # Omitted non-whitespace text must never produce an apparently clean result.
+    gaps = [(0, bounds[0][0]), *[(bounds[i - 1][1], bounds[i][0])
+                                for i in range(1, len(bounds))],
+            (bounds[-1][1], len(text))]
+    if any(text[start:end].strip() for start, end in gaps):
+        raise Unavailable("sentence spans omit projected text")
+    return trees, bounds
+
+
 def evaluate(input_data, raw_parameters, nlp):
     threshold, minimum, max_tokens = parameters(raw_parameters)
     if not isinstance(input_data, dict) or not isinstance(input_data.get("text"), str):
@@ -186,17 +201,10 @@ def evaluate(input_data, raw_parameters, nlp):
         raise Unavailable("not enough sentences or adapter sentence limit exceeded")
     if any(len(sentence) > max_tokens for sentence in sentences):
         raise Unavailable("sentence exceeds configured token limit")
-    trees = [tree_for(sentence) for sentence in sentences]
-    bounds = [sentence_bounds(text, sentence) for sentence in sentences]
-    if any(bounds[i - 1][1] > bounds[i][0] for i in range(1, len(bounds))):
-        raise Unavailable("overlapping sentence offsets")
-    # A parser must account for every non-whitespace character. Otherwise an
-    # apparently clean result could silently omit part of the supplied text.
-    gaps = [(0, bounds[0][0]), *[(bounds[i - 1][1], bounds[i][0])
-                                for i in range(1, len(bounds))],
-            (bounds[-1][1], len(text))]
-    if any(text[start:end].strip() for start, end in gaps):
-        raise Unavailable("sentence spans omit projected text")
+    if isinstance(nlp, CachedModel):
+        trees, bounds = nlp.structure(text, sentences)
+    else:
+        trees, bounds = sentence_structure(text, sentences)
     findings = []
     mode = raw_parameters.get("analysis", "similarity")
     if mode == "coordinated_nouns":
@@ -279,15 +287,24 @@ class CachedModel:
         self.pipe_names = model.pipe_names
         self._text = None
         self._doc = None
+        self._structure = None
 
     def __call__(self, text):
         if self._doc is None or self._text != text:
+            self.clear_document()
             self._doc = self.model(text)
             self._text = text
         return self._doc
 
+    def structure(self, text, sentences):
+        if self._text != text or self._doc is None:
+            raise Unavailable("parsed document is unavailable")
+        if self._structure is None:
+            self._structure = sentence_structure(text, sentences)
+        return self._structure
+
     def clear_document(self):
-        self._text = self._doc = None
+        self._text = self._doc = self._structure = None
 
 
 class ModelCache:

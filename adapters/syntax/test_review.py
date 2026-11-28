@@ -315,8 +315,9 @@ class TestSyntaxAdapter(unittest.TestCase):
         loads = []
         fake = type("Fake", (), {"load": staticmethod(lambda name: (loads.append(name), model)[1])})()
         configs = [opening, {**opening, "model_version": "wrong"}, clauses]
-        with contextlib.redirect_stderr(io.StringIO()) as err:
+        with contextlib.redirect_stderr(io.StringIO()) as err, patch.object(review, "tree_for", wraps=review.tree_for) as tree:
             results = review.evaluate_batch(data, review.parameter_batch(configs), fake)
+            self.assertEqual(tree.call_count, 2)  # One validation per sentence, not per gate.
         self.assertEqual(loads, ["en_core_web_sm"])
         self.assertEqual(model.calls, 1)
         self.assertEqual([result["extension"] for result in results], ["syntax.opening_pos", "syntax.clause_alternation"])
@@ -327,6 +328,31 @@ class TestSyntaxAdapter(unittest.TestCase):
         for invalid in ([], [opening] * 2, [opening] * (review.MAX_BATCH + 1), [opening, {}]):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 review.parameter_batch(invalid)
+
+    def test_batch_rechecks_gate_limits_and_clears_structure_after_each_request(self):
+        opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        strict = {**opening, "max_tokens": "1"}
+        model = Model([Sentence(0, 6, 0), Sentence(7, 14, 2)])
+        fake = type("Fake", (), {"load": staticmethod(lambda name: model)})()
+        session = review.SyntaxReviewSession(lambda: fake)
+        with contextlib.redirect_stderr(io.StringIO()), patch.object(review, "tree_for", wraps=review.tree_for) as tree:
+            for _ in range(2):
+                response = session.observe({"text": "First. Second."}, [opening, strict], text_complete=True)
+                self.assertEqual(response["status"], "processed")
+                self.assertEqual(len(response["results"]), 1)
+                self.assertEqual(response["results"][0]["parameters"], opening)
+            self.assertEqual(tree.call_count, 4)
+
+    def test_failed_structure_validation_is_never_cached(self):
+        opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        second = {**opening, "min_sentences": "3"}
+        model = Model([Sentence(0, 6, 0), Sentence(7, 14, 2), Sentence(15, 21, 4)])
+        model.sentences[0][0].head = model.sentences[0][1]  # Invalid cyclic tree.
+        fake = type("Fake", (), {"load": staticmethod(lambda name: model)})()
+        with contextlib.redirect_stderr(io.StringIO()), patch.object(review, "tree_for", wraps=review.tree_for) as tree:
+            result = review.evaluate_batch({"text": "First. Second. Third."}, [opening, second], fake)
+            self.assertEqual(result, [])
+            self.assertEqual(tree.call_count, 2)
 
     def test_batch_cli_without_attestation_never_loads_model(self):
         with tempfile.TemporaryDirectory() as directory:
