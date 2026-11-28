@@ -611,7 +611,7 @@ class PortableComparison(unittest.TestCase):
                  ('hello  world\r\n\r\nhello\nworld', 'failed'),
                  ('Café ici\n\nCafé\u00a0ici', 'failed'),
                  ('hello\n\nhello\n', 'failed'),
-                 ('hello\n\nHELLO', 'passed')]
+                 ('hello\n\nHELLO', 'passed'), ('ab\x1cc\n\nab c', 'passed')]
         for source, expected in cases:
             with self.subTest(source=source):
                 after = [{'entity_id': 'é', 'media_type': 'text/plain', 'source': source}]
