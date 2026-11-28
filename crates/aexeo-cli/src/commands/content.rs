@@ -762,51 +762,31 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         })
         .map(aexeo_core::text_index::LineIndex::new);
     for (gate, result) in preset.gates.iter().zip(&report.gates) {
-        if let Some(paths) = native_source_map.as_ref().and_then(|map| {
-            map.structure_positions(
-                gate,
-                result,
-                &aexeo_core::content_adapter::NativeStructureObservations {
-                    headings: input.headings.as_deref(),
-                    levels: heading_levels.as_deref(),
-                    destinations: destinations.as_deref(),
-                    links: link_observations.as_deref(),
-                    lists: structured_lists.as_deref(),
-                },
-            )
-        }) {
-            for (finding_index, path) in paths.into_iter().enumerate() {
-                if let Some(path) = path {
-                    native_source_locations.push(NativeSourceLocation {
-                        gate_id: &result.gate_id,
-                        finding_index,
-                        source: "host_supplied_native_path",
-                        path,
-                        utf16_offset: 0,
-                    });
-                }
-            }
-        }
-        if aexeo_core::source_mapping::prose_gate_has_positions(gate)
-            && let (Some(map), Some(index), Some(text)) = (
-                &native_source_map,
-                &host_projected_index,
-                input.text.as_deref(),
-            )
-        {
-            for (finding_index, finding) in result.findings.iter().enumerate() {
-                if let Some((path, utf16_offset)) = index
-                    .offset(text, finding.line, finding.column)
-                    .and_then(|offset| map.position(text, offset))
-                {
-                    native_source_locations.push(NativeSourceLocation {
-                        gate_id: &result.gate_id,
-                        finding_index,
-                        source: "host_supplied_native_path",
-                        path,
-                        utf16_offset,
-                    });
-                }
+        if let Some(map) = native_source_map.as_ref() {
+            let observed = aexeo_core::content_adapter::NativeStructureObservations {
+                headings: input.headings.as_deref(),
+                levels: heading_levels.as_deref(),
+                destinations: destinations.as_deref(),
+                links: link_observations.as_deref(),
+                lists: structured_lists.as_deref(),
+            };
+            for (finding_index, path, utf16_offset) in
+                aexeo_core::content_adapter::native_gate_positions(
+                    map,
+                    gate,
+                    result,
+                    &observed,
+                    input.text.as_deref(),
+                    host_projected_index.as_ref(),
+                )
+            {
+                native_source_locations.push(NativeSourceLocation {
+                    gate_id: &result.gate_id,
+                    finding_index,
+                    source: "host_supplied_native_path",
+                    path,
+                    utf16_offset,
+                });
             }
         }
         let hierarchy_positions = if let (

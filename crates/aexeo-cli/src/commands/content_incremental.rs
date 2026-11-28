@@ -692,6 +692,9 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     let mut mapping_unavailable_items = 0usize;
     let mut mapping_unavailable_proposals = 0usize;
     let mut mapping_duration_ms = 0u128;
+    let mut native_mapping_eligible = 0usize;
+    let mut native_mapping_mapped = 0usize;
+    let mut native_mapping_unavailable = 0usize;
     for (index, proposal) in batch.proposals.iter().enumerate() {
         let (result, unchecked) = match &baseline {
             Err(error) => (
@@ -946,21 +949,45 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                                         .and_then(|m| m.get(&item.entity_id)),
                                 )
                             });
-                            mapping.insert(
-                                item.entity_id.clone(),
-                                match mapped {
-                                    Ok(value) => {
-                                        mapping_eligible += value.eligible;
-                                        mapping_mapped += value.mapped;
-                                        serde_json::json!({"status":"available", "coverage":value})
+                            let mut item_mapping = match mapped {
+                                Ok(value) => {
+                                    mapping_eligible += value.eligible;
+                                    mapping_mapped += value.mapped;
+                                    serde_json::json!({"status":"available", "coverage":value})
+                                }
+                                Err(_) => {
+                                    mapping_status = "partial";
+                                    mapping_unavailable_items += 1;
+                                    serde_json::json!({"status":"unavailable"})
+                                }
+                            };
+                            if item.media_type == aexeo_core::content_adapter::MEDIA_TYPE {
+                                let native = serde_json::from_value::<
+                                    aexeo_core::content_gate::ContentReport,
+                                >(value.clone())
+                                .map_err(anyhow::Error::from)
+                                .and_then(|report| {
+                                    aexeo_core::source_mapping::map_incremental_native_report(
+                                        item_preset,
+                                        item,
+                                        &report,
+                                        proposal
+                                            .link_observations
+                                            .as_ref()
+                                            .and_then(|m| m.get(&item.entity_id)),
+                                    )
+                                });
+                                match native {
+                                    Ok(coverage) => {
+                                        native_mapping_eligible += coverage.eligible;
+                                        native_mapping_mapped += coverage.mapped;
+                                        item_mapping["native_coverage"] =
+                                            serde_json::to_value(coverage)?;
                                     }
-                                    Err(_) => {
-                                        mapping_status = "partial";
-                                        mapping_unavailable_items += 1;
-                                        serde_json::json!({"status":"unavailable"})
-                                    }
-                                },
-                            );
+                                    Err(_) => native_mapping_unavailable += 1,
+                                }
+                            }
+                            mapping.insert(item.entity_id.clone(), item_mapping);
                         }
                     }
                     Err(_) => {
@@ -980,7 +1007,7 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "allow_partial_results":batch.allow_partial_results, "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "base_link_unavailable_count":base_link_unavailable_count, "candidate_link_unavailable_count":candidate_link_unavailable_count, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some(), "source_mapping_enabled":source_snapshot.is_some(), "source_mapping_eligible":mapping_eligible, "source_mapping_mapped":mapping_mapped, "source_mapping_unavailable":mapping_unavailable_items + mapping_unavailable_proposals, "source_mapping_unavailable_items":mapping_unavailable_items, "source_mapping_unavailable_proposals":mapping_unavailable_proposals, "source_mapping_duration_ms":mapping_duration_ms})
+            serde_json::json!({"schema":"aexeo.content-incremental-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "allow_partial_results":batch.allow_partial_results, "input_bytes":bytes.len(), "proposals":batch.proposals.len(), "not_checked":totals.not_checked, "evaluated":totals.evaluated, "reused":totals.reused, "blocking_failed":totals.blocking_failed, "referenced_states":referenced_states, "base_evidence_supplied":base_evidence_supplied, "proposals_with_evidence":proposals_with_evidence, "base_link_observations_supplied":base_link_observations_supplied, "base_link_unavailable_count":base_link_unavailable_count, "candidate_link_unavailable_count":candidate_link_unavailable_count, "proposals_with_link_observations":proposals_with_link_observations, "mapped_proposals":maps.len(), "content_root_supplied":root.is_some(), "source_mapping_enabled":source_snapshot.is_some(), "source_mapping_eligible":mapping_eligible, "source_mapping_mapped":mapping_mapped, "source_mapping_unavailable":mapping_unavailable_items + mapping_unavailable_proposals, "source_mapping_unavailable_items":mapping_unavailable_items, "source_mapping_unavailable_proposals":mapping_unavailable_proposals, "source_mapping_duration_ms":mapping_duration_ms, "native_source_mapping_eligible":native_mapping_eligible, "native_source_mapping_mapped":native_mapping_mapped, "native_source_mapping_unavailable":native_mapping_unavailable})
         );
     }
     Ok(if totals.not_checked != 0 {
