@@ -23,7 +23,7 @@ def write_new(path, value):
         output.write(payload)
 
 
-def capture(text, report, gate_id, example_id, human_status=None, reviewer=None, method=None, reason=None, context=None, metadata=None):
+def capture(text, report, gate_id, example_id, human_status=None, reviewer=None, method=None, reason=None, context=None, metadata=None, evidence_sources=None):
     if not all(isinstance(value, str) and value.strip() for value in (gate_id, example_id)):
         raise ValueError("gate and example identifiers must be nonempty")
     gates = [gate for gate in report.get("gates", []) if gate.get("gate_id") == gate_id]
@@ -53,6 +53,12 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
     else:
         note["report_binding"] = "verified"
     note["report_binding_scope"] = "text_and_metadata" if note["report_binding"] == "verified" else "none"
+    if evidence_sources is not None:
+        module = _corpus_module()
+        digest = module.evidence_hash({"evidence_sources": evidence_sources})
+        if not isinstance(fingerprint, dict) or "evidence_sources_sha256" not in fingerprint or fingerprint["evidence_sources_sha256"] != digest:
+            raise ValueError("report evidence sources fingerprint does not match the supplied references")
+        note["evidence_sources_sha256"] = digest
     if "input_format" in report:
         if report["input_format"] not in ("text", "paragraph-text", "markdown", "html", "adapter-json"):
             raise ValueError("invalid report input format")
@@ -86,6 +92,8 @@ def _review_event(corpus, note, module, version):
     event = {"example_id": note.get("example_id"), "text_sha256": note.get("text_sha256"),
              "model_status": note.get("model_status"), "reviewer_status": note["human_status"],
              "reviewer": note["reviewer"], "method": note["method"]}
+    if "evidence_sources_sha256" in note:
+        event["evidence_sources_sha256"] = note["evidence_sources_sha256"]
     if "input_format" in note:
         event["input_format"] = note["input_format"]
     if "metadata_sha256" in note:
@@ -144,7 +152,7 @@ def bind_review(corpus, note, accept_human_label=False):
                       "text_sha256": event["text_sha256"], "expected": item["expected"]}
     if "metadata_sha256" in event:
         item["review"]["metadata_sha256"] = event["metadata_sha256"]
-    for key in ("resolved_policy_fingerprint", "report_binding", "report_binding_scope", "content_projection", "input_format"):
+    for key in ("resolved_policy_fingerprint", "report_binding", "report_binding_scope", "content_projection", "input_format", "evidence_sources_sha256"):
         if key in event:
             item["review"][key] = copy.deepcopy(event[key])
     if label_changed:
@@ -179,6 +187,8 @@ def blind_packet(corpus, split, rubric):
         raise ValueError("no unreviewed examples in the selected split")
     packet = {"version": 1, "kind": "blind_content_review", "gate_id": corpus["gate_id"],
               "rubric": rubric, "examples": examples}
+    if "evidence_sources" in corpus:
+        packet["evidence_sources"] = copy.deepcopy(corpus["evidence_sources"])
     if "content_projection" in corpus:
         packet["content_projection"] = copy.deepcopy(corpus["content_projection"])
     if "input_format" in corpus:
@@ -194,6 +204,8 @@ def _blind_entries(corpus, packet, module):
         raise ValueError("invalid blind review packet")
     module.check_projection(packet, module.corpus_projection(corpus))
     module.check_input_format(packet, corpus)
+    if packet.get("evidence_sources", {}) != corpus.get("evidence_sources", {}):
+        raise ValueError("blind review does not match current evidence sources")
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
     for entry in packet["examples"]:
@@ -245,6 +257,8 @@ def bind_blind_reviews(corpus, packet, reviewer, method, accept_human_label=Fals
                   "text_sha256": hashlib.sha256(item["text"].encode("utf-8")).hexdigest(),
                   "expected": status,
                   "rubric_sha256": hashlib.sha256(packet["rubric"].encode("utf-8")).hexdigest()}
+        if "evidence_sources" in result:
+            review["evidence_sources_sha256"] = module.evidence_hash(result)
         if "metadata" in item:
             review["metadata_sha256"] = module.metadata_hash(item["metadata"])
         if "content_projection" in result:
@@ -277,6 +291,8 @@ def combine_blind_reviews(corpus, reviews):
                      "reviewer_status": status,
                      "text_sha256": hashlib.sha256(item["text"].encode("utf-8")).hexdigest(),
                      "rubric_sha256": hashlib.sha256(packet["rubric"].encode("utf-8")).hexdigest()}
+            if "evidence_sources" in corpus:
+                event["evidence_sources_sha256"] = module.evidence_hash(corpus)
             if "metadata" in item:
                 event["metadata_sha256"] = module.metadata_hash(item["metadata"])
             if "content_projection" in corpus:
@@ -299,6 +315,7 @@ def main():
     note.add_argument("--text", type=Path, required=True)
     note.add_argument("--report", type=Path, required=True)
     note.add_argument("--metadata", type=Path, help="Optional JSON metadata supplied to the evaluated gate")
+    note.add_argument("--evidence-sources", type=Path, help="Optional JSON map of named reference texts supplied to the evaluation")
     note.add_argument("--gate", required=True)
     note.add_argument("--example", required=True)
     note.add_argument("--human-status", choices=["passed", "failed", "uncertain"])
@@ -355,11 +372,14 @@ def main():
             metadata = read_json(args.metadata) if args.metadata is not None else None
             if args.metadata is not None and metadata is None:
                 raise ValueError("metadata must be an object of string fields")
+            evidence_sources = read_json(args.evidence_sources) if args.evidence_sources is not None else None
+            if args.evidence_sources is not None and evidence_sources is None:
+                raise ValueError("evidence sources must be an object of string fields")
             value = capture(args.text.read_bytes().decode("utf-8"), read_json(args.report), args.gate,
                             args.example, args.human_status, args.reviewer, args.method,
                             args.reason_file.read_text(encoding="utf-8") if args.reason_file else None,
                             {key: getattr(args, key) for key in ("language", "content_type", "preset", "config_version", "tool_version") if getattr(args, key) is not None},
-                            metadata)
+                            metadata, evidence_sources)
         elif args.action == "export-review":
             value = export_review(read_json(args.corpus), read_json(args.note))
         elif args.action == "combine-reviews":

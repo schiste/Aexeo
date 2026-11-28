@@ -25,6 +25,28 @@ def metadata_hash(metadata):
     return digest.hexdigest()
 
 
+def evidence_hash(corpus):
+    """Return the CLI-compatible digest of supplied named reference texts."""
+    sources = corpus.get("evidence_sources", {})
+    if not isinstance(sources, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in sources.items()):
+        raise ValueError("evidence sources must be an object of string fields")
+    return metadata_hash(sources) if sources else None
+
+
+_UNSET_EVIDENCE = object()
+
+
+def evidence_binding(value, corpus, expected=_UNSET_EVIDENCE):
+    """Check a retained digest; legacy reviews with references remain unbound."""
+    if expected is _UNSET_EVIDENCE:
+        expected = evidence_hash(corpus)
+    if "evidence_sources_sha256" not in value:
+        return expected is None
+    if value["evidence_sources_sha256"] != expected:
+        raise ValueError("evidence sources fingerprint does not match the current corpus")
+    return True
+
+
 def resolve_policy(binary, preset, preset_source=None):
     """Resolve the same preset as the evaluated CLI, without reading content."""
     arguments = [binary, "content", "--preset", preset, "--format", "json", "--explain"]
@@ -151,7 +173,7 @@ def check_projection(container, expected):
         raise ValueError("content projection does not match the corpus")
 
 
-def review_is_bound(item, projection=None):
+def review_is_bound(item, projection=None, corpus=None, expected_evidence=_UNSET_EVIDENCE):
     """Only count reviews bound to the current text, metadata and label."""
     review = item["review"]
     check_projection(review, projection)
@@ -164,13 +186,14 @@ def review_is_bound(item, projection=None):
     for field, value in expected_hashes.items():
         if field in review and review[field] != value:
             raise ValueError(f"review {field} does not match the current example")
-    return all(field in review for field in expected_hashes)
+    return all(field in review for field in expected_hashes) and (corpus is None or evidence_binding(review, corpus, expected_evidence))
 
 
 def validate_corpus(corpus):
     if corpus.get("version") != 1:
         raise ValueError("unsupported corpus version")
     projection = corpus_projection(corpus)
+    evidence_hash(corpus)
     synthetic = corpus.get("fixture_kind") == "synthetic_regression"
     ids = set()
     text_splits = {}
@@ -241,6 +264,7 @@ def aggregate_blind_review_events(corpus, split, review_log):
     if review_log.get("gate_id") != corpus["gate_id"] or not isinstance(review_log.get("events"), list) or not review_log["events"]:
         raise ValueError("blind review log gate or events are invalid")
     projection = corpus_projection(corpus)
+    expected_evidence = evidence_hash(corpus)
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen, rubric_by_id = set(), {}
     opinions, counts_by_example = {}, {}
@@ -269,6 +293,8 @@ def aggregate_blind_review_events(corpus, split, review_log):
                 raise ValueError("blind review does not match current metadata")
         elif "metadata_sha256" in event:
             raise ValueError("blind review metadata is absent from the example")
+        if not evidence_binding(event, corpus, expected_evidence):
+            raise ValueError("blind review evidence sources are unbound")
         rubric = event.get("rubric_sha256")
         if not isinstance(rubric, str) or len(rubric) != 64 or any(c not in "0123456789abcdef" for c in rubric):
             raise ValueError("invalid blind review rubric fingerprint")
@@ -298,6 +324,7 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
     if type(version) is not int or version not in {1, 2, 3} or review_log.get("gate_id") != corpus["gate_id"]:
         raise ValueError("review log version or gate does not match corpus")
     projection = corpus_projection(corpus)
+    expected_evidence = evidence_hash(corpus)
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
     opinions = {}
@@ -332,6 +359,7 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
                 raise ValueError("review event does not match the current example metadata")
         elif "metadata_sha256" in event:
             raise ValueError("review event contains metadata absent from the example")
+        evidence_bound = evidence_binding(event, corpus, expected_evidence)
         model, reviewer = event["model_status"], event["reviewer_status"]
         valid_reviews = {"passed", "failed", "uncertain"} if version == 3 else {"passed", "failed"}
         if model not in {"passed", "failed", "not_checked"} or reviewer not in valid_reviews:
@@ -350,6 +378,9 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
         if version in {2, 3}:
             opinions.setdefault(identifier, set()).add(reviewer)
         policy_group = "unbound" if fingerprint is None else "matching" if fingerprint["sha256"] == current_policy else "different"
+        if not evidence_bound:
+            binding = "unverified"
+            policy_group = "unbound"
         if current_policy is not None:
             policy_counts[policy_group] += 1
         binding_counts[binding] += 1
@@ -452,12 +483,13 @@ def normalized_split_overlap(examples, include_examples=False, input_format=None
 def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=False):
     validate_corpus(corpus)
     projection = corpus_projection(corpus)
+    expected_evidence = evidence_hash(corpus)
     overlap = normalized_split_overlap(corpus["examples"], input_format=corpus.get("input_format"))
     if reject_normalized_overlap and overlap["cross_split_groups"]:
         raise ValueError("normalized example text appears in multiple splits")
     for item in corpus["examples"]:
         if item.get("review_status") == "reviewed":
-            review_is_bound(item, projection)
+            review_is_bound(item, projection, corpus, expected_evidence)
     examples = [item for item in corpus["examples"] if item["split"] == split]
     if not examples:
         raise ValueError("split must contain examples")
@@ -523,12 +555,17 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
                         or "metadata_sha256" not in input_fingerprint
                         or input_fingerprint["metadata_sha256"] != expected_metadata):
                     raise ValueError("evaluated report input fingerprint differs from corpus example")
+            if report_has_input and "evidence_sources_sha256" in input_fingerprint:
+                if input_fingerprint["evidence_sources_sha256"] != expected_evidence:
+                    raise ValueError("evaluated report evidence sources fingerprint differs from corpus")
+            elif expected_evidence is not None:
+                report_has_input = False
             gates = [gate for gate in report["gates"] if gate["gate_id"] == corpus["gate_id"]]
             if len(gates) != 1 or gates[0]["status"] not in {"passed", "failed", "not_checked"}:
                 raise ValueError(f"missing or invalid gate for {item['id']}")
             actual, expected = gates[0]["status"], item["expected"]
             record_result(counts, actual, expected)
-            bound_review = item.get("review_status") == "reviewed" and review_is_bound(item, projection)
+            bound_review = item.get("review_status") == "reviewed" and review_is_bound(item, projection, corpus, expected_evidence)
             for dimension, label in item.get("strata", {}).items():
                 bucket = strata_results.setdefault(dimension, {}).setdefault(
                     label, {"counts": empty_counts(), "examples": 0,

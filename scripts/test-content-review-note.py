@@ -20,6 +20,35 @@ class FeedbackTests(unittest.TestCase):
         self.corpus = {"version": 1, "gate_id": "length", "examples": [
             {"id": "e1", "split": "development", "text": self.text, "expected": "passed"}]}
 
+    def test_reference_fingerprints_follow_notes_and_blind_reviews(self):
+        sources = {"earlier": "Texte privé", "other": "snapshot"}
+        self.corpus["evidence_sources"] = sources
+        digest = module._corpus_module().evidence_hash(self.corpus)
+        self.report["input_fingerprint"] = {"version": 1, "text_sha256": hashlib.sha256(self.text.encode()).hexdigest(),
+                                            "metadata_sha256": None, "evidence_sources_sha256": digest}
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "person", "manual", evidence_sources=sources)
+        event = module.export_review(self.corpus, note)["events"][0]
+        self.assertEqual(event["evidence_sources_sha256"], digest)
+        self.assertNotIn("Texte privé", json.dumps(event))
+        bound = module.bind_review(self.corpus, note)
+        self.assertEqual(bound["examples"][0]["review"]["evidence_sources_sha256"], digest)
+        packet = module.blind_packet(self.corpus, "development", "Check the draft against its prior version")
+        self.assertEqual(packet["evidence_sources"], sources)
+        packet["examples"][0]["human_status"] = "passed"
+        blind, _, _ = module.bind_blind_reviews(self.corpus, packet, "person", "manual")
+        self.assertEqual(blind["examples"][0]["review"]["evidence_sources_sha256"], digest)
+        log = module.combine_blind_reviews(self.corpus, [(packet, "person", "manual")])
+        self.assertEqual(log["events"][0]["evidence_sources_sha256"], digest)
+        self.assertNotIn("Texte privé", json.dumps(log))
+        self.corpus["evidence_sources"]["earlier"] = "changed"
+        for action in (lambda: module.export_review(self.corpus, note),
+                       lambda: module.bind_blind_reviews(self.corpus, packet, "person", "manual"),
+                       lambda: module._corpus_module().aggregate_review_events(self.corpus, "development", log)):
+            with self.assertRaisesRegex(ValueError, "evidence sources"):
+                action()
+        with self.assertRaisesRegex(ValueError, "evidence sources"):
+            module.capture(self.text, self.report, "length", "e1", evidence_sources=self.corpus["evidence_sources"])
+
     def test_report_format_is_preserved_and_rejects_corpus_mismatch(self):
         self.report["input_format"] = "paragraph-text"
         self.corpus["input_format"] = "paragraph-text"

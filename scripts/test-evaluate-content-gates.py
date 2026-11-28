@@ -343,6 +343,46 @@ class EvaluateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "synthetic"):
             eval_module.validate_corpus(corpus)
 
+    def test_evidence_references_bind_review_and_run_fingerprints(self):
+        text = "draft"
+        item = {"id": "a", "split": "holdout", "text": text, "expected": "passed", "review_status": "reviewed",
+                "review": {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "expected": "passed"}}
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "evidence_sources": {"prior": "secret"}, "examples": [item]}
+        digest = eval_module.evidence_hash(corpus)
+        report = {"gates": [{"gate_id": "g", "status": "passed"}], "input_fingerprint": {"version": 1,
+                  "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "metadata_sha256": None, "evidence_sources_sha256": digest}}
+        def run():
+            with patch.object(eval_module.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=json.dumps(report))):
+                return eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(run()["unbound_reviewed_examples"], 1)
+        item["review"]["evidence_sources_sha256"] = digest
+        self.assertEqual(run()["reviewed_examples"], 1)
+        report["input_fingerprint"]["evidence_sources_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "evidence sources"):
+            run()
+        report["input_fingerprint"]["evidence_sources_sha256"] = digest
+        corpus["evidence_sources"]["prior"] = "changed"
+        with self.assertRaisesRegex(ValueError, "evidence sources"):
+            run()
+        self.assertEqual(eval_module.evidence_hash({"evidence_sources": {"z": "2", "a": "1"}}),
+                         eval_module.evidence_hash({"evidence_sources": {"a": "1", "z": "2"}}))
+
+    def test_legacy_historical_review_with_references_is_explicitly_unverified(self):
+        text = "draft"
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "evidence_sources": {"prior": "reference"},
+                  "examples": [{"id": "a", "split": "holdout", "text": text, "expected": "passed"}]}
+        event = {"example_id": "a", "reviewer": "r", "method": "manual", "model_status": "passed", "reviewer_status": "passed",
+                 "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "report_binding": "verified",
+                 "report_binding_scope": "text_and_metadata", "resolved_policy_fingerprint": {"version": 1, "sha256": "a" * 64}}
+        log = {"version": 1, "gate_id": "g", "events": [event]}
+        metrics = eval_module.aggregate_review_events(corpus, "holdout", log, "a" * 64)
+        self.assertEqual(metrics["report_binding_counts"], {"verified": 0, "unverified": 1})
+        self.assertEqual(metrics["policy_binding_counts"]["unbound"], 1)
+        event["evidence_sources_sha256"] = eval_module.evidence_hash(corpus)
+        metrics = eval_module.aggregate_review_events(corpus, "holdout", log, "a" * 64)
+        self.assertEqual(metrics["report_binding_counts"]["verified"], 1)
+        self.assertEqual(metrics["policy_binding_counts"]["matching"], 1)
+
     def test_evidence_sources_reach_the_cli_as_local_files(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "evidence_sources": {"s": "snapshot"}, "examples": [
             {"id": "a", "split": "holdout", "text": "a", "expected": "passed"},

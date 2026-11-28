@@ -1240,3 +1240,7 @@ observations in Markdown and HTML, including reused reports and rejected stale
 observations. Telemetry distinguishes unavailable whole proposals from
 unavailable individual item mappings. These fixtures do not establish live CMS
 revision freshness or browser-rendered visibility.
+
+- [x] Bind human review notes, blind packets and corpus comparisons to the
+  supplied named reference texts. Preserve partial legacy review records as
+  unbound when references are present; do not infer reference authenticity.
