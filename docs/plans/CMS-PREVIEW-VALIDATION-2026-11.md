@@ -247,4 +247,31 @@ In a controlled copy, removing three linked numeric reference markers left the
 33 measured sentences and all six gate measurements unchanged. This is one
 regression example, not a general guarantee about citations or locales. The
 checks remain editorial prompts and do not assess factual accuracy. Publication
-and deployment of 0.9.9 and a connected revision-audit retest remain outstanding.
+and deployment of a corrected package and a connected revision-audit retest remain outstanding.
+
+### Preview WASM loading investigation (28 November 2026)
+
+A connected revision-audit request returned an internal error. A brief,
+read-only Worker tail identified `TypeError: Invalid URL string` in
+`loadBridgeModule`; the tail was stopped and its captured logs were deleted.
+The current website source pins `@aeptus/aexeo-emdash` 0.9.6, but the exact
+package version in the deployed Worker was not independently established.
+
+A local Cloudflare Vite/workerd comparison used the published 0.9.6 archive and
+an archive built from Aexeo 0.9.10. Both were tested with the same Worker entry,
+Portable Text input, Vite Cloudflare plugin and `vite-plugin-wasm`. The 0.9.6
+bundle omitted the WASM module and returned `Invalid URL string`; the 0.9.10
+bundle attached the compiled module and evaluated the test content. In 0.9.6
+the WASM import uses a variable; the newer loader uses a literal import that the
+bundler can resolve. The local test used Vite 7.3.3, the Cloudflare Vite plugin
+1.36.0 and Wrangler 4.136.3, with compatibility date 2026-09-23. It did not
+reproduce the complete Astro/EmDash host or its deployed configuration.
+
+The 0.9.10 release preparation is merged in
+[PR #1089](https://github.com/schiste/Aexeo/pull/1089). Its archive passed a
+public API smoke test, plugin and WASM integration tests, and the comparison
+above. It was not published to npm or deployed to Preview at the time of this
+record. Verify the registry artifact, update the host through its normal
+workflow, and rerun a connected audit against a known revision before treating
+the Preview integration as working. An audit remains advisory and does not
+verify factual accuracy or authorize publication.
