@@ -1,10 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { cmsBodyCoverage, cmsBodyCoverageNotice, cmsMetadataCoverage, cmsMetadataCoverageNotice, hasCompleteBody, isCmsObservableFinding } from "../src/cms-coverage.js";
-import type { Finding } from "../src/types.js";
+import type { EmdashDocument, Finding } from "../src/types.js";
 
 const finding = (rule_id: string): Finding => ({ rule_id, message: "", path: "/a", line: 1, column: 1, severity: "warning", suggestion: null, scope: "page" });
 
 describe("CMS observation boundaries", () => {
+  it("does not treat malformed persisted body observations as complete", () => {
+    for (const invalid of [
+      { body: null },
+      { body: "not a block array" },
+      { body: [], body_capabilities: null },
+      { body: [], body_capabilities: {} },
+      { body: [], body_capabilities: ["text", "headings", "paragraphs", "links", 42] },
+    ]) {
+      const document = { route: "/a", title: "A", ...invalid } as unknown as EmdashDocument;
+      expect(hasCompleteBody(document)).toBe(false);
+      expect(cmsBodyCoverage(document)).toBe("unavailable");
+    }
+  });
+
   it("distinguishes absent, partial, and explicitly empty bodies", () => {
     expect(hasCompleteBody({ route: "/a", title: "A" })).toBe(false);
     expect(hasCompleteBody({ route: "/a", title: "A", body: [] })).toBe(true);
