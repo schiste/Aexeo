@@ -90,7 +90,9 @@ absence of a match does not establish their absence. Review the passage in conte
 
 The parameters JSON may also contain an array of 1–16 distinct parameter maps.
 Each map must match a configured gate exactly. Adjacent entries using the same
-model share its load and parse; changing the model reloads it. Results remain
+model share its load, parse and validated sentence structures within that request;
+changing the model reloads it. Each rule still checks its own configured limits.
+The parsed document and structures are cleared after the request. Results remain
 individually bound to their parameters and input. A failed observation is omitted
 while other observations may still be returned, so inspect every gate's status.
 Invalid or duplicate configurations reject the batch before any model is run.
