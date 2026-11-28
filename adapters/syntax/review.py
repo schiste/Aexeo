@@ -6,6 +6,8 @@ import json
 import math
 import re
 import sys
+import unicodedata
+from collections import Counter
 
 EXTENSION = "syntax.similarity"
 MAX_TEXT = 200_000
@@ -34,6 +36,8 @@ def parameters(raw):
         raise ValueError("unsupported analysis")
     if "analysis" in raw:
         required.add("analysis")
+    if mode == "coordinated_nouns" and "marker_labels" in raw:
+        required.add("marker_labels")
     if set(raw) != required or not all(isinstance(v, str) and v for v in raw.values()):
         raise ValueError("parameters must contain exactly the documented nonempty string fields")
     try:
@@ -52,11 +56,16 @@ def parameters(raw):
             raise ValueError("invalid clause alternation parameters")
     if mode == "coordinated_nouns":
         labels = raw["coordination_labels"].split(",")
-        if (not 2 <= min_items <= 100 or len(labels) > 32
-                or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:.-]{0,63}", label) for label in labels)
-                or len(set(labels)) != len(labels)):
+        if (not 2 <= min_items <= 100 or not valid_labels(labels)):
             raise ValueError("invalid coordinated noun parameters")
+        if "marker_labels" in raw and not valid_labels(raw["marker_labels"].split(",")):
+            raise ValueError("invalid noun marker labels")
     return threshold, minimum, max_tokens
+
+
+def valid_labels(labels):
+    return (len(labels) <= 32 and len(set(labels)) == len(labels)
+            and all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_:.-]{0,63}", label) for label in labels))
 
 
 def coordinated_noun_groups(sentence, labels):
@@ -67,14 +76,27 @@ def coordinated_noun_groups(sentence, labels):
         if token.pos_ not in nouns or (token.dep_ in labels and token.head.pos_ in nouns):
             continue
         pending = [token]
-        count = 0
+        group = []
         while pending:
             current = pending.pop()
-            count += 1
+            group.append(current)
             pending.extend(child for child in current.children
                            if child.i in ids and child.dep_ in labels and child.pos_ in nouns)
-        if count > 1:
-            yield count
+        if len(group) > 1:
+            yield group
+
+
+def shared_marker_counts(group, labels, sentence_ids):
+    """Count identical observed preceding direct-child markers in a noun group."""
+    signatures = []
+    for noun in group:
+        markers = sorted((child for child in noun.children
+                          if child.i in sentence_ids and child.i < noun.i and child.dep_ in labels), key=lambda child: child.i)
+        if markers:
+            signature = tuple((child.dep_, unicodedata.normalize("NFC", child.text.casefold()))
+                              for child in markers)
+            signatures.append(signature)
+    return Counter(signatures).values()
 
 
 def tree_for(sentence):
@@ -178,11 +200,19 @@ def evaluate(input_data, raw_parameters, nlp):
     if mode == "coordinated_nouns":
         labels = set(raw_parameters["coordination_labels"].split(","))
         minimum_items = int(raw_parameters["min_items"])
+        marker_labels = (set(raw_parameters["marker_labels"].split(","))
+                         if "marker_labels" in raw_parameters else None)
         for sentence, (start, _) in zip(sentences, bounds):
-            for count in coordinated_noun_groups(sentence, labels):
-                if count >= minimum_items:
+            sentence_ids = {token.i for token in sentence} if marker_labels is not None else None
+            for group in coordinated_noun_groups(sentence, labels):
+                counts = shared_marker_counts(group, marker_labels, sentence_ids) if marker_labels is not None else [len(group)]
+                for count in counts:
+                    if count < minimum_items:
+                        continue
                     prefix = text[:start]
-                    findings.append({"message": f"The parser found {count} coordinated noun heads; review the list in context.",
+                    description = ("coordinated noun heads with matching observed markers"
+                                   if marker_labels is not None else "coordinated noun heads")
+                    findings.append({"message": f"The parser found {count} {description}; review the list in context.",
                                      "line": prefix.count("\n") + 1,
                                      "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
                     if len(findings) > 1000:

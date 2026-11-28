@@ -145,6 +145,39 @@ class TestSyntaxAdapter(unittest.TestCase):
             self.assertEqual(config["gates"][0]["extension"], "syntax.coordinated_nouns")
             review.parameters(params)
 
+    def test_shared_noun_markers_and_examples(self):
+        root = Path(review.__file__).parent
+        for suffix in ("", "-fr"):
+            config = tomllib.loads((root / f"shared-noun-markers-example{suffix}.toml").read_text(encoding="utf-8"))
+            params = json.loads((root / f"shared-noun-markers-parameters{suffix}.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["gates"][0]["parameters"], params)
+            review.parameters(params)
+        params = json.loads((root / "shared-noun-markers-parameters.json").read_text())
+        text = "The alpha, the beta, the gamma and the delta."
+        sentence = Sentence(0, len(text), 0)
+        nouns = [Token(i, "NOUN", "ROOT" if i == 1 else "conj") for i in (1, 3, 5, 7)]
+        markers = [Token(i, "DET", "det") for i in (0, 2, 4, 6)]
+        for noun, marker in zip(nouns, markers):
+            marker.text = "The" if noun.i == 1 else "the"
+            marker.head = noun
+            noun.children.append(marker)
+        for noun in nouns[1:]:
+            noun.head = nouns[0]
+            nouns[0].children.append(noun)
+        sentence[:] = [item for pair in zip(markers, nouns) for item in pair]
+        model = Model([sentence])
+        results = review.evaluate({"text": text}, params, model)
+        self.assertEqual(len(results[0]["diagnostics"]), 1)
+        self.assertIn("matching observed markers", results[0]["diagnostics"][0]["message"])
+        markers[-1].text = "a"
+        self.assertEqual(review.evaluate({"text": text}, params, model)[0]["diagnostics"], [])
+        self.assertEqual(len(review.evaluate({"text": text}, {**params, "min_items": "3"}, model)[0]["diagnostics"]), 1)
+        markers[0].dep_ = "other"
+        self.assertEqual(review.evaluate({"text": text}, {**params, "min_items": "3"}, model)[0]["diagnostics"], [])
+        for invalid in ("", "det,,case", "det,det", "det, case"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                review.parameters({**params, "marker_labels": invalid})
+
     def test_ordered_subtree_distance(self):
         leaf = (("NOUN", "nsubj"), ())
         root = (("VERB", "ROOT"), (leaf,))
