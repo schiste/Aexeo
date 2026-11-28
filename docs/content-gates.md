@@ -2163,8 +2163,10 @@ match that inventory. The projection's observed-field coverage remains in force:
 an unobserved field is not treated as absent. A mismatch is not checked.
 The v1 `content-change` evaluator also accepts this explicit media type and
 binds the whole JSON as content. It does not currently attach source positions
-for these findings, and rejects embedded metadata when metadata gates are
-selected. The experimental v2 Rust verifier and independent Python comparator
+for these findings. With metadata gates, embedded host values must exactly match
+the change entry's metadata; observed-field coverage remains in force. The host
+must independently verify the complete change inputs, including metadata, because
+the v1 verdict subject does not bind all decision inputs. The experimental v2 Rust verifier and independent Python comparator
 accept only a narrow host subset: the JSON object must contain exactly the
 schema and string text fields, optionally with ordered UTF-8 byte boundaries
 in `block_ends`, a string array of observed `headings`, and ordered,
