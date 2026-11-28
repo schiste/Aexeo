@@ -6,6 +6,7 @@ id = "editorial.sentence_openings"
 kind = "repeated_sentence_openings"
 opening_words = 2
 max_consecutive = 2
+allow_arabic_word_boundaries = true
 delimiters = ".!?؟"
 blocking = false
 
