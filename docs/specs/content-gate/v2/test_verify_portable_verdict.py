@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import validate_inline_list_gate, validate_forbidden_terms_gate, validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import validate_similar_sentence_lengths_gate, validate_inline_list_gate, validate_forbidden_terms_gate, validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -129,6 +129,36 @@ class PortableComparison(unittest.TestCase):
             self.artifacts['resolved_policy'] = self.encoded(policy)
             with self.subTest(gate=invalid), self.assertRaisesRegex(VerificationError, 'invalid resolved gate'):
                 self.check()
+
+    def test_sentence_rhythm_policy_validation(self):
+        gate = {'kind': 'similar_sentence_lengths', 'id': 'rhythm', 'severity': 'warning',
+                'blocking': False, 'run_length': 2, 'tolerance_words': 0, 'delimiters': '.!?'}
+        for options in ({}, {'min_difference_percent': 30}, {'range_min_words': 15, 'range_max_words': 22},
+                        {'allow_arabic_word_boundaries': True, 'abbreviations': ['Dr.', 'e.g.']}):
+            validate_similar_sentence_lengths_gate(dict(gate, **options))
+        for options in ({'run_length': True}, {'run_length': 1}, {'tolerance_words': -1},
+                        {'delimiters': ''}, {'min_difference_percent': 0},
+                        {'min_difference_percent': 30, 'run_length': 3},
+                        {'min_difference_percent': 30, 'tolerance_words': 1},
+                        {'range_min_words': 15}, {'range_min_words': 23, 'range_max_words': 22},
+                        {'range_min_words': 15, 'range_max_words': 22, 'min_difference_percent': 30},
+                        {'allow_arabic_word_boundaries': 1}, {'abbreviations': ['Dr.', 'Dr.']},
+                        {'abbreviations': ['no period']}, {'extra': 1}):
+            with self.subTest(options=options), self.assertRaises(VerificationError):
+                validate_similar_sentence_lengths_gate(dict(gate, **options))
+
+    def test_unchecked_sentence_rhythm_still_validates_policy(self):
+        policy = json.loads(self.artifacts['resolved_policy'])
+        change = json.loads(self.artifacts['change'])
+        verdict = copy.deepcopy(self.previous['verdict'])
+        verdict['checks'][0]['status'] = 'not_checked'
+        policy['gates'][0] = {'kind': 'similar_sentence_lengths', 'id': 'words',
+                              'severity': 'warning', 'blocking': True, 'run_length': 2,
+                              'tolerance_words': 0, 'delimiters': '.!?', 'min_difference_percent': 30}
+        require_policy_coverage(policy, change, False, verdict)
+        policy['gates'][0]['min_difference_percent'] = 101
+        with self.assertRaises(VerificationError):
+            require_policy_coverage(policy, change, False, verdict)
 
     def test_heading_policy_validation_applies_when_not_checked(self):
         policy = json.loads(self.artifacts['resolved_policy'])
@@ -1089,6 +1119,8 @@ class PortableComparison(unittest.TestCase):
                 policy['gates'][0].update(mark='—', max_per_paragraph=1)
             elif kind == 'inline_triple_candidates':
                 policy['gates'][0].update(conjunction='and', delimiters='.!?')
+            elif kind == 'similar_sentence_lengths':
+                policy['gates'][0].update(run_length=2, tolerance_words=0, delimiters='.!?')
             for status in ('passed', 'failed', 'not_checked'):
                 verdict['checks'][0]['status'] = status
                 with self.subTest(kind=kind, status=status):

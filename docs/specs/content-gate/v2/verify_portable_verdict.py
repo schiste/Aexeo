@@ -214,6 +214,53 @@ def validate_inline_list_gate(gate):
             text(abbreviation)
 
 
+def validate_similar_sentence_lengths_gate(gate):
+    """Validate resolved rhythm parameters; this does not re-evaluate prose."""
+    if gate.get('kind') != 'similar_sentence_lengths':
+        return
+    required = {'kind', 'id', 'severity', 'blocking', 'run_length', 'tolerance_words', 'delimiters'}
+    optional = {'min_difference_percent', 'range_min_words', 'range_max_words',
+                'allow_arabic_word_boundaries', 'abbreviations'}
+    if (not required <= set(gate) or set(gate) - required - optional
+            or gate['severity'] not in ('warning', 'error')
+            or type(gate['blocking']) is not bool):
+        raise VerificationError('invalid resolved sentence rhythm gate')
+    run, tolerance = gate['run_length'], gate['tolerance_words']
+    if (type(run) is not int or not 2 <= run <= 64
+            or type(tolerance) is not int or not 0 <= tolerance <= (1 << 64) - 1):
+        raise VerificationError('invalid sentence rhythm bounds')
+    text(gate['delimiters'], empty=False)
+    if 'allow_arabic_word_boundaries' in gate and type(gate['allow_arabic_word_boundaries']) is not bool:
+        raise VerificationError('invalid sentence rhythm boundary option')
+    if 'min_difference_percent' in gate:
+        percent = gate['min_difference_percent']
+        if (type(percent) is not int or not 1 <= percent <= 100
+                or run != 2 or tolerance != 0):
+            raise VerificationError('invalid sentence rhythm percentage')
+    has_min, has_max = 'range_min_words' in gate, 'range_max_words' in gate
+    if has_min or has_max:
+        if not has_min or not has_max:
+            raise VerificationError('incomplete sentence rhythm range')
+        lower, upper = gate['range_min_words'], gate['range_max_words']
+        if (type(lower) is not int or type(upper) is not int or not 1 <= lower <= upper <= 1000
+                or run != 2 or tolerance != 0 or 'min_difference_percent' in gate):
+            raise VerificationError('invalid sentence rhythm range')
+    if 'abbreviations' in gate:
+        abbreviations = gate['abbreviations']
+        if not isinstance(abbreviations, list) or not abbreviations:
+            raise VerificationError('invalid sentence rhythm abbreviations')
+        seen = set()
+        for abbreviation in abbreviations:
+            text(abbreviation, empty=False)
+            word = abbreviation[:-1]
+            if (not abbreviation.endswith('.') or not word or any(not part for part in word.split('.'))
+                    or any(ch.isspace() and ch not in '\x1c\x1d\x1e\x1f' for ch in word)
+                    or ('.' in word and (len(abbreviation.encode('utf-8')) > 128 or word.count('.') >= 16))
+                    or abbreviation in seen):
+                raise VerificationError('invalid sentence rhythm abbreviation')
+            seen.add(abbreviation)
+
+
 def validate_paragraph_length_gate(gate):
     """Validate exact resolved fields and producer bounds before checking outcomes."""
     kind = gate.get('kind')
@@ -696,6 +743,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
         validate_paragraph_length_gate(gate)
         validate_forbidden_terms_gate(gate)
         validate_inline_list_gate(gate)
+        validate_similar_sentence_lengths_gate(gate)
         if kind == 'unique_collection_metadata':
             required = {'kind', 'id', 'severity', 'blocking', 'field'}
             if (not required <= set(gate) or set(gate) - required - {'group_by'}
@@ -817,6 +865,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
                 raise VerificationError('invalid resolved gate')
             validate_heading_gate(gate)
             validate_paragraph_length_gate(gate)
+            validate_similar_sentence_lengths_gate(gate)
     if not isinstance(policy, dict) or 'name' not in policy:
         raise VerificationError('resolved policy name is unavailable')
     text(policy['name'], empty=False)
