@@ -219,7 +219,8 @@ archive was built from Aexeo commit `0d0048bc6637f5c3dd34a64739fc5ce3d5357a58`
 with pinned dependencies and wasm-bindgen 0.2.118. Its SHA-256 was
 `65dc08743723f089826764ff95b01514ad077c420465e630c9e84f3dbb781e7c`.
 The plugin suite passed 440 tests, the real WASM suite passed, and editorial
-preset and revision-audit tests passed against the extracted archive. These
-local checks do not reproduce Preview's runtime and do not establish that an
+preset and revision-audit tests passed against the extracted archive. A
+configured revision-audit smoke test also passed in workerd using that extracted
+bundle and WASM. These local checks do not reproduce Preview's runtime and do not establish that an
 upgrade will resolve its error. Publication, installation and a connected
 retest remain separate steps.
