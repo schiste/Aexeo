@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.8]
 
+- Allow an explicitly configured, candidate-bound link observer for unsaved fragment audits. Invalid or unavailable observations remain unchecked; an audit never authorizes publication.
+
 - Add the opt-in `writing-review`, `writing-review-en` and `writing-review-fr` composed presets. Their advisory checks are starting points for editorial review, not assessments of factual accuracy, semantic equivalence, idiomatic translation or authorship.
 
 ## [0.9.7]
