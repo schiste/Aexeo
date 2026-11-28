@@ -4,6 +4,12 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.11]
+
+- Allow explicitly installed, revision-specific and candidate-specific custom gate providers for configured CMS audits. Candidate results require the candidate digest and projected input; host trust, freshness and publication remain separate responsibilities.
+- Treat malformed persisted body and capability shapes as unavailable instead of reporting complete coverage or throwing.
+- Improve sentence boundary handling after URL paths for supported non-ASCII punctuation in the bundled WASM engine.
+
 ## [0.9.10]
 
 - Expose host-attested list-structure coverage in revision audit reports. This attestation is not reused for unsaved candidates.
