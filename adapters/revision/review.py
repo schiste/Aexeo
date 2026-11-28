@@ -29,11 +29,19 @@ def normalize(text):
 
 def parameters(raw):
     required = {"source", "pairs", "minimum"}
-    if not isinstance(raw, dict) or not required <= set(raw) or set(raw) - required - {"matching"} or not all(isinstance(value, str) and value for value in raw.values()):
+    if not isinstance(raw, dict) or not required <= set(raw) or set(raw) - required - {"matching", "unicode_version"} or not all(isinstance(value, str) and value for value in raw.values()):
         raise ValueError("expected source, pairs and minimum string parameters")
     matching = raw.get("matching", "exact")
     if matching not in ("exact", "unicode_caseless"):
         raise ValueError("unknown matching mode")
+    version = raw.get("unicode_version")
+    if matching == "unicode_caseless":
+        if not isinstance(version, str) or not version or len(version) > 32:
+            raise ValueError("unicode_caseless requires a bounded Unicode version")
+        if version != unicodedata.unidata_version:
+            raise Unavailable("configured Unicode version is unavailable")
+    elif version is not None:
+        raise ValueError("Unicode version requires unicode_caseless matching")
     try:
         pairs = strict_json(raw["pairs"])
         minimum = int(raw["minimum"])
@@ -120,8 +128,8 @@ def main():
     try:
         data = load_json(args.input, MAX_INPUT_BYTES)
         config = load_json(args.parameters, MAX_PARAMETERS_BYTES)
-        parameters(config)
         try:
+            parameters(config)
             if not args.drafts_complete:
                 raise Unavailable("draft coverage not attested")
             result = evaluate(data, config)

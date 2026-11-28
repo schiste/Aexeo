@@ -4,6 +4,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import unicodedata
 from pathlib import Path
 import review
 
@@ -25,7 +26,7 @@ class ReviewTests(unittest.TestCase):
         self.assertIn("Observed 1", result["diagnostics"][0]["message"])
 
     def test_unicode_caseless_is_opt_in_and_preserves_bound_input(self):
-        config = {"source": "prior", "pairs": json.dumps([{"before": "Difficultés", "after": "Équipe"}]), "minimum": "1", "matching": "unicode_caseless"}
+        config = {"source": "prior", "pairs": json.dumps([{"before": "Difficultés", "after": "Équipe"}]), "minimum": "1", "matching": "unicode_caseless", "unicode_version": unicodedata.unidata_version}
         data = {"text": "Une e\u0301quipe agit.", "evidence_sources": {"prior": "Les DIFFICULTE\u0301S persistent."}}
         result = review.evaluate(data, config)[0]
         self.assertEqual(result["diagnostics"], [])
@@ -33,7 +34,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result["parameters"], config)
         data["text"] += " Les difficultés restent."
         self.assertEqual(len(review.evaluate(data, config)[0]["diagnostics"]), 1)
-        exact = {key: value for key, value in config.items() if key != "matching"}
+        exact = {key: value for key, value in config.items() if key not in ("matching", "unicode_version")}
         self.assertEqual(len(review.evaluate(data, exact)[0]["diagnostics"]), 1)
 
     def test_unicode_caseless_rejects_colliding_pairs(self):
@@ -43,16 +44,32 @@ class ReviewTests(unittest.TestCase):
             [{"before": "first", "after": "Straße"}, {"before": "second", "after": "STRASSE"}],
         ):
             with self.subTest(pairs=pairs), self.assertRaises(ValueError):
-                review.parameters({"source": "prior", "pairs": json.dumps(pairs), "minimum": "1", "matching": "unicode_caseless"})
+                review.parameters({"source": "prior", "pairs": json.dumps(pairs), "minimum": "1", "matching": "unicode_caseless", "unicode_version": unicodedata.unidata_version})
         with self.assertRaises(ValueError):
             review.parameters({**self.config, "matching": "language_guess"})
 
     def test_caseless_draft_with_excessive_combining_sequence_is_unavailable(self):
         data = {"text": "a" + "\u0315" * (review.MAX_COMBINING_SEQUENCE + 1), "evidence_sources": {"prior": "difficulties assistance"}}
         with self.assertRaises(review.Unavailable):
-            review.evaluate(data, {**self.config, "matching": "unicode_caseless"})
+            review.evaluate(data, {**self.config, "matching": "unicode_caseless", "unicode_version": unicodedata.unidata_version})
         # The legacy exact path remains available for the same input.
         self.assertEqual(len(review.evaluate(data, self.config)[0]["diagnostics"]), 1)
+
+    def test_unicode_version_is_explicit_and_unavailable_versions_do_not_pass(self):
+        with self.assertRaises(ValueError):
+            review.parameters({**self.config, "matching": "unicode_caseless"})
+        with self.assertRaises(ValueError):
+            review.parameters({**self.config, "unicode_version": unicodedata.unidata_version})
+        with self.assertRaises(review.Unavailable):
+            review.evaluate(self.input, {**self.config, "matching": "unicode_caseless", "unicode_version": "0.0.0"})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_file, params_file = root / "input.json", root / "params.json"
+            input_file.write_text(json.dumps(self.input), encoding="utf-8")
+            params_file.write_text(json.dumps({**self.config, "matching": "unicode_caseless", "unicode_version": "0.0.0"}), encoding="utf-8")
+            result = subprocess.run([sys.executable, str(Path(review.__file__)), str(input_file), str(params_file), "--drafts-complete"], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout), [])
+            self.assertIn("not checked", result.stderr)
 
     def test_missing_prior_and_oversized_inputs_are_unavailable(self):
         with self.assertRaises(review.Unavailable):
@@ -82,7 +99,7 @@ class ReviewTests(unittest.TestCase):
             self.assertEqual(json.loads(observed.stdout)[0]["diagnostics"], [])
 
     def test_cli_unicode_mode_binds_parameters_and_withholds_excessive_text(self):
-        config = {"source": "prior", "pairs": json.dumps([{"before": "difficultés", "after": "équipe"}]), "minimum": "1", "matching": "unicode_caseless"}
+        config = {"source": "prior", "pairs": json.dumps([{"before": "difficultés", "after": "équipe"}]), "minimum": "1", "matching": "unicode_caseless", "unicode_version": unicodedata.unidata_version}
         data = {"text": "Une E\u0301QUIPE agit.", "evidence_sources": {"prior": "Des DIFFICULTÉS persistent."}}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
