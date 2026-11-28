@@ -695,6 +695,7 @@ mod tests {
         let sources = builtin_content_presets();
         for name in [
             "sentence-asymmetry-review",
+            "medium-sentence-pairs-review",
             "framing-colon-review-en",
             "framing-colon-review-fr",
             "long-inline-list-review-en",

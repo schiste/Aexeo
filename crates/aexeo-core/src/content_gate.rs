@@ -8694,6 +8694,26 @@ terms = ["bad"]
                 .status,
             GateStatus::NotChecked
         );
+        context.paragraphs = Some(vec![
+            ContentParagraph {
+                text: "One two three.".into(),
+                line: 1,
+                column: 1,
+            },
+            ContentParagraph {
+                text: "One two three.".into(),
+                line: 2,
+                column: 1,
+            },
+        ]);
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
         context.paragraphs = None;
         assert_eq!(
             preset
