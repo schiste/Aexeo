@@ -4091,6 +4091,56 @@ mod tests {
     }
 
     #[test]
+    fn native_change_positions_index_findings_across_entities() {
+        use sha2::{Digest, Sha256};
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let projection = serde_json::json!({
+            "schema": "aexeo.content-adapter/v1",
+            "text": "bad ugly",
+            "native_source_map": {"spans": [{"start": 0, "end": 3, "path": ["body", 0], "utf16_start": 0}]}
+        }).to_string();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(projection.clone());
+        state.sha256 = format!("{:x}", Sha256::digest(projection.as_bytes()));
+        let mut second = change.entries[0].clone();
+        second.entity_id = "second-article".into();
+        change.entries.push(second);
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad','ugly']\nblocking=false\n").unwrap();
+        let report = evaluate_change_with_native_locations(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            8192,
+            ChangeEvaluationHost::default(),
+            None,
+            HtmlContentScope::Document,
+            None,
+        )
+        .unwrap();
+        assert_eq!(report.coverage.len(), 2);
+        assert_eq!(report.locations.len(), 2);
+        assert_eq!(
+            report
+                .locations
+                .iter()
+                .map(|location| location.verdict_finding_index)
+                .collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        for location in &report.locations {
+            let finding = &report.verdict.findings[location.verdict_finding_index];
+            assert_eq!(
+                finding.check_id.as_deref(),
+                Some(location.check_id.as_str())
+            );
+        }
+        assert_ne!(report.locations[0].entity_id, report.locations[1].entity_id);
+    }
+
+    #[test]
     fn change_evidence_is_evaluated_and_bound_per_entity() {
         use std::collections::BTreeMap;
         let change = change();
