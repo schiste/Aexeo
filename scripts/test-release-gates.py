@@ -110,6 +110,10 @@ class SyntaxReleaseTests(unittest.TestCase):
                     "adapters/syntax/coordinated-nouns-parameters.json",
                     "adapters/syntax/coordinated-nouns-example-fr.toml",
                     "adapters/syntax/coordinated-nouns-parameters-fr.json",
+                    "adapters/syntax/shared-noun-markers-example.toml",
+                    "adapters/syntax/shared-noun-markers-parameters.json",
+                    "adapters/syntax/shared-noun-markers-example-fr.toml",
+                    "adapters/syntax/shared-noun-markers-parameters-fr.json",
                 })
                 for member in bundle.getmembers():
                     self.assertTrue(member.isfile())

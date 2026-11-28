@@ -63,11 +63,28 @@ have not been calibrated. A smoke test with spaCy 3.8.11 and both example models
 at 3.8.0 detected the four-noun English and French sample lists. This does not
 establish accuracy across content. One sentence suffices for this observation.
 
-The check does not classify nouns as abstract, compare determiners or prepositions,
+The default check does not classify nouns as abstract or compare determiners or prepositions,
 prove grammatical parallelism, or identify every list. Model errors and mixed
 parts of speech can affect coverage. A matching group may be deliberate; the
 adapter never rewrites or removes content. Missing parser annotations, source
 coverage or model compatibility yield `not_checked`, not a clean pass.
+
+## Optional shared noun-marker review
+
+The `shared-noun-markers-example` and matching parameter files add optional
+`marker_labels` to the same gate. They compare the ordered dependency labels and
+case-folded, NFC-normalized text of observed preceding direct children of each
+coordinated noun. Only explicit, identical nonempty marker sequences count;
+`min_items` applies to each matching sequence. The examples use `det` for English
+and `case,det` for French; adapt these labels to the parser and language. The
+examples are uncalibrated. A smoke test detected synthetic examples in both
+languages, but missed another English list because the parser labelled a noun
+as apposition rather than coordination. Omit `marker_labels` to retain the
+original count.
+
+Implied or shared markers, postpositions, affixes and parse errors may be missed.
+A match does not establish abstract meaning, excessive parallelism or poor style;
+absence of a match does not establish their absence. Review the passage in context.
 
 ## Batch several observations
 
