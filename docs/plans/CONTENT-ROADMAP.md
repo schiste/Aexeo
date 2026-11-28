@@ -136,8 +136,15 @@ publishing 0.9.5 and host-side validation remain open.
     `fragment_preset_not_configured`, narrowing the failure to a later stage.
     The host repository's current CMS manifest declares Aexeo 0.9.6 and EmDash
     1.6.0; that does not establish which bytes are deployed. No article content
-    was modified. These observations do not identify the failure's cause or test
-    retrieval of an actual report; inspect host logs and retest the deployment.
+    was modified. A subsequent filtered worker log captured a `TypeError: Invalid
+    URL string` in `loadBridgeModule` during the candidate audit, before the WASM
+    evaluator ran (worker script version `5ff9e000-52c3-473f-86c1-3cfb7f43b8c9`).
+    Aexeo 0.9.7 and later include a bundled-Worker loader fix exercised in workerd;
+    that test does not prove this Astro deployment contains the fix or that the
+    failure has the same cause in every audit. Publish and install the current
+    tested package, then repeat revision and candidate audits and retrieve their
+    reports through the connected MCP. Verify the actual deployment and rendered
+    host separately; no successful report was observed in this probe.
   - Release candidate update, 2026-11-28: [#1025](https://github.com/schiste/Aexeo/pull/1025)
     merged the 0.9.8 package version and the composable writing-review presets.
     TypeScript, 428 plugin tests, the real-WASM suite, an isolated installed
