@@ -68,7 +68,13 @@ followed from `requested_url` to `url`, in request order, each as
 `{"url": "...", "status_code": 301}`. An absent or empty chain means no hops
 were recorded, not that none happened. `redirected_arrivals` is optional too:
 other requests that were redirected to the same page, each as
-`{"requested_url": "...", "redirect_chain": [...], "status_code": 200}`.
+`{"requested_url": "...", "redirect_chain": [...], "redirect_chain_observed": true, "status_code": 200}`.
+An additional arrival without an explicit `redirect_chain_observed: true` is
+not used as redirect evidence. For the main input page, a nonempty consistent
+`redirect_chain` is the caller's observation. A missing or inconsistent chain
+cannot establish that the requested URL reached the final URL, even when other
+arrivals have verified chains. Such uncertainty prevents reconciliation from
+confirming orphan conclusions.
 
 The report lists every observed page, including pages with zero observed links,
 and counts distinct source URLs separately for each context. It preserves
@@ -332,9 +338,13 @@ credentials, and status) in the page's `crawl_response.redirect_chain`, which
 the adapter reports on the page. Hops of other requests redirected to the same
 page go in `crawl_response.redirected_arrivals` and are checked the same way. Requested and effective URLs that differ
 without a recorded chain raise `audit_redirect_chain_unavailable`: older
-artifacts and browser runners without hop data. A chain that
-does not start at the requested URL, or holds a non-3xx status, is dropped and
-raises `audit_redirect_chain_inconsistent`. The site URL
+artifacts and browser runners without hop data. An audit chain is used as
+evidence only when its producer marks `redirect_chain_observed` true. A chain
+that does not start at the requested URL, contains an invalid HTTP(S) hop URL,
+or has a status other than 301, 302, 303, 307 or 308 is dropped and raises
+`audit_redirect_chain_inconsistent` when observed. Consistent recorded hops are
+still caller-supplied provenance; they do not independently authenticate each
+HTTP response or its Location header. The site URL
 gives the origin unless every observed URL shares a different one, as when
 `example.com` redirects to `www.example.com`: that origin is then used and
 `audit_observed_origin_differs_from_target` is raised. Links written with the

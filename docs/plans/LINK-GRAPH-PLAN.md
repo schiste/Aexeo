@@ -600,3 +600,14 @@ no sccache wrapper. Earlier changes keep fixture servers alive until explicit
 shutdown and handle fragmented requests, but neither this sample nor those
 changes establish the root cause or exclude future intermittent failures.
 The issues remain open.
+
+### Redirect evidence coverage
+
+- An alias is no longer verified from a requested and final URL alone when its
+  redirect chain is absent, inconsistent or explicitly unobserved. A separate
+  unverified arrival continues to withhold reconciliation even if another
+  arrival has a valid chain. HTTP 304/305 and malformed hop URLs cannot provide
+  redirect credit. Legacy audit chains without an observation flag remain
+  unavailable; valid recorded chains still provide conditional evidence. This
+  change does not independently verify provenance, Location headers or a live
+  deployment.
