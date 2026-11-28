@@ -333,6 +333,13 @@ value can coexist with an unobserved source. An observed empty description is
 not the same as an unavailable mapping. `rendered_page: not_observed` remains
 true regardless of body coverage. Older stored reports may lack this field.
 
+Revision audits expose `input_coverage.body.list_structure_attestation` as
+`host_attested`, `not_attested`, or `not_used_for_candidate`. This describes
+whether a host assertion was supplied to the evaluator, not whether list
+classification succeeded or whether the assertion is correct. A proposed
+unsaved fragment never inherits a historical revision attestation; inspect each
+gate status and reason for the actual evaluation.
+
 Revision audit `input_coverage.body.unmapped_components` lists the block and
 inline component types encountered without a host mapping, with occurrence
 counts. It is limited to the projection actually inspected; an empty list

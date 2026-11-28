@@ -251,6 +251,8 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
       body: {
         coverage: cmsBodyCoverage(adapted.document),
         projected_blocks: adapted.document.body?.length ?? null,
+        list_structure_attestation: candidate !== undefined ? "not_used_for_candidate" as const :
+          listStructureAttested ? "host_attested" as const : "not_attested" as const,
         capabilities: adapted.document.body === undefined ? [] :
           adapted.document.body_capabilities ?? ["text", "headings", "paragraphs", "links"],
         field_selection: contentFields === undefined ? "automatic" as const : "configured" as const,
