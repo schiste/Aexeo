@@ -276,6 +276,7 @@ fn http_url_end(
     start: usize,
     block_end: Option<usize>,
     starts_segment: bool,
+    delimiters: &str,
 ) -> Option<usize> {
     const MAX_URL_BYTES: usize = 2048;
     let tail = text.get(start..)?;
@@ -313,9 +314,28 @@ fn http_url_end(
         return None;
     }
     let mut end = start;
+    let authority_start = if tail
+        .get(..8)
+        .is_some_and(|s| s.eq_ignore_ascii_case("https://"))
+    {
+        start + 8
+    } else {
+        start + 7
+    };
+    let mut after_authority = false;
     for (relative, ch) in tail.char_indices() {
         let offset = start + relative;
-        if block_end.is_some_and(|boundary| offset >= boundary) || ch.is_whitespace() {
+        if offset >= authority_start && matches!(ch, '/' | '?' | '#') {
+            after_authority = true;
+        }
+        // An ideographic stop can also be an IDNA domain separator. Do not
+        // split the authority; only treat configured stops after it as prose.
+        if block_end.is_some_and(|boundary| offset >= boundary)
+            || ch.is_whitespace()
+            || (after_authority
+                && matches!(ch, '。' | '！' | '？' | '؟')
+                && delimiters.contains(ch))
+        {
             break;
         }
         if relative + ch.len_utf8() > MAX_URL_BYTES {
@@ -394,6 +414,7 @@ fn for_each_sentence(
                 offset,
                 following_block,
                 block_end || offset == segment_start,
+                delimiters,
             ) {
                 protected_url_end = end;
             }
@@ -5680,8 +5701,70 @@ mod tests {
             );
         }
         assert_eq!(
-            http_url_end("wordhttps://example.org", 4, None, false),
+            http_url_end("wordhttps://example.org", 4, None, false, ".!?"),
             None
+        );
+    }
+
+    #[test]
+    fn sentence_url_respects_configured_non_ascii_terminators() {
+        for (terminator, following) in [
+            ('。', "下一句"),
+            ('！', "下一句"),
+            ('？', "下一句"),
+            ('؟', "التالي"),
+        ] {
+            let text = format!("Read https://example.org/v1.2{terminator}{following}.");
+            let mut sentences = Vec::new();
+            for_each_sentence(
+                &text,
+                1,
+                1,
+                &[],
+                ".!?。！？؟",
+                &[],
+                |segment, line, column| {
+                    if !segment.trim().is_empty() {
+                        sentences.push((segment.trim().to_owned(), line, column));
+                    }
+                },
+            );
+            assert_eq!(sentences.len(), 2, "{text}");
+            assert_eq!(sentences[0].0, "Read https://example.org/v1.2", "{text}");
+            assert_eq!(sentences[1].0, following, "{text}");
+            assert_eq!((sentences[1].1, sentences[1].2), (1, 31), "{text}");
+            let preset = ContentPreset::from_toml(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_character_length'\nmax_chars=1\ndelimiters='.!?。！？؟'\n",
+            ).unwrap();
+            let report = preset.evaluate(&literal_input(&text)).unwrap();
+            assert_eq!(report.gates[0].measurements["sentence_count"], 2, "{text}");
+            assert_eq!(
+                (
+                    report.gates[0].findings[1].line,
+                    report.gates[0].findings[1].column
+                ),
+                (1, 31),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn sentence_url_keeps_unconfigured_and_encoded_terminators() {
+        let literal = "https://example.org/資料。suffix";
+        assert_eq!(
+            http_url_end(literal, 0, None, false, ".!?"),
+            Some(literal.len())
+        );
+        let international = "https://例子。测试/路径";
+        assert_eq!(
+            http_url_end(international, 0, None, false, ".!?。"),
+            Some(international.len())
+        );
+        let encoded = "https://example.org/%E3%80%82suffix";
+        assert_eq!(
+            http_url_end(encoded, 0, None, false, ".!?。"),
+            Some(encoded.len())
         );
     }
 
@@ -5739,15 +5822,21 @@ mod tests {
             ]
         );
         let url = "https://example.org/page";
-        assert_eq!(http_url_end(url, 0, None, false), Some(url.len()));
+        assert_eq!(http_url_end(url, 0, None, false, ".!?"), Some(url.len()));
         let mixed = "HtTpS://example.org/page";
-        assert_eq!(http_url_end(mixed, 0, None, false), Some(mixed.len()));
-        assert_eq!(http_url_end("HTTPS://", 0, None, false), None);
-        assert_eq!(http_url_end("wordHTTP://example.org", 4, None, false), None);
-        assert_eq!(http_url_end(url, 0, Some(15), false), Some(15));
-        assert_eq!(http_url_end("https://", 0, None, false), None);
         assert_eq!(
-            http_url_end("wordhttps://example.org", 4, None, false),
+            http_url_end(mixed, 0, None, false, ".!?"),
+            Some(mixed.len())
+        );
+        assert_eq!(http_url_end("HTTPS://", 0, None, false, ".!?"), None);
+        assert_eq!(
+            http_url_end("wordHTTP://example.org", 4, None, false, ".!?"),
+            None
+        );
+        assert_eq!(http_url_end(url, 0, Some(15), false, ".!?"), Some(15));
+        assert_eq!(http_url_end("https://", 0, None, false, ".!?"), None);
+        assert_eq!(
+            http_url_end("wordhttps://example.org", 4, None, false, ".!?"),
             None
         );
         assert_eq!(
@@ -5755,7 +5844,8 @@ mod tests {
                 &format!("https://example.org/{}", "x".repeat(2048)),
                 0,
                 None,
-                false
+                false,
+                ".!?"
             ),
             None
         );
