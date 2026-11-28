@@ -209,6 +209,56 @@ describe("revision audits", () => {
     expect(evaluate).not.toHaveBeenCalled();
   });
 
+  it("binds candidate extensions to the candidate digest and retains them during link checks", async () => {
+    const { ctx } = host();
+    const initial = { ...report, gates: [
+      { gate_id: "external", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "extension" as const, findings: [], reason: "unavailable" },
+      { gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" },
+    ] };
+    const projected = { id: "/revision/one", text: "Candidate.", source_text: null, headings: null, metadata: null, evidence_sources: null };
+    const results = [{ extension: "example", parameters: {}, input: projected, diagnostics: [] }];
+    const evaluate = vi.fn(async (...args: unknown[]) => ({ ...initial, gates: initial.gates.map((gate) =>
+      gate.gate_id === "external" && args[5] ? { ...gate, status: "passed" as const } :
+      gate.gate_id === "links" && args[6] ? { ...gate, status: "passed" as const } : gate) }));
+    const provider = vi.fn(async (request: { candidate_sha256_json: string }) => ({ candidate_sha256_json: request.candidate_sha256_json, results }));
+    const historical = vi.fn();
+    const telemetry = vi.fn();
+    const result = await auditCandidate(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: "Candidate." }, {
+      preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } } }, evaluate,
+      projectContent: async () => projected, candidateExternalGates: provider, revisionExternalGates: historical,
+      projectLinks: async (document) => ({ document, destinations: ["/candidate"] }),
+      candidateLinkObservations: async (request) => ({ candidate_sha256_json: request.candidate_sha256_json, observations: ["reachable"] }), onExternalGateTelemetry: telemetry,
+    });
+    expect(result).toMatchObject({ status: "evaluated", report: { gates: [{ status: "passed" }, { status: "passed" }] }, assurance: { publication_authorization: "not_granted" } });
+    if (result.status !== "evaluated") throw new Error("expected audit");
+    expect(provider).toHaveBeenCalledWith(expect.objectContaining({ revision: "rev1", field: "content", candidate_sha256_json: result.candidate!.sha256_json, input: projected }));
+    expect(evaluate.mock.calls[2]?.[5]).toEqual(results);
+    expect(historical).not.toHaveBeenCalled();
+    expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: "success" }));
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain("Candidate.");
+  });
+
+  it("leaves candidate extension gates unchecked on invalid bindings and provider errors", async () => {
+    const request = { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: "Candidate." };
+    const initial = { ...report, gates: [{ gate_id: "external", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "extension" as const, findings: [], reason: "unavailable" }] };
+    for (const mode of ["mismatch", "invalid", "throws"] as const) {
+      const telemetry = vi.fn();
+      const evaluate = vi.fn(async () => initial);
+      const result = await auditCandidate(host().ctx as never, request, {
+        preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } } }, evaluate,
+        projectContent: async () => ({ id: "/revision/one", text: "Candidate.", source_text: null, headings: null, metadata: null, evidence_sources: null }),
+        candidateExternalGates: async ({ candidate_sha256_json }) => {
+          if (mode === "throws") throw new Error("private details");
+          return { candidate_sha256_json: mode === "mismatch" ? "wrong" : candidate_sha256_json, results: mode === "invalid" ? null as never : [] };
+        }, onExternalGateTelemetry: telemetry,
+      });
+      expect(result).toMatchObject({ status: "evaluated", report: initial });
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
+      expect(JSON.stringify(result)).not.toContain("private details");
+    }
+  });
+
   it("runs explicitly configured extension gates on the historical projection and preserves them when observing links", async () => {
     const { ctx } = host();
     const unchecked = { ...report, gates: [

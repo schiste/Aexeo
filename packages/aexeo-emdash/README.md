@@ -307,6 +307,18 @@ candidate. Invocation does not authorize publication or validate the provider's
 judgment. A report's `assurance.runtime_providers` identifies invocation,
 including combinations with explicitly installed locale or link observers.
 
+For an unsaved fragment, the host can separately install
+`candidateExternalGates`. It receives `{ collection, id, revision, field,
+candidate_sha256_json, locale, preset, input }` and returns
+`{ candidate_sha256_json, results }`. The response must echo the supplied digest;
+each result must also match the projected input, extension and parameters. A
+mismatched digest or result, missing provider or provider error leaves the
+extension gate `not_checked`. This digest identifies the serialized candidate
+fragment, not the entire revision, provider identity or publication state. The
+host remains responsible for access control, confidentiality, freshness and
+provider trust. As with historical audits, telemetry contains only duration
+and status, and no result grants publication authorization.
+
 A trusted configured-mode host can separately opt in to link observations for
 revision audits by passing `revisionLinkObservations` as a runtime dependency
 to `createPlugin`. It is never enabled by serializable presets:
