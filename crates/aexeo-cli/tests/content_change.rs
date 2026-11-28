@@ -135,6 +135,7 @@ fn native_report_cli_binds_final_verdict_and_exposes_only_observed_positions() {
     let telemetry = String::from_utf8_lossy(&output.stderr);
     assert!(telemetry.contains("content_change_native_locations"));
     assert!(!telemetry.contains("bad ugly"));
+    let report_bytes = fs::read(dir.path().join("verdict.json")).unwrap();
     let output = run(
         dir.path(),
         &change,
@@ -147,6 +148,21 @@ fn native_report_cli_binds_final_verdict_and_exposes_only_observed_positions() {
         ],
     );
     assert_ne!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read(dir.path().join("verdict.json")).unwrap(),
+        report_bytes
+    );
+    change["entries"][0]["after"]["inline"] = "tampered".into();
+    assert_ne!(
+        run(dir.path(), &change, policy, &["--native-report"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        fs::read(dir.path().join("verdict.json")).unwrap(),
+        report_bytes
+    );
 }
 
 #[test]
