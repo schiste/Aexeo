@@ -15,6 +15,46 @@ ENGINE_VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8")
 
 
 class PortableCliInterop(unittest.TestCase):
+    def test_native_change_report_conforms_to_published_schema(self):
+        # Validate real producer output with the independently maintained schema.
+        from jsonschema import Draft202012Validator
+        from referencing import Registry, Resource
+
+        schema = json.loads((HERE.parent / 'v1/native-change-report.schema.json').read_text())
+        verdict_schema = json.loads((HERE.parent / 'v1/verdict.schema.json').read_text())
+        schema['$id'] = 'https://schema.invalid/native-change-report.schema.json'
+        registry = Registry().with_resource(
+            'https://schema.invalid/verdict.schema.json', Resource.from_contents(verdict_schema))
+        validator = Draft202012Validator(schema, registry=registry)
+        binary = os.environ.get('AEXEO_CLI_BIN')
+        executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+        source = json.dumps({'schema': 'aexeo.content-adapter/v1', 'text': 'bad ugly',
+            'native_source_map': {'spans': [{'start': 0, 'end': 3,
+                'path': ['body', 0], 'utf16_start': 0}]}}, separators=(',', ':'))
+        change = {'schema': 'content-gate.change/v1', 'change_id': 'example',
+            'created_at': '2026-01-01T00:00:00Z', 'origin': {'kind': 'manual'},
+            'base': {'kind': 'opaque', 'revision': 'r1'},
+            'entries': [{'entity_id': 'article', 'operation': 'create',
+                'media_type': 'application/vnd.aexeo.content-adapter+json',
+                'after': {'inline': source, 'sha256': hashlib.sha256(source.encode()).hexdigest()}}]}
+        with tempfile.TemporaryDirectory(prefix='aexeo-native-schema-') as directory:
+            root = Path(directory)
+            (root / 'change.json').write_text(json.dumps(change), encoding='utf-8')
+            (root / 'preset.toml').write_text(
+                "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\n"
+                "terms=['bad','ugly']\nblocking=false\n", encoding='utf-8')
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change.json'),
+                CONTENT_GATE_VERDICT_FILE=str(root / 'report.json'))
+            result = subprocess.run(executable + ['content-change', '--preset', 'test',
+                '--preset-source', 'test=' + str(root / 'preset.toml'), '--native-report'],
+                cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads((root / 'report.json').read_text(encoding='utf-8'))
+            errors = list(validator.iter_errors(report))
+            self.assertEqual(errors, [], '\n'.join(str(error) for error in errors))
+            self.assertEqual((report['coverage'][0]['findings'], report['coverage'][0]['mapped']), (2, 1))
+            self.assertEqual(report['locations'][0]['path'], ['body', 0])
+
     @unittest.skipUnless(os.environ.get('AETHYME_CLI_BIN'), 'native comparator not supplied')
     def test_native_rejects_rebound_empty_policy(self):
         # The valid control proves the selected executable supports this protocol.
