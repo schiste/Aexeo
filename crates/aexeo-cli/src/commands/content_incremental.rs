@@ -933,58 +933,60 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                                 );
                                 continue;
                             };
-                            let mapped = serde_json::from_value::<
+                            let report = serde_json::from_value::<
                                 aexeo_core::content_gate::ContentReport,
-                            >(value.clone())
-                            .map_err(anyhow::Error::from)
-                            .and_then(|report| {
-                                aexeo_core::source_mapping::map_incremental_report(
-                                    item_preset,
-                                    item,
-                                    &report,
-                                    scope,
-                                    proposal
-                                        .link_observations
-                                        .as_ref()
-                                        .and_then(|m| m.get(&item.entity_id)),
-                                )
-                            });
+                            >(value.clone());
+                            let observations = proposal
+                                .link_observations
+                                .as_ref()
+                                .and_then(|m| m.get(&item.entity_id));
+                            let is_native =
+                                item.media_type == aexeo_core::content_adapter::MEDIA_TYPE;
+                            let mapped =
+                                report
+                                    .as_ref()
+                                    .ok()
+                                    .filter(|_| !is_native)
+                                    .and_then(|report| {
+                                        aexeo_core::source_mapping::map_incremental_report(
+                                            item_preset,
+                                            item,
+                                            report,
+                                            scope,
+                                            observations,
+                                        )
+                                        .ok()
+                                    });
                             let mut item_mapping = match mapped {
-                                Ok(value) => {
+                                Some(value) => {
                                     mapping_eligible += value.eligible;
                                     mapping_mapped += value.mapped;
                                     serde_json::json!({"status":"available", "coverage":value})
                                 }
-                                Err(_) => {
+                                None => {
                                     mapping_status = "partial";
                                     mapping_unavailable_items += 1;
                                     serde_json::json!({"status":"unavailable"})
                                 }
                             };
-                            if item.media_type == aexeo_core::content_adapter::MEDIA_TYPE {
-                                let native = serde_json::from_value::<
-                                    aexeo_core::content_gate::ContentReport,
-                                >(value.clone())
-                                .map_err(anyhow::Error::from)
-                                .and_then(|report| {
+                            if is_native {
+                                let native = report.as_ref().ok().and_then(|report| {
                                     aexeo_core::source_mapping::map_incremental_native_report(
                                         item_preset,
                                         item,
-                                        &report,
-                                        proposal
-                                            .link_observations
-                                            .as_ref()
-                                            .and_then(|m| m.get(&item.entity_id)),
+                                        report,
+                                        observations,
                                     )
+                                    .ok()
                                 });
                                 match native {
-                                    Ok(coverage) => {
+                                    Some(coverage) => {
                                         native_mapping_eligible += coverage.eligible;
                                         native_mapping_mapped += coverage.mapped;
                                         item_mapping["native_coverage"] =
                                             serde_json::to_value(coverage)?;
                                     }
-                                    Err(_) => native_mapping_unavailable += 1,
+                                    None => native_mapping_unavailable += 1,
                                 }
                             }
                             mapping.insert(item.entity_id.clone(), item_mapping);
