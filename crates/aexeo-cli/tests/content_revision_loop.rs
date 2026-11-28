@@ -687,3 +687,19 @@ fn external_results_are_supplied_per_candidate_and_stale_results_never_pass() {
     assert_eq!(patch.read()["stop"], "satisfied");
     assert_eq!(patch.finish(), 0);
 }
+
+#[test]
+fn python_syntax_session_drives_real_revision_cli() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/test-syntax-revision-workflow.py");
+    let output = Command::new("python3")
+        .arg(script)
+        .arg(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

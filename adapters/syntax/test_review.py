@@ -371,6 +371,47 @@ class TestSyntaxAdapter(unittest.TestCase):
         self.assertEqual(loads, ["en_core_web_sm"])
         self.assertEqual(model.calls, 2)
 
+    def test_python_session_reparses_and_detaches_each_revision(self):
+        opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        class CountingModel(Model):
+            calls = 0
+            def __call__(self, text):
+                self.calls += 1
+                return super().__call__(text)
+        model = CountingModel([Sentence(0, 6, 0), Sentence(7, 14, 2)])
+        loads = []
+        fake = type("Fake", (), {"load": staticmethod(lambda name: (loads.append(name), model)[1])})()
+        session = review.SyntaxReviewSession(lambda: fake)
+        original = {"text": "First. Second."}
+        first = session.observe(original, opening, text_complete=True)
+        original["text"] = "Third. Fourth."
+        missing = session.observe(original, opening, text_complete=False)
+        second = session.observe(original, opening, text_complete=True)
+        self.assertEqual([first["status"], missing["status"], second["status"]], ["processed", "not_checked", "processed"])
+        self.assertEqual(first["results"][0]["input"]["text"], "First. Second.")
+        self.assertEqual(second["results"][0]["input"]["text"], "Third. Fourth.")
+        self.assertEqual(missing["results"], [])
+        self.assertEqual(loads, ["en_core_web_sm"])
+        self.assertEqual(model.calls, 2)
+        self.assertEqual(session.observe(original, opening, text_complete="yes")["status"], "invalid")
+        with patch.object(review, "MAX_REQUESTS", 1):
+            limited = review.SyntaxReviewSession(lambda: self.fail("unexpected model load"))
+            self.assertEqual(limited.observe(original, opening, text_complete=False)["status"], "not_checked")
+            self.assertEqual(limited.observe(original, opening, text_complete=False)["status"], "invalid")
+
+    def test_python_session_optional_telemetry_is_aggregate_and_detached(self):
+        session = review.SyntaxReviewSession(lambda: self.fail("unexpected model load"), telemetry=True)
+        session.observe({"text": "private draft"}, PARAMS, text_complete=False)
+        session.observe({"text": "private draft"}, PARAMS, text_complete="invalid")
+        metrics = session.telemetry
+        self.assertEqual({key: metrics[key] for key in ("requests", "not_checked", "invalid", "results")},
+                         {"requests": 2, "not_checked": 1, "invalid": 1, "results": 0})
+        self.assertGreaterEqual(metrics["elapsed_ms"], 0)
+        self.assertNotIn("private draft", json.dumps(metrics))
+        metrics["requests"] = 100
+        self.assertEqual(session.telemetry["requests"], 2)
+        self.assertIsNone(review.SyntaxReviewSession().telemetry)
+
     def test_stream_rejects_ambiguous_requests_without_leaking_or_loading(self):
         lines = [b'{"input":{"text":"secret","text":"other"},"parameters":{},"text_complete":true}',
                  b'{"input":{},"parameters":{},"text_complete":"yes"}',
