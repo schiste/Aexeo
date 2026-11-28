@@ -27,6 +27,15 @@ export type RevisionLinkObservationProvider = (request: {
   locale: string | undefined; preset: string; destinations: readonly string[];
 }) => Promise<BoundLinkObservations["observations"]>;
 
+/** Explicit host observer for an unsaved fragment. The response must echo the
+ * JSON digest of the candidate. Destinations can be sensitive; the host owns
+ * authorization, network policy and freshness. No content is published. */
+export type CandidateLinkObservationProvider = (request: {
+  collection: string; id: string; revision: string; field: string;
+  candidate_sha256_json: string; locale: string | undefined; preset: string;
+  destinations: readonly string[];
+}) => Promise<{ candidate_sha256_json: string; observations: BoundLinkObservations["observations"] }>;
+
 /** Trusted host projection for the locale of the exact requested revision.
  * The host must establish that the value belongs to that revision. */
 export type RevisionLocaleProvider = (request: {
@@ -50,6 +59,7 @@ export interface RevisionAuditOptions {
   evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[], linkObservations?: BoundLinkObservations) => Promise<ContentReport>;
   projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>;
   revisionLinkObservations?: RevisionLinkObservationProvider | undefined;
+  candidateLinkObservations?: CandidateLinkObservationProvider | undefined;
   revisionLocale?: RevisionLocaleProvider | undefined;
   onRevisionLocaleTelemetry?: ((event: RevisionLocaleTelemetry) => void) | undefined;
   onLinkProviderTelemetry?: ((event: LinkProviderTelemetry) => void) | undefined;
@@ -167,8 +177,9 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
     // Runtime diagnostics can include private source content or configuration.
     return { status: "not_checked", reason: "revision_evaluation_failed", revision } as const;
   }
-  let revisionObserverInvoked = false;
-  if (candidate === undefined && options.revisionLinkObservations && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
+  let linkObserverInvoked = false;
+  const observerAvailable = candidate === undefined ? options.revisionLinkObservations !== undefined : options.candidateLinkObservations !== undefined;
+  if (observerAvailable && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
     const started = options.onLinkProviderTelemetry ? performance.now() : 0;
     let status: LinkProviderTelemetry["status"] = "error";
     let reason: string | undefined;
@@ -178,10 +189,17 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
         status = "unavailable";
         reason = "link projection unavailable from adapter";
       } else {
-        revisionObserverInvoked = true;
-        const observations = await options.revisionLinkObservations({ collection, id, revision,
-          ...(field === undefined ? {} : { field }), locale: localeAtAudit ?? undefined,
-          preset: selected.name, destinations: [...projection.destinations] });
+        linkObserverInvoked = true;
+        const common = { collection, id, revision, locale: localeAtAudit ?? undefined,
+          preset: selected.name, destinations: [...projection.destinations] };
+        let observations: BoundLinkObservations["observations"];
+        if (candidate === undefined) {
+          observations = await options.revisionLinkObservations!({ ...common, ...(field === undefined ? {} : { field }) });
+        } else {
+          const result = await options.candidateLinkObservations!({ ...common, field: field!, candidate_sha256_json: candidate.digest });
+          if (!result || result.candidate_sha256_json !== candidate.digest) throw new Error("candidate observation mismatch");
+          observations = result.observations;
+        }
         if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
         report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence,
           options.onContentEvaluationTelemetry, undefined, { ...projection, observations });
@@ -203,11 +221,15 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
     return { status: "not_checked", reason: "revision_audit_id_unavailable", revision } as const;
   }
   const localeProviderInvoked = options.revisionLocale !== undefined;
-  const runtimeProviders = localeProviderInvoked
-    ? revisionObserverInvoked ? "revision_locale_and_link_observer_invoked" as const : "revision_locale_provider_invoked" as const
-    : revisionObserverInvoked ? "revision_link_observer_invoked" as const : "not_invoked" as const;
+  const runtimeProviders = candidate !== undefined && linkObserverInvoked
+    ? localeProviderInvoked ? "revision_locale_and_candidate_link_observer_invoked" as const : "candidate_link_observer_invoked" as const
+    : localeProviderInvoked
+      ? linkObserverInvoked ? "revision_locale_and_link_observer_invoked" as const : "revision_locale_provider_invoked" as const
+      : linkObserverInvoked ? "revision_link_observer_invoked" as const : "not_invoked" as const;
   const providerLimitation = {
     not_invoked: "Only local configured content checks run; runtime providers are not invoked.",
+    candidate_link_observer_invoked: "An explicitly configured candidate link observer ran; other runtime providers were not invoked.",
+    revision_locale_and_candidate_link_observer_invoked: "Explicitly configured revision locale and candidate link providers ran; other runtime providers were not invoked.",
     revision_link_observer_invoked: "An explicitly configured revision link observer ran; other runtime providers were not invoked.",
     revision_locale_provider_invoked: "An explicitly configured revision locale provider ran; other runtime providers were not invoked.",
     revision_locale_and_link_observer_invoked: "Explicitly configured revision locale and link providers ran; other runtime providers were not invoked.",

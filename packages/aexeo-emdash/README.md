@@ -234,7 +234,17 @@ fingerprint of the submitted JSON serialization, not a cross-language canonical
 JSON digest. Source paths and locations refer to the candidate field. The
 reported revision status concerns the **base revision**, not the candidate.
 Revision-specific link observations and host attestations of list completeness
-are not reused for the proposed text. Unavailable checks remain `not_checked`.
+are not reused for the proposed text. An independent host may explicitly provide
+`candidateLinkObservations` in the configured runtime. It receives the collection,
+id, base revision, field, candidate JSON digest, locale, preset and projected
+destinations, and returns `{ candidate_sha256_json, observations }`. The digest
+must exactly echo the request and the observations must contain one valid status
+per destination in order. Without a usable projection or a matching response,
+the affected gates remain `not_checked`. The callback is not invoked when the
+preset has no link-reachability gate. `onLinkProviderTelemetry` reports only
+status and duration. Destinations and identifiers may be private; hosts control
+authorization, network policy, timeout and freshness. The digest binds the host
+response to the candidate identity; it does not authenticate the provider.
 Audit reports are persisted and can contain findings or excerpts; protect access
 as for revision audits. A passing result does not establish factual accuracy,
 meaning preservation, currentness or publication authorization. The agent must
