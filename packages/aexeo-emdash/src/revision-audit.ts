@@ -322,7 +322,13 @@ function localeStatus(audited: unknown, current: Current | null): "unchanged" | 
 
 /** Re-check status at read time; a stored report does not prove currentness. */
 export async function getRevisionAudit(ctx: RevisionContext, auditId: string) {
-  const stored = await ctx.kv.get<{ collection: string; id: string; revision: string; locale_at_audit?: string | null }>(reportKey(auditId));
+  let stored: { collection: string; id: string; revision: string; locale_at_audit?: string | null } | null | undefined;
+  try {
+    stored = await ctx.kv.get<{ collection: string; id: string; revision: string; locale_at_audit?: string | null }>(reportKey(auditId));
+  } catch {
+    // Storage diagnostics may contain private identifiers or content.
+    return { status: "not_checked", reason: "revision_audit_read_failed" } as const;
+  }
   if (!stored) return { status: "not_checked", reason: "audit_unavailable" } as const;
   const current = await currentOrUnknown(ctx, stored.collection, stored.id);
   return { ...stored, revision_status: revisionStatus(current, stored.revision), locale_status: localeStatus(stored.locale_at_audit, current) };
