@@ -16,8 +16,8 @@ Supply `--drafts-complete` only after independently establishing coverage of bot
 ## Composed French writing review
 
 `combined-writing-review-fr.toml` combines the built-in `writing-review-fr`
-profile with the French literal revision, opening POS and clause alternation
-examples. The standalone revision archive does not contain the syntax adapter;
+profile with the French literal revision, opening POS, clause alternation and
+coordinated-noun examples. The standalone revision archive does not contain the syntax adapter;
 obtain its separate release archive before following this combined workflow. It is an opt-in illustration, not a universal French standard. The
 underlying checks are advisory and report unavailable observations separately;
 installing a preset does not run the Python adapters. Select and pin an
@@ -32,9 +32,9 @@ umask 077
 preset=adapters/revision/combined-writing-review-fr.toml
 aexeo-cli content draft.md --input-format markdown --preset review --preset-source review="$preset" --evidence-source prior=earlier.md --export-adapter-input > input.json
 python3 adapters/revision/review.py input.json adapters/revision/example-fr-parameters.json --drafts-complete > revision.json
-python3 adapters/syntax/review.py input.json adapters/syntax/opening-pos-parameters-fr.json --text-complete > pos.json
-python3 adapters/syntax/review.py input.json adapters/syntax/clause-alternation-parameters-fr.json --text-complete > clauses.json
-python3 -c 'import json; from pathlib import Path; files = ("revision.json", "pos.json", "clauses.json"); Path("results.json").write_text(json.dumps(sum((json.loads(Path(f).read_text()) for f in files), []), ensure_ascii=False))'
+python3 -c 'import json, tomllib; from pathlib import Path; p = tomllib.loads(Path("adapters/revision/combined-writing-review-fr.toml").read_text()); Path("syntax-parameters.json").write_text(json.dumps([g["parameters"] for g in p["gates"] if g["extension"].startswith("syntax.")]))'
+python3 adapters/syntax/review.py input.json syntax-parameters.json --text-complete > syntax.json
+python3 -c 'import json; from pathlib import Path; files = ("revision.json", "syntax.json"); Path("results.json").write_text(json.dumps(sum((json.loads(Path(f).read_text()) for f in files), []), ensure_ascii=False))'
 aexeo-cli content draft.md --input-format markdown --preset review --preset-source review="$preset" --evidence-source prior=earlier.md --extension-results results.json --format json
 ```
 
@@ -48,7 +48,7 @@ runs. The fixed 30% adjacent-length threshold is an adjustable review prompt;
 short texts can have too little evidence.
 
 The configured colon phrases and list candidates are literal or surface-form
-heuristics. POS and clause results are model judgments, not language-agnostic
+heuristics. POS, clause and noun coordination results are model judgments, not language-agnostic
 grammatical proofs. Literal revision pairs do not prove that two abstract nouns
 were replaced, that a rewrite preserved meaning, or that the replacement is
 true or idiomatic. Neither a pass nor a revision predicts a detector result.

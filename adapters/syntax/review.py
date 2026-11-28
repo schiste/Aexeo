@@ -12,6 +12,7 @@ MAX_TEXT = 200_000
 MAX_SENTENCES = 1_000
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_PARAMETERS_BYTES = 16 * 1024
+MAX_BATCH = 16
 
 
 class Unavailable(Exception):
@@ -238,6 +239,56 @@ def evaluate(input_data, raw_parameters, nlp):
     return [{"extension": extension, "parameters": raw_parameters, "input": input_data, "diagnostics": findings}]
 
 
+class CachedModel:
+    """Reuse one model's parse within a bounded batch for the same text."""
+    def __init__(self, model):
+        self.model = model
+        self.meta = model.meta
+        self.pipe_names = model.pipe_names
+        self._text = None
+        self._doc = None
+
+    def __call__(self, text):
+        if self._doc is None or self._text != text:
+            self._doc = self.model(text)
+            self._text = text
+        return self._doc
+
+
+def parameter_batch(raw):
+    """Accept the legacy single configuration or a bounded list of them."""
+    configs = raw if isinstance(raw, list) else [raw]
+    if not 1 <= len(configs) <= MAX_BATCH:
+        raise ValueError("invalid syntax batch size")
+    seen = set()
+    for config in configs:
+        parameters(config)
+        key = json.dumps(config, sort_keys=True, ensure_ascii=False)
+        if key in seen:
+            raise ValueError("duplicate syntax configuration")
+        seen.add(key)
+    return configs
+
+
+def evaluate_batch(data, configs, spacy):
+    """Return only individually available observations, caching adjacent models."""
+    results = []
+    cached_name = None
+    cached_model = None
+    for config in configs:
+        try:
+            name = config["model"]
+            if cached_name != name:
+                # Clear first: a failed load must not reuse the previous model.
+                cached_name, cached_model = None, None
+                cached_model = CachedModel(spacy.load(name))
+                cached_name = name
+            results.extend(evaluate(data, config, cached_model))
+        except Exception as exc:  # Do not expose private input in diagnostics.
+            print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
+    return results
+
+
 def load_json(path, limit):
     """Read at most the accepted limit plus one byte, then decode JSON."""
     with open(path, "rb") as handle:
@@ -250,21 +301,18 @@ def load_json(path, limit):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="private JSON produced by --export-adapter-input")
-    parser.add_argument("parameters", help="JSON string map matching the preset's gate parameters")
+    parser.add_argument("parameters", help="JSON string map or array of maps matching the preset's gate parameters")
     parser.add_argument("--text-complete", action="store_true", help="attest that the projected text covers the whole intended content")
     args = parser.parse_args()
     try:
         data = load_json(args.input, MAX_JSON_BYTES)
-        config = load_json(args.parameters, MAX_PARAMETERS_BYTES)
-        parameters(config)
+        configs = parameter_batch(load_json(args.parameters, MAX_PARAMETERS_BYTES))
         try:
             if not args.text_complete:
                 raise Unavailable("text coverage not attested")
             import spacy
-            nlp = spacy.load(config["model"])
-            result = evaluate(data, config, nlp)
+            result = evaluate_batch(data, configs, spacy)
         except Exception as exc:  # Untrusted parser failures are never a clean pass.
-
             print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
             result = []
         output = json.dumps(result, ensure_ascii=False)
