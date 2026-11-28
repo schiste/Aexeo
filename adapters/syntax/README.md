@@ -159,3 +159,10 @@ No model is installed or loaded until the first complete request; model errors
 remain unavailable. Returned results are detached snapshots, but they contain
 private content and must be handled accordingly. The session cannot authenticate
 the parser or guarantee that an editorial suggestion preserves meaning.
+
+For opt-in local aggregate telemetry, construct `SyntaxReviewSession(telemetry=True)`
+and read `session.telemetry`. It returns a copy of request and response-status
+counts, the number of observations returned, and cumulative elapsed milliseconds.
+These counters describe only calls through `observe`; they contain no draft,
+parameters or file paths and do not measure accuracy or model quality. Telemetry
+is disabled by default and is not transmitted.

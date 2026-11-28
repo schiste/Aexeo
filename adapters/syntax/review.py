@@ -6,6 +6,7 @@ import json
 import math
 import re
 import sys
+import time
 import unicodedata
 from collections import Counter
 
@@ -393,14 +394,32 @@ class SyntaxReviewSession:
     is not itself a passing gate: missing results remain not_checked in Aexeo.
     """
 
-    def __init__(self, load_spacy=None):
+    def __init__(self, load_spacy=None, *, telemetry=False):
         self._load_spacy = load_spacy if load_spacy is not None else import_spacy
         self._cache = ModelCache()
         self._spacy = None
         self._requests = 0
+        self._telemetry = ({"requests": 0, "processed": 0, "not_checked": 0,
+                            "invalid": 0, "results": 0, "elapsed_ms": 0.0}
+                           if telemetry else None)
+
+    @property
+    def telemetry(self):
+        """Return opt-in aggregate counts and time, with no content or paths."""
+        return dict(self._telemetry) if self._telemetry is not None else None
 
     def observe(self, input_data, raw_parameters, *, text_complete):
         """Evaluate a detached snapshot; no source is modified or transmitted."""
+        started = time.perf_counter() if self._telemetry is not None else None
+        result = self._observe(input_data, raw_parameters, text_complete=text_complete)
+        if self._telemetry is not None:
+            self._telemetry["requests"] += 1
+            self._telemetry[result["status"]] += 1
+            self._telemetry["results"] += len(result["results"])
+            self._telemetry["elapsed_ms"] += (time.perf_counter() - started) * 1000
+        return result
+
+    def _observe(self, input_data, raw_parameters, *, text_complete):
         try:
             line = bounded_json({"input": input_data, "parameters": raw_parameters,
                                  "text_complete": text_complete}, MAX_JSON_BYTES - 1).encode("utf-8") + b"\n"

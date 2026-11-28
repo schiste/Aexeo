@@ -399,6 +399,19 @@ class TestSyntaxAdapter(unittest.TestCase):
             self.assertEqual(limited.observe(original, opening, text_complete=False)["status"], "not_checked")
             self.assertEqual(limited.observe(original, opening, text_complete=False)["status"], "invalid")
 
+    def test_python_session_optional_telemetry_is_aggregate_and_detached(self):
+        session = review.SyntaxReviewSession(lambda: self.fail("unexpected model load"), telemetry=True)
+        session.observe({"text": "private draft"}, PARAMS, text_complete=False)
+        session.observe({"text": "private draft"}, PARAMS, text_complete="invalid")
+        metrics = session.telemetry
+        self.assertEqual({key: metrics[key] for key in ("requests", "not_checked", "invalid", "results")},
+                         {"requests": 2, "not_checked": 1, "invalid": 1, "results": 0})
+        self.assertGreaterEqual(metrics["elapsed_ms"], 0)
+        self.assertNotIn("private draft", json.dumps(metrics))
+        metrics["requests"] = 100
+        self.assertEqual(session.telemetry["requests"], 2)
+        self.assertIsNone(review.SyntaxReviewSession().telemetry)
+
     def test_stream_rejects_ambiguous_requests_without_leaking_or_loading(self):
         lines = [b'{"input":{"text":"secret","text":"other"},"parameters":{},"text_complete":true}',
                  b'{"input":{},"parameters":{},"text_complete":"yes"}',
