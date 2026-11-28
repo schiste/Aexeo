@@ -1119,6 +1119,8 @@ class PortableComparison(unittest.TestCase):
                 policy['gates'][0].update(mark='—', max_per_paragraph=1)
             elif kind == 'inline_triple_candidates':
                 policy['gates'][0].update(conjunction='and', delimiters='.!?')
+            elif kind == 'similar_sentence_lengths':
+                policy['gates'][0].update(run_length=2, tolerance_words=0, delimiters='.!?')
             for status in ('passed', 'failed', 'not_checked'):
                 verdict['checks'][0]['status'] = status
                 with self.subTest(kind=kind, status=status):
