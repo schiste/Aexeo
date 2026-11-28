@@ -224,3 +224,27 @@ configured revision-audit smoke test also passed in workerd using that extracted
 bundle and WASM. These local checks do not reproduce Preview's runtime and do not establish that an
 upgrade will resolve its error. Publication, installation and a connected
 retest remain separate steps.
+
+## Mixed-content revision smoke test, 28 November 2026
+
+The extracted 0.9.9 archive and its WASM were exercised locally against a copy
+of the published evidence-room revision, using a simulated host and KV store.
+The source contained 18 Portable Text blocks and two `askYourAi` components.
+No CMS content was modified. This is not a test of the deployed Preview host or
+its renderer, permissions, configuration, or publication workflow.
+
+With no component mapping, coverage was unavailable and all six configured
+`writing-review-en` gates reported `not_checked`. For a separate test only,
+explicitly excluding `askYourAi` produced 18 projected blocks and complete body
+coverage; five gates ran while sentence variance remained `not_checked` because
+list structure had not been attested. Adding an explicit test attestation for
+revision list completeness allowed the variance check to run and exclude five
+list paragraphs. A real host must verify that both the component exclusion and
+list-completeness attestation are valid before configuring them. The local
+results do not establish either claim for Preview.
+
+In a controlled copy, removing three linked numeric reference markers left the
+33 measured sentences and all six gate measurements unchanged. This is one
+regression example, not a general guarantee about citations or locales. The
+checks remain editorial prompts and do not assess factual accuracy. Publication
+and deployment of 0.9.9 and a connected revision-audit retest remain outstanding.
