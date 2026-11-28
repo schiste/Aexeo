@@ -25,8 +25,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - When `GIT_SEQUENCE_EDITOR` names a script in a path containing spaces,
   quote the executable inside the variable value: Git invokes it through a shell.
 - When an adapter is distributed as a standalone archive, run its tests from
-  an extracted archive. Keep cross-adapter checks in the whole-repository
-  release suite unless every required fixture is shipped in that archive.
+  an extracted archive. Use the build script’s actual output path instead of
+  assuming a previously released version. Keep cross-adapter checks in the
+  whole-repository release suite unless every required fixture is shipped in
+  that archive.
 - Run archive workerd tests with the process working directory in session
   scratch: Wrangler can create `.wrangler/cache` in the working directory even
   when `TMPDIR` is set. If it appears in the worktree, inspect ownership before
