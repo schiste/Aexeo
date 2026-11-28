@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 
 from batch import run_cases
-from evaluate import evaluate
+from evaluate import validate_saved
 from review import (NoRedirect, add_source_assessment, add_source_assessment_arguments,
                     request_body, review_from_response, validate_source_assessment)
 
@@ -42,10 +42,8 @@ def read_checkpoint(path, cases, threshold):
         raise ValueError("invalid checkpoint")
     if not saved:
         return saved
-    by_id = {case["id"]: case for case in cases}
-    selected = [by_id[item["id"]] for item in saved]
-    report = evaluate(selected, saved)
-    if (report["reviewer"] != "clef:" + MODEL or report["threshold"] != threshold
+    reviewer, saved_threshold, protocol = validate_saved(cases, saved)
+    if (reviewer != "clef:" + MODEL or protocol != "aexeo-clef-support-v1" or saved_threshold != threshold
             or any(item["review"]["reliability"] != "uncertain" for item in saved)):
         raise ValueError("checkpoint model or threshold differs")
     return saved
@@ -68,8 +66,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claim", help="Exact claim to review")
     parser.add_argument("--source", type=Path, help="UTF-8 source snapshot")
-    parser.add_argument("--cases", type=Path, help="JSON array of labeled examples")
+    parser.add_argument("--cases", type=Path, help="JSON array of claim/source cases")
     parser.add_argument("--max-cases", type=int, help="Maximum number of cases for a batch")
+    parser.add_argument("--unlabeled", action="store_true", help="Review claims without benchmark labels")
     parser.add_argument("--checkpoint", type=Path, help="Save and resume batch progress at this private file")
     parser.add_argument("--minimum-probability", type=float, required=True)
     add_source_assessment_arguments(parser)
@@ -83,7 +82,7 @@ def main():
             parser.error("--cases requires --max-cases and excludes --claim/--source and source assessments")
         if args.checkpoint and args.cases.resolve() == args.checkpoint.resolve():
             parser.error("checkpoint must differ from the input cases")
-    elif not args.claim or not args.claim.strip() or args.source is None or args.max_cases is not None or args.checkpoint is not None:
+    elif not args.claim or not args.claim.strip() or args.source is None or args.max_cases is not None or args.checkpoint is not None or args.unlabeled:
         parser.error("provide --claim and --source, or --cases and --max-cases")
     try:
         if args.cases:
@@ -91,7 +90,7 @@ def main():
             saved = read_checkpoint(args.checkpoint, cases, args.minimum_probability) if args.checkpoint else []
             save = (lambda reviews: write_checkpoint(args.checkpoint, reviews)) if args.checkpoint else None
             result = run_cases(cases, MODEL, args.minimum_probability, args.max_cases, "", fetch=fetch_review,
-                               existing=saved, on_review=save)
+                               existing=saved, on_review=save, require_labels=not args.unlabeled)
         else:
             with args.source.open(encoding="utf-8", newline="") as source:
                 result = fetch_review(args.claim, source.read(), MODEL, args.source_reliability, args.minimum_probability, "")

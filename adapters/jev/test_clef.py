@@ -49,6 +49,25 @@ class ClefTests(unittest.TestCase):
         self.assertEqual(report["false_approvals"], 1)
         self.assertNotIn("contradicted", sent[0])
 
+    def test_unlabeled_cli_checkpoint_resume_without_network(self):
+        cases = [{"id": "one", "claim": "claim", "source_text": "source"}]
+        record = review.review_from_response("claim", "source", "uncertain", 0.8, self.response(), provider="clef")
+        with tempfile.TemporaryDirectory() as folder:
+            cases_path, checkpoint = Path(folder) / "cases.json", Path(folder) / "checkpoint.json"
+            cases_path.write_text(json.dumps(cases), encoding="utf-8")
+            clef.write_checkpoint(checkpoint, [{"id": "one", "review": record}])
+            args = ["clef.py", "--cases", str(cases_path), "--checkpoint", str(checkpoint),
+                    "--max-cases", "1", "--minimum-probability", "0.8", "--unlabeled"]
+            with patch("sys.argv", args), patch("clef.fetch_review") as fetch, contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(clef.main(), 0)
+            fetch.assert_not_called()
+            self.assertEqual(json.loads(output.getvalue())[0]["review"], record)
+            cases[0]["claim"] = "changed"
+            cases_path.write_text(json.dumps(cases), encoding="utf-8")
+            with patch("sys.argv", args), patch("clef.fetch_review") as fetch, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(clef.main(), 2)
+            fetch.assert_not_called()
+
     def test_single_cli_preserves_source_bytes(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "source.txt"
