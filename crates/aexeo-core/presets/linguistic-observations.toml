@@ -29,22 +29,32 @@ blocking = false
 locale = "und"
 reference = "original"
 
-# A provider must analyze sentence boundaries and grammatical categories for
-# the configured locale. A missing or unsupported provider stays not_checked.
+# Configure a locally installed parser model, version and language before use.
+# See adapters/syntax for the provider and model-specific parameters.
 [[gates]]
 id = "linguistic.opening_categories"
 kind = "custom"
-extension = "linguistic.opening_categories"
+extension = "syntax.opening_pos"
 blocking = false
 [gates.parameters]
-locale = "und"
+analysis = "opening_pos"
+model = "unspecified"
+model_version = "unspecified"
+language = "und"
+min_sentences = "2"
+max_tokens = "80"
 
-# Clause analysis is language-dependent; this slot does not imply that an
-# analyzer is installed or that every sentence must alternate mechanically.
 [[gates]]
 id = "linguistic.clause_structure"
 kind = "custom"
-extension = "linguistic.clause_structure"
+extension = "syntax.clause_alternation"
 blocking = false
 [gates.parameters]
-locale = "und"
+analysis = "clause_alternation"
+model = "unspecified"
+model_version = "unspecified"
+language = "und"
+min_sentences = "2"
+max_tokens = "80"
+subordinate_labels = "advcl,acl:relcl,ccomp"
+short_max_words = "11"

@@ -418,8 +418,8 @@ A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensio
 
 `linguistic-observations` is an opt-in, advisory starter with separate custom
 extensions `linguistic.register`, `linguistic.idiom`,
-`linguistic.reference_fidelity`, `linguistic.opening_categories`, and
-`linguistic.clause_structure`. It executes no evaluator. Without an explicitly
+`linguistic.reference_fidelity`, `syntax.opening_pos`, and
+`syntax.clause_alternation`. It executes no evaluator. Without an explicitly
 installed provider, all five gates are `not_checked`. Compose it with a writing
 profile only when you want those separate coverage results; the default writing
 profiles are unchanged.
@@ -1877,15 +1877,17 @@ conjunctions and cannot establish coverage for every language or script. Its
 results are prompts for human review, never instructions to remove items.
 The Rust enum gains two optional fields; exhaustive constructors must supply them.
 
-The `linguistic-observations` starter also exposes advisory custom slots for
-opening grammatical categories and clause structure. These are extension
-contracts, not built-in parsers: a host must supply an appropriate analyzer,
-configure its locale, and decide what constitutes a review finding. Without a
-provider, or when its analysis is unavailable, each slot is `not_checked`.
-Provider output is an observation, not proof of a grammatical category or a
-requirement to alternate sentence structures. The existing sentence-asymmetry
-and medium-sentence-pairs starters measure word counts independently; compose
-them only where their sentence and word segmentation fits the language.
+The `linguistic-observations` starter also exposes advisory slots for
+`syntax.opening_pos` and `syntax.clause_alternation`, supported by the optional
+[local syntax adapter](../adapters/syntax/README.md). Override each entire gate
+with an installed model, its version, language and appropriate dependency labels;
+`unspecified` and `und` are placeholders. The adapter ships French and English
+configuration examples. The preset does not install or invoke the adapter.
+Without a matching result, or when analysis is unavailable, each slot is
+`not_checked`. Parser labels are observations, not proof of grammatical category
+or a requirement to alternate sentence structures. Sentence-asymmetry and
+medium-sentence-pairs measure word counts independently; compose them only where
+their segmentation fits the language.
 
 These checks cannot infer whether abstract phrasing is necessary, whether a
 phrase is translationese, whether a parallel construction is intentional, or
