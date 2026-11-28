@@ -49,3 +49,22 @@ absence of a subordinate clause, and legitimate parallelism should be retained
 when appropriate. These checks do not establish writing quality, authorship,
 meaning preservation, or translation quality. The same coverage, version and
 `not_checked` requirements described above apply.
+
+## Optional coordinated noun review
+
+The `coordinated-nouns-example` and `coordinated-nouns-parameters` files provide
+English and `-fr` French starters using the same three-command workflow above.
+Each advisory gate counts model-labelled noun and proper-noun heads connected
+by configured coordination dependency labels, including nested coordination
+chains. It flags groups with at least `min_items` heads (the examples use four),
+pointing to the sentence containing the group. Configure model, version, language,
+labels and threshold together; the labels are model-specific and the examples
+have not been calibrated. A smoke test with spaCy 3.8.11 and both example models
+at 3.8.0 detected the four-noun English and French sample lists. This does not
+establish accuracy across content. One sentence suffices for this observation.
+
+The check does not classify nouns as abstract, compare determiners or prepositions,
+prove grammatical parallelism, or identify every list. Model errors and mixed
+parts of speech can affect coverage. A matching group may be deliberate; the
+adapter never rewrites or removes content. Missing parser annotations, source
+coverage or model compatibility yield `not_checked`, not a clean pass.
