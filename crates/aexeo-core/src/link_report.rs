@@ -1023,6 +1023,9 @@ fn recorded_redirect_chain(
     response: &aexeo_contracts::CrawlResponseProvenance,
     issues: &mut std::collections::BTreeSet<&'static str>,
 ) -> Vec<RedirectHop> {
+    if !response.redirect_chain_observed {
+        return Vec::new();
+    }
     consistent_chain(&response.requested_url, &response.redirect_chain, issues)
 }
 
@@ -1045,12 +1048,19 @@ fn consistent_chain(
 }
 
 /// A chain is evidence only when it starts at the requested URL and every hop
-/// is a redirect status.
+/// is a status the HTTP crawler follows as a redirect.
 pub(crate) fn redirect_chain_consistent(requested_url: &str, chain: &[RedirectHop]) -> bool {
     chain.first().is_some_and(|hop| hop.url == requested_url)
-        && chain
-            .iter()
-            .all(|hop| (300..400).contains(&hop.status_code))
+        && chain.iter().all(|hop| {
+            matches!(hop.status_code, 301 | 302 | 303 | 307 | 308)
+                && Url::parse(&hop.url).is_ok_and(|url| {
+                    matches!(url.scheme(), "http" | "https")
+                        && url.host().is_some()
+                        && url.username().is_empty()
+                        && url.password().is_none()
+                        && url.fragment().is_none()
+                })
+        })
 }
 
 /// Every request that ended on the page, as its requested URL and recorded
@@ -1063,7 +1073,11 @@ fn arrivals(page: &RenderedPage) -> impl Iterator<Item = (Option<&str>, &[Redire
     .chain(page.redirected_arrivals.iter().map(|arrival| {
         (
             Some(arrival.requested_url.as_str()),
-            arrival.redirect_chain.as_slice(),
+            if arrival.redirect_chain_observed {
+                arrival.redirect_chain.as_slice()
+            } else {
+                &[]
+            },
         )
     }))
 }
@@ -1125,8 +1139,9 @@ fn normalized_url(value: &str) -> Option<String> {
 }
 
 /// The URLs each request ending on the page passed through, after parsing:
-/// the requested URL, the hops of a consistent recorded chain, then the
-/// final URL. One path per entry of [`arrivals`], in the same order.
+/// the requested URL and hops of a consistent recorded chain, then the
+/// final URL. An unobserved or inconsistent chain cannot establish an alias.
+/// One path per entry of [`arrivals`], in the same order.
 fn response_paths(page: &RenderedPage) -> Vec<Vec<String>> {
     arrivals(page)
         .map(|(requested, chain)| response_path(&page.url, requested, chain))
@@ -1135,11 +1150,11 @@ fn response_paths(page: &RenderedPage) -> Vec<Vec<String>> {
 
 fn response_path(url: &str, requested: Option<&str>, chain: &[RedirectHop]) -> Vec<String> {
     let mut path = Vec::new();
-    if let Some(requested) = requested {
+    if let Some(requested) =
+        requested.filter(|requested| redirect_chain_consistent(requested, chain))
+    {
         path.push(requested);
-        if redirect_chain_consistent(requested, chain) {
-            path.extend(chain.iter().map(|hop| hop.url.as_str()));
-        }
+        path.extend(chain.iter().map(|hop| hop.url.as_str()));
     }
     path.push(url);
     let mut path = path
@@ -1531,20 +1546,28 @@ fn build_link_report_with(
             .filter(|alias| resolved(alias))
             .collect::<Vec<_>>();
         // Every request that redirected here must be accounted for by a
-        // verified alias, each through its own chain.
+        // verified alias, each through its own chain. An invalid or missing
+        // chain may produce only the final URL, but must not disappear from
+        // this coverage check when another arrival is valid.
+        let final_url = normalized_url(&page.url);
         let redirected = arrivals(page)
             .zip(response_paths(page))
-            .filter(|(_, path)| path.len() > 1)
+            .filter(|((requested, chain), path)| {
+                path.len() > 1
+                    || !chain.is_empty()
+                    || requested.is_some_and(|requested| {
+                        normalized_url(requested).is_none_or(|url| Some(url) != final_url)
+                    })
+            })
             .collect::<Vec<_>>();
         let redirect_resolved = !redirected.is_empty()
             && redirected.iter().all(|((requested, chain), path)| {
-                requested.is_some_and(|requested| {
-                    chain.is_empty() || redirect_chain_consistent(requested, chain)
-                }) && path[..path.len() - 1].iter().all(|url| {
-                    resolved_here
-                        .iter()
-                        .any(|alias| normalized_url(&alias.url).as_ref() == Some(url))
-                })
+                requested.is_some_and(|requested| redirect_chain_consistent(requested, chain))
+                    && path[..path.len() - 1].iter().all(|url| {
+                        resolved_here
+                            .iter()
+                            .any(|alias| normalized_url(&alias.url).as_ref() == Some(url))
+                    })
             });
         if page_redirects[index] && !redirect_resolved {
             coverage_issues.insert("redirect_observed");
@@ -2213,6 +2236,7 @@ mod tests {
         let mut response = serde_json::json!({"requested_url":"https://example.org/old", "observed_url":"https://example.org/new", "status_code":200, "headers_observed":true});
         if let Some(chain) = chain {
             response["redirect_chain"] = chain;
+            response["redirect_chain_observed"] = true.into();
         }
         serde_json::from_value(serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org/", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":[
             {"path":"crawl/index.html", "relative_path":"index.html", "route":"", "raw_html":"<main><a href='/old'>Old</a><a href='/moved'>Moved</a></main>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/", "observed_url":"https://example.org/", "status_code":200, "headers_observed":true}},
@@ -2273,7 +2297,7 @@ mod tests {
             "requested_url":"https://example.org/new", "observed_url":"https://example.org/new",
             "status_code":200, "headers_observed":true, "redirected_arrivals":[
                 {"requested_url":"https://example.org/moved", "redirect_chain":[{"url":"https://example.org/elsewhere", "status_code":301}]},
-                {"requested_url":"https://example.org/old", "redirect_chain":[{"url":"https://example.org/old", "status_code":301}]}]})).unwrap());
+                {"requested_url":"https://example.org/old", "redirect_chain_observed":true, "redirect_chain":[{"url":"https://example.org/old", "status_code":301}]}]})).unwrap());
         let report = build_link_report_from_audit(&artifact).unwrap();
         let page = &report.pages[1];
         // The direct capture redirected from nothing; links to the consistent
@@ -2290,7 +2314,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&page.redirected_arrivals).unwrap(),
             serde_json::json!([{"requested_url":"https://example.org/moved"},
-                {"requested_url":"https://example.org/old", "redirect_chain":[{"url":"https://example.org/old", "status_code":301}]}])
+                {"requested_url":"https://example.org/old", "redirect_chain_observed":true, "redirect_chain":[{"url":"https://example.org/old", "status_code":301}]}])
         );
         for issue in [
             "audit_redirect_chain_inconsistent",
@@ -2299,6 +2323,26 @@ mod tests {
         ] {
             assert!(report.issues.contains(&issue.to_string()), "{issue}");
         }
+    }
+
+    #[test]
+    fn an_unobserved_primary_chain_is_not_redirect_evidence() {
+        let mut artifact = redirected_audit(Some(serde_json::json!([
+            {"url":"https://example.org/old", "status_code":301}
+        ])));
+        artifact.site.as_mut().unwrap().pages[1]
+            .crawl_response
+            .as_mut()
+            .unwrap()
+            .redirect_chain_observed = false;
+        let report = build_link_report_from_audit(&artifact).unwrap();
+        assert!(report.pages[1].redirect_chain.is_empty());
+        assert!(report.pages[1].via_redirect.is_none());
+        assert!(
+            report
+                .issues
+                .contains(&"audit_redirect_chain_unavailable".to_string())
+        );
     }
 
     #[test]
@@ -3304,6 +3348,9 @@ mod tests {
         for chain in [
             Vec::new(),
             vec![hop("https://example.org/elsewhere", 301)],
+            vec![hop("https://example.org/old", 304)],
+            vec![hop("https://example.org/old", 305)],
+            vec![hop("https://example.org/old", 301), hop("not a URL", 302)],
             vec![
                 hop("https://example.org/old", 301),
                 hop("https://example.org/middle", 200),
@@ -3480,6 +3527,35 @@ mod tests {
     }
 
     #[test]
+    fn redirect_alias_requires_an_observed_followed_chain() {
+        for chain in [
+            Vec::new(),
+            vec![hop("https://example.org/other", 301)],
+            vec![hop(ALIAS, 304)],
+            vec![hop(ALIAS, 305)],
+            vec![hop(ALIAS, 301), hop("not a URL", 302)],
+            vec![hop(ALIAS, 301), hop("https://example.org/other#part", 302)],
+        ] {
+            let page = RenderedPage {
+                redirect_chain: chain.clone(),
+                ..guide_via(ALIAS)
+            };
+            let report = alias_report(InventoryDisposition::Redirect, Some(GUIDE), vec![page]);
+            assert!(
+                !reconciliation(&report).comparable,
+                "{chain:?}: {report:#?}"
+            );
+            assert!(reconciliation(&report).eligible_pages.is_empty());
+            assert!(
+                report.pages[0]
+                    .inventory_aliases
+                    .iter()
+                    .all(|alias| alias.verified_by.is_none())
+            );
+        }
+    }
+
+    #[test]
     fn a_redirect_alias_reaching_a_directly_captured_target_is_verified() {
         let arrival = RedirectedArrival {
             requested_url: ALIAS.into(),
@@ -3508,6 +3584,52 @@ mod tests {
         };
         let report = alias_report(InventoryDisposition::Redirect, Some(GUIDE), vec![guide]);
         assert!(report.issues.contains(&"redirect_observed".to_string()));
+
+        // An unverified arrival cannot be hidden by the valid alias above.
+        for chain in [Vec::new(), vec![hop("https://example.org/other", 304)]] {
+            let other = RedirectedArrival {
+                requested_url: "https://example.org/other".into(),
+                redirect_chain: chain,
+                redirect_chain_observed: false,
+                status_code: Some(200),
+            };
+            let page = RenderedPage {
+                redirected_arrivals: vec![
+                    RedirectedArrival {
+                        requested_url: ALIAS.into(),
+                        redirect_chain: vec![hop(ALIAS, 301)],
+                        redirect_chain_observed: true,
+                        status_code: Some(200),
+                    },
+                    other,
+                ],
+                ..served(GUIDE, "<main>Guide</main>")
+            };
+            let report = alias_report(InventoryDisposition::Redirect, Some(GUIDE), vec![page]);
+            assert!(report.issues.contains(&"redirect_observed".to_string()));
+            assert!(!reconciliation(&report).comparable);
+        }
+    }
+
+    #[test]
+    fn an_unobserved_arrival_chain_does_not_verify_an_alias() {
+        let page = RenderedPage {
+            redirected_arrivals: vec![RedirectedArrival {
+                requested_url: ALIAS.into(),
+                redirect_chain: vec![hop(ALIAS, 301)],
+                redirect_chain_observed: false,
+                status_code: Some(200),
+            }],
+            ..served(GUIDE, "<main>Guide</main>")
+        };
+        let report = alias_report(InventoryDisposition::Redirect, Some(GUIDE), vec![page]);
+        assert!(!reconciliation(&report).comparable);
+        assert!(
+            report.pages[0]
+                .inventory_aliases
+                .iter()
+                .all(|alias| alias.verified_by.is_none())
+        );
     }
 
     #[test]

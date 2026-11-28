@@ -1171,6 +1171,7 @@ fn a_recorded_redirect_chain_is_reported_in_order_and_credited_separately() {
         "https://example.org/new",
         "<main>New</main>",
     );
+    redirected["crawl_response"]["redirect_chain_observed"] = true.into();
     redirected["crawl_response"]["redirect_chain"] = serde_json::json!([
         {"url":"https://example.org/old", "status_code":301},
         {"url":"https://example.org/middle", "status_code":302},
@@ -1209,6 +1210,18 @@ fn a_recorded_redirect_chain_is_reported_in_order_and_credited_separately() {
     ));
     assert!(has_issue(&report["issues"], "redirect_observed"));
     assert_issues_sorted(&report);
+
+    // A legacy artifact containing hops without an observation attestation
+    // cannot credit them as a complete redirect chain.
+    let mut unobserved = audit.clone();
+    unobserved["site"]["pages"][1]["crawl_response"]["redirect_chain_observed"] = false.into();
+    let report = run_report(&unobserved, true);
+    assert!(report["pages"][1].get("via_redirect").is_none());
+    assert!(report["pages"][1].get("redirect_chain").is_none());
+    assert!(has_issue(
+        &report["issues"],
+        "audit_redirect_chain_unavailable"
+    ));
 }
 
 #[test]

@@ -733,6 +733,7 @@ mod tests {
         ] {
             let mut new = page("new", "<main>New</main>");
             new["crawl_response"]["requested_url"] = "https://example.org/old".into();
+            new["crawl_response"]["redirect_chain_observed"] = true.into();
             new["crawl_response"]["redirect_chain"] =
                 serde_json::json!([{"url":"https://example.org/old", "status_code":301}]);
             let artifact = audit(vec![page("", html), new], &Config::default());
@@ -761,6 +762,7 @@ mod tests {
     fn conditional_redirect_does_not_suppress_an_orphan_finding() {
         let mut new = page("new", "<main>New</main>");
         new["crawl_response"]["requested_url"] = "https://example.org/old".into();
+        new["crawl_response"]["redirect_chain_observed"] = true.into();
         new["crawl_response"]["redirect_chain"] =
             serde_json::json!([{"url":"https://example.org/old", "status_code":301}]);
         let artifact = audit(
@@ -866,6 +868,7 @@ mod tests {
     fn a_page_reached_through_a_redirect_is_credited_its_redirected_links() {
         let mut new = page("new", "<main>New</main>");
         new["crawl_response"]["requested_url"] = "https://example.org/old".into();
+        new["crawl_response"]["redirect_chain_observed"] = true.into();
         new["crawl_response"]["redirect_chain"] =
             serde_json::json!([{"url":"https://example.org/old", "status_code":301}]);
         let artifact = audit(
