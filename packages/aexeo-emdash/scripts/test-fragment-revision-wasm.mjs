@@ -103,3 +103,47 @@ assert.equal(candidateCalls[0].candidate_sha256_json, candidateAudit.candidate.s
 assert.deepEqual(candidateCalls[0].destinations, ["https://example.org/proposed"]);
 assert.equal(historical.data.content[0].markDefs[0].href, "https://example.org/historical");
 console.log("WASM candidate-specific link observation test passed");
+
+// Revision extension providers see the historical projection and must return
+// results bound to that exact input. They are never reused for candidates.
+const extensionPolicy = `version=1
+name="revision-extension"
+[[gates]]
+id="external"
+kind="custom"
+extension="example.rule"
+blocking=true
+`;
+const extensionCalls = [];
+const extensionEvents = [];
+const extensionPlugin = createPlugin({ revisionAudits: true, contentPreset: {
+  name: "revision-extension", sources: { "revision-extension": extensionPolicy },
+  fragmentFieldsByCollection: { posts: { intro: "revision-extension" } },
+} }, {
+  externalGates: async () => { throw new Error("current provider must not run"); },
+  revisionExternalGates: async request => {
+    extensionCalls.push(request);
+    return [{ extension: "example.rule", parameters: {}, input: request.input, diagnostics: [] }];
+  },
+  onExternalGateTelemetry: event => extensionEvents.push(event),
+});
+const extensionAudit = await extensionPlugin.routes["audit-revision"].handler({ ...ctx, input });
+assert.equal(extensionAudit.status, "evaluated");
+assert.equal(extensionAudit.report.gates[0].status, "passed");
+assert.equal(extensionCalls[0].revision, "rev1");
+assert.equal(extensionCalls[0].field, "intro");
+assert.equal(extensionCalls[0].input.text, "A useful short introduction.");
+assert.equal(extensionAudit.assurance.runtime_providers, "revision_external_gates_invoked");
+assert.equal(extensionAudit.assurance.publication_authorization, "not_granted");
+assert.equal(extensionEvents[0].status, "success");
+assert.ok(!JSON.stringify(extensionEvents).includes("introduction"));
+const candidateWithExtension = await extensionPlugin.routes["audit-candidate"].handler({ ...ctx, input: { ...input, candidate: "New draft." } });
+assert.equal(candidateWithExtension.report.gates[0].status, "not_checked");
+assert.equal(extensionCalls.length, 1);
+const mismatchedPlugin = createPlugin({ revisionAudits: true, contentPreset: {
+  name: "revision-extension", sources: { "revision-extension": extensionPolicy },
+  fragmentFieldsByCollection: { posts: { intro: "revision-extension" } },
+} }, { revisionExternalGates: async request => [{ extension: "example.rule", parameters: {}, input: { ...request.input, text: "different" }, diagnostics: [] }] });
+const mismatched = await mismatchedPlugin.routes["audit-revision"].handler({ ...ctx, input });
+assert.equal(mismatched.report.gates[0].status, "not_checked");
+console.log("WASM historical extension audit test passed");

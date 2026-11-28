@@ -1,11 +1,11 @@
 import { adaptContentItem, type CustomBlockMappings, type DescriptionField, type MetadataFields, type EmdashContentItem } from "./adapter.js";
 import { validLinkObservations } from "./content-evaluator.js";
-import type { ContentPresetOptions, LinkProviderTelemetry } from "./content-evaluator.js";
+import type { ContentPresetOptions, ExternalGateTelemetry, LinkProviderTelemetry } from "./content-evaluator.js";
 import { emitTelemetry } from "./telemetry.js";
 import { selectFragmentPreset } from "./fragment-selection.js";
 import { collectionListStructureAttested, fragmentListStructureAttested } from "./list-structure-attestation.js";
 import { selectContentPreset } from "./preset-selection.js";
-import type { ContentReport, ContentEvaluationTelemetry, ExternalGateResult, BoundLinkObservations, LinkDestinationProjection } from "./content.js";
+import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult, BoundLinkObservations, LinkDestinationProjection } from "./content.js";
 import type { SandboxCtx } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
 import { cmsBodyCoverage } from "./cms-coverage.js";
@@ -36,6 +36,13 @@ export type CandidateLinkObservationProvider = (request: {
   destinations: readonly string[];
 }) => Promise<{ candidate_sha256_json: string; observations: BoundLinkObservations["observations"] }>;
 
+/** Trusted host extension for an exact historical revision; the projected input
+ * can contain private content. The host controls access, timeout and freshness. */
+export type RevisionExternalGateProvider = (request: {
+  collection: string; id: string; revision: string; field?: string;
+  locale: string | undefined; preset: string; input: ExtensionInput;
+}) => Promise<ExternalGateResult[]>;
+
 /** Trusted host projection for the locale of the exact requested revision.
  * The host must establish that the value belongs to that revision. */
 export type RevisionLocaleProvider = (request: {
@@ -59,6 +66,9 @@ export interface RevisionAuditOptions {
   evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[], linkObservations?: BoundLinkObservations) => Promise<ContentReport>;
   projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>;
   revisionLinkObservations?: RevisionLinkObservationProvider | undefined;
+  revisionExternalGates?: RevisionExternalGateProvider | undefined;
+  projectContent?: ((document: EmdashDocument, evidence?: Record<string, string>) => Promise<ExtensionInput>) | undefined;
+  onExternalGateTelemetry?: ((event: ExternalGateTelemetry) => void) | undefined;
   candidateLinkObservations?: CandidateLinkObservationProvider | undefined;
   revisionLocale?: RevisionLocaleProvider | undefined;
   onRevisionLocaleTelemetry?: ((event: RevisionLocaleTelemetry) => void) | undefined;
@@ -177,6 +187,29 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
     // Runtime diagnostics can include private source content or configuration.
     return { status: "not_checked", reason: "revision_evaluation_failed", revision } as const;
   }
+  let externalResults: ExternalGateResult[] | undefined;
+  let externalInvoked = false;
+  if (candidate === undefined && options.revisionExternalGates && report.gates.some((gate) => gate.required_capability === "extension")) {
+    const started = options.onExternalGateTelemetry ? performance.now() : 0;
+    let status: ExternalGateTelemetry["status"] = "error";
+    try {
+      if (!options.projectContent) throw new Error("content projection unavailable");
+      const projected = await options.projectContent(adapted.document, evidence);
+      externalInvoked = true;
+      const results = await options.revisionExternalGates({ collection, id, revision,
+        ...(field === undefined ? {} : { field }), locale: localeAtAudit ?? undefined, preset: selected.name, input: projected });
+      if (!Array.isArray(results)) throw new Error("invalid extension results");
+      const evaluated = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence,
+        options.onContentEvaluationTelemetry, results);
+      externalResults = results;
+      report = evaluated;
+      status = "success";
+    } catch {
+      // Keep the local report; provider diagnostics may contain private content.
+    } finally {
+      if (options.onExternalGateTelemetry) emitTelemetry(options.onExternalGateTelemetry, { duration_ms: performance.now() - started, status });
+    }
+  }
   let linkObserverInvoked = false;
   const observerAvailable = candidate === undefined ? options.revisionLinkObservations !== undefined : options.candidateLinkObservations !== undefined;
   if (observerAvailable && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
@@ -202,7 +235,7 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
         }
         if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
         report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence,
-          options.onContentEvaluationTelemetry, undefined, { ...projection, observations });
+          options.onContentEvaluationTelemetry, externalResults, { ...projection, observations });
         status = "success";
       }
     } catch {
@@ -235,7 +268,10 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
     revision_locale_and_link_observer_invoked: "Explicitly configured revision locale and link providers ran; other runtime providers were not invoked.",
   }[runtimeProviders];
   const localeLimitation = localeProviderInvoked ? "the preset locale is supplied by the host for the requested revision" : "the preset locale is taken from the current record";
-  const limitation = `${candidate === undefined ? "" : "This is an unsaved proposed fragment, not the contents of the base revision; revision-specific link observations and list-structure attestations were not used. "}${providerLimitation} Rendered page metadata and source freshness are not verified; ${localeLimitation}; passing does not establish factual accuracy or currentness and does not authorize publication.`;
+  const finalProviderLimitation = externalInvoked
+    ? "The revision extension provider was invoked; the report records whether revision locale and link providers were invoked. Other runtime providers were not invoked."
+    : providerLimitation;
+  const limitation = `${candidate === undefined ? "" : "This is an unsaved proposed fragment, not the contents of the base revision; revision-specific link observations and list-structure attestations were not used. "}${finalProviderLimitation} Rendered page metadata and source freshness are not verified; ${localeLimitation}; passing does not establish factual accuracy or currentness and does not authorize publication.`;
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
     ...(candidate === undefined ? {} : { candidate: { status: "unsaved" as const, field: field!, sha256_json: candidate.digest } }),
     preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation,
@@ -244,7 +280,7 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
       publication_authorization: "not_granted" as const,
       rendered_page: "not_checked" as const,
       source_freshness: "not_checked" as const,
-      runtime_providers: runtimeProviders,
+      runtime_providers: externalInvoked ? runtimeProviders === "not_invoked" ? "revision_external_gates_invoked" : `${runtimeProviders}_and_revision_external_gates` : runtimeProviders,
       locale_source: localeProviderInvoked ? "revision_provider" as const : "current_record" as const,
     },
     input_coverage: {

@@ -209,6 +209,55 @@ describe("revision audits", () => {
     expect(evaluate).not.toHaveBeenCalled();
   });
 
+  it("runs explicitly configured extension gates on the historical projection and preserves them when observing links", async () => {
+    const { ctx } = host();
+    const unchecked = { ...report, gates: [
+      { gate_id: "external", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "extension" as const, findings: [], reason: "unavailable" },
+      { gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" },
+    ] };
+    const input = { id: "/revision/one", text: "Historical sentence.", source_text: null, headings: null, metadata: null, evidence_sources: null };
+    const external = [{ extension: "example", parameters: {}, input, diagnostics: [] }];
+    const evaluate = vi.fn(async (...args: unknown[]) => ({ ...unchecked, gates: unchecked.gates.map((gate) =>
+      gate.gate_id === "external" && args[5] ? { ...gate, status: "passed" as const } :
+      gate.gate_id === "links" && args[6] ? { ...gate, status: "passed" as const } : gate) }));
+    const projectContent = vi.fn(async (document: any) => {
+      expect(JSON.stringify(document.body)).toContain("Historical sentence.");
+      expect(JSON.stringify(document.body)).not.toContain("current body");
+      return input;
+    });
+    const provider = vi.fn(async () => external);
+    const telemetry = vi.fn();
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article" }, evaluate, projectContent, revisionExternalGates: provider, onExternalGateTelemetry: telemetry,
+      projectLinks: async (document) => ({ document, destinations: ["/historic"] }), revisionLinkObservations: async () => ["reachable"],
+    });
+    expect(provider).toHaveBeenCalledWith({ collection: "posts", id: "one", revision: "rev1", locale: "en", preset: "article", input });
+    expect(evaluate.mock.calls[2]?.[5]).toEqual(external);
+    expect(result).toMatchObject({ status: "evaluated", report: { gates: [{ status: "passed" }, { status: "passed" }] }, assurance: { publication_authorization: "not_granted" } });
+    expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: "success" }));
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain("Historical sentence");
+  });
+
+  it("keeps extension gates unchecked after a provider error and never sends candidates to a revision provider", async () => {
+    const { ctx } = host();
+    const initial = { ...report, gates: [{ gate_id: "external", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "extension" as const, findings: [], reason: "unavailable" }] };
+    const evaluate = vi.fn(async () => initial);
+    const provider = vi.fn(async () => { throw new Error("private provider data"); });
+    const telemetry = vi.fn();
+    const options = { preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } } }, evaluate,
+      projectContent: async () => ({ id: "/revision/one", text: "Historical sentence.", source_text: null, headings: null, metadata: null, evidence_sources: null }),
+      revisionExternalGates: provider, onExternalGateTelemetry: telemetry };
+    const request = { collection: "posts", id: "one", revision: "rev1" };
+    const result = await auditRevision(ctx as never, request, options);
+    expect(result).toMatchObject({ status: "evaluated", report: initial });
+    expect(JSON.stringify(result)).not.toContain("private provider data");
+    expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: "error" }));
+    await auditCandidate(ctx as never, { ...request, field: "content", candidate: "proposed" }, options);
+    expect(provider).toHaveBeenCalledTimes(1);
+    await auditRevision(ctx as never, request, { ...options, evaluate: async () => report });
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
+
   it("observes links only for the exact requested revision and binds results to its projection", async () => {
     const { ctx } = host();
     const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
