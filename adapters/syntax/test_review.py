@@ -165,6 +165,19 @@ class TestSyntaxAdapter(unittest.TestCase):
         with self.assertRaises(review.Unavailable):
             review.evaluate({"text": "A.\n\nB. C."}, PARAMS, Model([Sentence(0, 6, 0), Sentence(7, 9, 2)]))
 
+    def test_sentence_spans_cover_all_non_whitespace_text(self):
+        params = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        for text, spans in (("X A. B.", ((2, 4), (5, 7))),
+                            ("A. X B.", ((0, 2), (5, 7))),
+                            ("A. B. X", ((0, 2), (3, 5))),
+                            ("A. 📌 B.", ((0, 2), (5, 7)))):
+            for config in (PARAMS, params):
+                with self.subTest(text=text, analysis=config.get("analysis")), self.assertRaises(review.Unavailable):
+                    review.evaluate({"text": text}, config, Model([Sentence(*spans[0], 0), Sentence(*spans[1], 2)]))
+        text = "  A.  B.  "
+        result = review.evaluate({"text": text}, params, Model([Sentence(2, 4, 0), Sentence(6, 8, 2)]))
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+
     def test_finding_location_skips_leading_sentence_whitespace(self):
         result = review.evaluate({"text": "A. B."}, PARAMS, Model([Sentence(0, 2, 0), Sentence(2, 5, 2)]))
         self.assertEqual(result[0]["diagnostics"][0]["column"], 4)
@@ -205,6 +218,20 @@ class TestSyntaxAdapter(unittest.TestCase):
                     self.assertEqual(review.main(), 0)
                     self.assertEqual(json.loads(out.getvalue()), [])
                     self.assertNotIn("private content", err.getvalue())
+
+    def test_parser_omission_does_not_emit_a_clean_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "input.json").write_text('{"text":"A. omitted B."}')
+            (root / "params.json").write_text(json.dumps(PARAMS))
+            model = Model([Sentence(0, 2, 0), Sentence(11, 13, 2)])
+            fake_spacy = type("Fake", (), {"load": staticmethod(lambda name: model)})()
+            arguments = ["review.py", str(root / "input.json"), str(root / "params.json"), "--text-complete"]
+            with patch.object(sys, "argv", arguments), patch.dict(sys.modules, {"spacy": fake_spacy}), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(review.main(), 0)
+                self.assertEqual(json.loads(out.getvalue()), [])
+                self.assertIn("not checked", err.getvalue())
+                self.assertNotIn("omitted", err.getvalue())
 
     def test_json_files_are_bounded_before_decoding(self):
         with tempfile.TemporaryDirectory() as directory:
