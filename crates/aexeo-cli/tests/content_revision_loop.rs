@@ -610,3 +610,80 @@ fn revisions_use_only_observations_bound_to_each_candidate() {
     assert_eq!(event["proposals_with_link_observations"], 1);
     assert_eq!(fs::read_to_string(draft).unwrap(), initial);
 }
+
+#[test]
+fn external_results_are_supplied_per_candidate_and_stale_results_never_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft");
+    let policy = dir.path().join("policy.toml");
+    let first = dir.path().join("first.json");
+    let second = dir.path().join("second.json");
+    fs::write(&draft, "Original sentence.").unwrap();
+    fs::write(&policy, "version=1\nname='test'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\nblocking=true\n[gates.parameters]\nmode='strict'\n").unwrap();
+    let source = format!("test={}", policy.display());
+    let make_results = |text: &str, target: &std::path::Path, failed: bool| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                "-",
+                "--input-format",
+                "text",
+                "--export-adapter-input",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(text.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        let input: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let diagnostics = if failed {
+            json!([{"message":"Review", "line":1, "column":1}])
+        } else {
+            json!([])
+        };
+        fs::write(target, serde_json::to_vec(&json!([{"extension":"example.rule", "parameters":{"mode":"strict"}, "input":input, "diagnostics":diagnostics}])).unwrap()).unwrap();
+    };
+    make_results("Original sentence.", &first, true);
+    make_results("Revised sentence.", &second, false);
+    let initial_args = ["--extension-results", first.to_str().unwrap()];
+    for (results, expected) in [
+        (Some(second.to_str().unwrap()), "satisfied"),
+        (Some(first.to_str().unwrap()), "incomplete"),
+        (None, "incomplete"),
+    ] {
+        let mut session = start(draft.to_str().unwrap(), &source, "text", &initial_args);
+        let request = session.read();
+        assert_eq!(request["report"]["gates"][0]["status"], "failed");
+        let mut proposal = json!({"action":"submit", "candidate":"Revised sentence."});
+        if let Some(path) = results {
+            proposal["extension_results"] = json!(path);
+        }
+        session.send(proposal);
+        let done = session.read();
+        assert_eq!(done["stop"], expected, "{done}");
+        assert_eq!(
+            done["report"]["gates"][0]["status"],
+            if expected == "satisfied" {
+                "passed"
+            } else {
+                "not_checked"
+            }
+        );
+        assert_eq!(
+            session.finish(),
+            if expected == "satisfied" { 0 } else { 2 }
+        );
+    }
+    let mut patch = start(draft.to_str().unwrap(), &source, "text", &initial_args);
+    let request = patch.read();
+    patch.send(json!({"action":"patch", "base_sha256":request["candidate_sha256"], "start_byte":0, "end_byte":"Original sentence.".len(), "replacement":"Revised sentence.", "extension_results":second}));
+    assert_eq!(patch.read()["stop"], "satisfied");
+    assert_eq!(patch.finish(), 0);
+}
