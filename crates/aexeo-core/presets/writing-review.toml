@@ -1,0 +1,3 @@
+version = 1
+name = "Composable writing review starter"
+extends = ["style-structure-review", "sentence-asymmetry-review"]
