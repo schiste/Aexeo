@@ -16,6 +16,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("html-scope").long("html-scope").value_parser(["document", "main"]).help("HTML scope; requires HTML input"))
                 .arg(Arg::new("metadata").long("metadata").help("JSON object of metadata string values"))
                 .arg(Arg::new("link-observations").long("link-observations").help("Source-bound link observation snapshot for the initial draft"))
+                .arg(Arg::new("extension-results").long("extension-results").help("Input-bound external gate results for the initial draft"))
                 .arg(Arg::new("max-revisions").long("max-revisions").default_value("3").value_parser(value_parser!(u32).range(0..=32)))
                 .arg(Arg::new("scope").long("scope").default_value("all").value_parser(["all", "blocking"]))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate counts to stderr")),

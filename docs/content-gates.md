@@ -192,15 +192,25 @@ child's exit with its gate report, binds the report to the candidate bytes and
 checks that the resolved policy and metadata fingerprints do not change between
 evaluations. This detects these changes, not a malicious evaluator or future
 publication races. The optional source-bound link observations described below are
-the only auxiliary observations accepted here. Other auxiliary sources, external
-services, collection/site contexts and direct CMS retrieval are not supported;
+supported alongside explicitly supplied external gate results. Use
+`--extension-results PATH` for the initial draft and include
+`"extension_results":"PATH"` in each submit or patch proposal to supply a new
+result file. Omitting it clears the previous results. Generate each result against
+the exact candidate projection using `content - --export-adapter-input` with
+the same input format, HTML scope and metadata; the content evaluator validates
+the complete projection and parameters. For `adapter-json`, the host must obtain
+the corresponding `ContentInput` projection itself; that format does not support
+`--export-adapter-input`. Stale or missing results remain `not_checked`. The
+caller must explicitly run and trust the provider, keep result files private, and
+retain them until evaluation finishes. External services, collection/site
+contexts and direct CMS retrieval are not supported;
 gates needing them remain unavailable. Hosts may supply their own content projections as described below. A proposal may be at most 16 MiB; the JSON line and
 child report also have byte limits. The caller must manage idle timeouts and
 model costs. `--telemetry` emits aggregate counts and durations to stderr; total
 time includes waiting for the agent and evaluation time includes child startup.
 Telemetry records the aggregate number of accepted patch proposals, whether the
-initial link snapshot was supplied and how many proposals supplied one, without
-content, paths or destinations.
+initial link snapshot and external results were supplied and how many proposals
+supplied each, without content, paths or destinations.
 No claim is made about semantic preservation, factual accuracy or publication
 readiness.
 

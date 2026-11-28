@@ -27,6 +27,7 @@ enum Proposal {
     Submit {
         candidate: String,
         link_observations: Option<String>,
+        extension_results: Option<String>,
     },
     Patch {
         base_sha256: String,
@@ -34,6 +35,7 @@ enum Proposal {
         end_byte: usize,
         replacement: String,
         link_observations: Option<String>,
+        extension_results: Option<String>,
     },
     Decline {},
 }
@@ -58,6 +60,7 @@ fn evaluate(
     candidate: &str,
     args: &ArgMatches,
     link_observations: Option<&str>,
+    extension_results: Option<&str>,
 ) -> Result<(Value, ContentReport)> {
     let mut command = Command::new(std::env::current_exe().context("locating current executable")?);
     command
@@ -84,6 +87,9 @@ fn evaluate(
     }
     if let Some(path) = link_observations {
         command.arg("--link-observations").arg(path);
+    }
+    if let Some(path) = extension_results {
+        command.arg("--extension-results").arg(path);
     }
     let mut child = command
         .stdin(Stdio::piped())
@@ -182,6 +188,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     let binding = RefCell::new(None::<(Value, Value, Value)>);
     let current_report = RefCell::new(None::<Value>);
     let observations = RefCell::new(args.get_one::<String>("link-observations").cloned());
+    let extensions = RefCell::new(args.get_one::<String>("extension-results").cloned());
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     let stdout = io::stdout();
@@ -189,6 +196,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     let mut proposal_number = 0usize;
     let mut proposals_with_observations = 0usize;
     let mut patch_proposals = 0usize;
+    let mut proposals_with_extensions = 0usize;
     let mut evaluation_ms = 0.0;
     let outcome = content_revision_loop::revise(
         &initial,
@@ -196,7 +204,12 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
         scope,
         |candidate| {
             let evaluation_started = started.map(|_| std::time::Instant::now());
-            let (report, typed) = evaluate(candidate, args, observations.borrow().as_deref())?;
+            let (report, typed) = evaluate(
+                candidate,
+                args,
+                observations.borrow().as_deref(),
+                extensions.borrow().as_deref(),
+            )?;
             if let Some(time) = evaluation_started {
                 evaluation_ms += time.elapsed().as_secs_f64() * 1000.0;
             }
@@ -248,9 +261,12 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                 Proposal::Submit {
                     candidate,
                     link_observations,
+                    extension_results,
                 } => {
                     proposals_with_observations += usize::from(link_observations.is_some());
                     *observations.borrow_mut() = link_observations;
+                    proposals_with_extensions += usize::from(extension_results.is_some());
+                    *extensions.borrow_mut() = extension_results;
                     Some(candidate)
                 }
                 Proposal::Patch {
@@ -259,6 +275,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                     end_byte,
                     replacement,
                     link_observations,
+                    extension_results,
                 } => {
                     if base_sha256 != candidate_sha256 {
                         user_bail!("patch base digest does not match the current candidate");
@@ -281,6 +298,8 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                     revised.push_str(&candidate[end_byte..]);
                     proposals_with_observations += usize::from(link_observations.is_some());
                     *observations.borrow_mut() = link_observations;
+                    proposals_with_extensions += usize::from(extension_results.is_some());
+                    *extensions.borrow_mut() = extension_results;
                     Some(revised)
                 }
                 Proposal::Decline {} => None,
@@ -303,7 +322,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "patch_proposals":patch_proposals, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
+            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "patch_proposals":patch_proposals, "initial_extension_results":args.contains_id("extension-results"), "proposals_with_extension_results":proposals_with_extensions, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
         );
     }
     Ok(match outcome.stop {

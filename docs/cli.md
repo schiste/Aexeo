@@ -38,6 +38,9 @@ Options:
       --link-observations <link-observations>
           Source-bound link observation snapshot for the initial draft
 
+      --extension-results <extension-results>
+          Input-bound external gate results for the initial draft
+
       --max-revisions <max-revisions>
           [default: 3]
 
