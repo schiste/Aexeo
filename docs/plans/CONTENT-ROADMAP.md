@@ -614,6 +614,18 @@ registry before considering the release delivered.
   separately bound metadata inventory. The v1 change evaluator also supports
   host projections without claiming source positions; the independent v2
   verifier and portable source positions remain open.
+- [x] Accept embedded host metadata in incremental item checks when it exactly
+  matches the separately bound inventory; preserve observed-field coverage and
+  fail closed on mismatches ([#1028](https://github.com/schiste/Aexeo/pull/1028)).
+  Apply the same rule to v1 change entries
+  ([#1029](https://github.com/schiste/Aexeo/pull/1029)); v1 runners still must
+  independently bind decision inputs beyond the verdict subject.
+- [x] Expose host-supplied native paths and UTF-16 offsets for incremental
+  findings, separately from file coordinates, with explicit unavailable
+  status and aggregate-only coverage telemetry
+  ([#1030](https://github.com/schiste/Aexeo/pull/1030)). This does not
+  establish that paths identify the current CMS revision; portable v1 change
+  verdicts still do not carry these native paths.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
   The single-content CLI accepts source- and destination-bound host link
