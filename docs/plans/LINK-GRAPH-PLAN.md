@@ -533,6 +533,18 @@ identity. This comparison is not a complete BCP 47 validator.
   equivalence or substitute for a matching real site.
   On 2026-11-10 the Preview CMS schema was accessible, but a direct article
   request redirected to Cloudflare Access login; the HTML remained unobserved.
+  On 2026-11-28, Preview's static publication status identified the latest
+  build as [run 46131203452](https://github.com/Aeptus/website-and-content/actions/runs/46131203452),
+  commit `ebc9ad9590128230b8174654c379a93c03e0c1e8`. Its report and failed-job
+  log show the snapshot pull succeeded, but the Astro build failed while
+  rendering homepages because localized `homepage_settings/homepage` was
+  missing for `fr-fr` and `en-gb`. The static-artifact validation, Aexeo and
+  deployment steps were skipped. This describes that run only; it does not
+  establish the current CMS state or the cause of missing settings. No matching
+  new rendered artifact was produced in that run, so it cannot close the
+  inventory or real-site comparison items. Repair and deployment are owned by
+  the website workflow; compare the actual artifact and inventory after a
+  successful candidate build rather than treating this failed run as coverage.
 - [x] Benchmark graph parsing independently and retain opt-in, aggregate-only
   operational telemetry. A calibrated CI budget enforces it in the perf budget
   step.
