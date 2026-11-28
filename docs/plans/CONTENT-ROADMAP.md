@@ -125,6 +125,19 @@ publishing 0.9.5 and host-side validation remain open.
   revision access on the target host, then verify its connected MCP actions and
   permissions against a real revision. Repository support alone does not expose
   an action through an already connected host.
+  - Connected Preview probe, 2026-11-28: MCP discovery exposed revision and
+    candidate audit and report retrieval actions. `audit_revision` returned
+    `revision_unavailable` for a deliberately nonexistent revision, while two
+    existing revisions of the evidence-room article returned the generic MCP
+    `INTERNAL_ERROR` (one whole-content request and one `content` fragment).
+    Revision listing confirmed both revision IDs exist, a separate settings read
+    succeeded, and `get_audit` returned `audit_unavailable` for a nonexistent
+    audit ID. The real revision with an unconfigured fragment field returned
+    `fragment_preset_not_configured`, narrowing the failure to a later stage.
+    The host repository's current CMS manifest declares Aexeo 0.9.6 and EmDash
+    1.6.0; that does not establish which bytes are deployed. No article content
+    was modified. These observations do not identify the failure's cause or test
+    retrieval of an actual report; inspect host logs and retest the deployment.
   - Release candidate update, 2026-11-28: [#1025](https://github.com/schiste/Aexeo/pull/1025)
     merged the 0.9.8 package version and the composable writing-review presets.
     TypeScript, 428 plugin tests, the real-WASM suite, an isolated installed
