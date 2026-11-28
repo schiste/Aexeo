@@ -1,0 +1,11 @@
+version = 1
+name = "Adjacent medium-length sentence review"
+
+[[gates]]
+id = "editorial.medium_sentence_pairs"
+kind = "similar_sentence_lengths"
+run_length = 2
+tolerance_words = 0
+range_min_words = 15
+range_max_words = 22
+blocking = false

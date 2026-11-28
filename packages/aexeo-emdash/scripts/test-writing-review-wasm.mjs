@@ -23,4 +23,12 @@ for (const id of ["editorial.framing_colon", "editorial.fr_long_enumeration_revi
 }
 const unavailable = await evaluateContent({ route: "/unavailable", title: "Example" }, "writing-review-fr");
 assert.equal(unavailable.gates.find((gate) => gate.gate_id === "editorial.framing_colon")?.status, "not_checked");
+const mediumText = `${Array(15).fill("word").join(" ")}. ${Array(22).fill("word").join(" ")}.`;
+const mediumReport = await evaluateContent({ route: "/medium", title: "Example", body: [paragraph(mediumText)] }, "medium-sentence-pairs-review");
+const mediumGate = mediumReport.gates.find((gate) => gate.gate_id === "editorial.medium_sentence_pairs");
+assert.equal(mediumGate?.status, "failed");
+assert.equal(mediumGate?.blocking, false);
+assert.equal(mediumGate?.measurements?.range_pairs, 1);
+const missingMedium = await evaluateContent({ route: "/medium-missing", title: "Example" }, "medium-sentence-pairs-review");
+assert.equal(missingMedium.gates.find((gate) => gate.gate_id === "editorial.medium_sentence_pairs")?.status, "not_checked");
 console.log("WASM composed writing review presets passed");

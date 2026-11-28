@@ -274,6 +274,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/sentence-asymmetry-review.toml").into(),
         ),
         (
+            "medium-sentence-pairs-review".into(),
+            include_str!("../presets/medium-sentence-pairs-review.toml").into(),
+        ),
+        (
             "sentence-rhythm-review".into(),
             include_str!("../presets/sentence-rhythm-review.toml").into(),
         ),
@@ -691,6 +695,7 @@ mod tests {
         let sources = builtin_content_presets();
         for name in [
             "sentence-asymmetry-review",
+            "medium-sentence-pairs-review",
             "framing-colon-review-en",
             "framing-colon-review-fr",
             "long-inline-list-review-en",
