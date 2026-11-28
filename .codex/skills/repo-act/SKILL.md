@@ -464,7 +464,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   ordinary map decoding can silently retain only one value.
 - For structured evidence and review inputs, test duplicate JSON keys at
   multiple depths, including review provenance; ambiguous input must remain
-  `not_checked` and must not produce a passing blocking gate.
+  `not_checked` and must not produce a passing blocking gate. Also test JSON
+  encoded inside string parameters separately: validating the outer object
+  cannot detect duplicate keys or non-finite values in the embedded document.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
 - For EmDash gate report tests, an empty `measurements` map may be omitted
