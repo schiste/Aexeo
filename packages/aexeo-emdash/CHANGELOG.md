@@ -4,6 +4,10 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.8]
+
+- Add the opt-in `writing-review`, `writing-review-en` and `writing-review-fr` composed presets. Their advisory checks are starting points for editorial review, not assessments of factual accuracy, semantic equivalence, idiomatic translation or authorship.
+
 ## [0.9.7]
 
 - Fix configured-mode WASM loading in bundled Workers, including revision audits; validate the real plugin bundle in workerd.

@@ -363,6 +363,17 @@ the current record failed, and concurrent ordering is not guaranteed. These
 annotations are advisory and cannot authorize publication or provide a tamper-proof
 audit trail.
 
+### Composable writing review
+
+The optional `writing-review` preset combines structural and sentence-length
+review. `writing-review-en` and `writing-review-fr` add language-specific
+framing and enumeration candidates; the French preset also includes its register
+review starter. Configure the desired name in `contentPreset` for the relevant
+collections, or use it for a configured revision audit. Projects can inherit and
+customize these presets. Their checks are advisory, may report insufficient
+coverage, and do not verify facts, meaning preservation, idiomatic translation
+or authorship. The optional syntax adapter needs separate configuration.
+
 ### Automatic field-level editorial audits
 
 A configured plugin can evaluate selected CMS fields as independent fragments
