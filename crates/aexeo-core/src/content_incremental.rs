@@ -280,9 +280,14 @@ fn evaluate_item(
         (ProjectionMode::Adapted(_), crate::content_adapter::MEDIA_TYPE) => {
             let adapted = crate::content_adapter::parse(item.entity_id.clone(), &item.source)
                 .map_err(|_| unavailable("host adapter projection is invalid"))?;
-            if adapted.input.metadata.is_some() && preset.gates.iter().any(is_item_metadata_gate) {
+            // The separately bound inventory drives incremental invalidation.
+            // Never silently replace a conflicting host projection with it.
+            if preset.gates.iter().any(is_item_metadata_gate)
+                && adapted.input.metadata.is_some()
+                && adapted.input.metadata.as_ref() != metadata
+            {
                 return Err(unavailable(
-                    "embedded host metadata is not supported for incremental metadata gates",
+                    "embedded host metadata does not match the bound metadata inventory",
                 ));
             }
             literal_projection = adapted.literal_text;
@@ -2960,6 +2965,137 @@ mod tests {
                 .iter()
                 .all(|gate| gate.status == GateStatus::NotChecked)
         );
+    }
+
+    #[test]
+    fn host_metadata_must_match_bound_inventory_and_preserves_observation_coverage() {
+        let preset = ContentPreset::from_toml("version=1\nname='metadata'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n").unwrap();
+        let evaluate = |metadata: serde_json::Value,
+                        observed: serde_json::Value,
+                        bound: Option<BTreeMap<String, String>>| {
+            let source = serde_json::json!({
+                "schema":"aexeo.content-adapter/v1", "text":"body",
+                "metadata":metadata, "observed_metadata_fields":observed
+            })
+            .to_string();
+            let mut candidate = item("a", &source, None);
+            candidate.media_type = crate::content_adapter::MEDIA_TYPE.into();
+            evaluate_item(
+                &preset,
+                &candidate,
+                ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+                bound.as_ref(),
+                None,
+                None,
+                true,
+            )
+        };
+        let present = BTreeMap::from([("description".into(), "value".into())]);
+        let report = evaluate(
+            serde_json::json!({"description":"value"}),
+            serde_json::json!(["description"]),
+            Some(present.clone()),
+        )
+        .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        let absent = evaluate(
+            serde_json::json!({}),
+            serde_json::json!(["description"]),
+            Some(BTreeMap::new()),
+        )
+        .unwrap();
+        assert_eq!(absent.gates[0].status, GateStatus::Failed);
+        let unknown = evaluate(
+            serde_json::json!({}),
+            serde_json::json!([]),
+            Some(BTreeMap::new()),
+        )
+        .unwrap();
+        assert_eq!(unknown.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            evaluate(
+                serde_json::json!({"description":"other"}),
+                serde_json::json!(["description"]),
+                Some(present)
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate(
+                serde_json::json!({}),
+                serde_json::json!(["description"]),
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn incremental_host_metadata_changes_are_rechecked_and_bound() {
+        let (mut snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='metadata'\n[[gates]]\nid='length'\nkind='metadata_length'\nfield='description'\nmin=4\n").unwrap();
+        let projection = |description: &str| {
+            serde_json::json!({
+                "schema":"aexeo.content-adapter/v1", "text":"body",
+                "metadata":{"description":description}, "observed_metadata_fields":["description"]
+            })
+            .to_string()
+        };
+        let mut base = item("a", &projection("old value"), Some(vec!["/b"]));
+        base.media_type = crate::content_adapter::MEDIA_TYPE.into();
+        snapshot.items[0] = base.clone();
+        let inventory = snapshot
+            .items
+            .iter()
+            .map(|item| {
+                (
+                    item.entity_id.clone(),
+                    Some(BTreeMap::from([("description".into(), "old value".into())])),
+                )
+            })
+            .collect();
+        let baseline = IncrementalBaseline::prepare_adapted_with_metadata(
+            snapshot.clone(),
+            inventory,
+            preset.clone(),
+        )
+        .unwrap();
+        let mut next = item("a", &projection("new"), Some(vec!["/b"]));
+        next.media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let mut update = entry("a", Operation::Update, Some(&base), Some(&next));
+        update.media_type = crate::content_adapter::MEDIA_TYPE.into();
+        update.metadata = Some(BTreeMap::from([("description".into(), "new".into())]));
+        change.entries.push(update);
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("matching projection must be evaluated")
+        };
+        assert_eq!((evaluated, reused), (1, snapshot.items.len() - 1));
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Failed);
+        let expected = evaluate_item(
+            &preset,
+            &next,
+            ProjectionMode::Adapted(crate::html_content_adapter::HtmlContentScope::Document),
+            change.entries[0].metadata.as_ref(),
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&reports["a"]).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        change.entries[0].metadata = Some(BTreeMap::from([("description".into(), "wrong".into())]));
+        assert!(matches!(
+            baseline.evaluate(&change, &[next]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
     }
 
     #[test]

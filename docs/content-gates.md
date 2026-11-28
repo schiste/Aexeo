@@ -2158,7 +2158,9 @@ and schema `aexeo.content-adapter/v1`. The snapshot digest binds the complete
 JSON bytes, including its observations. Missing capabilities and invalid snapshots
 fail closed; host observation completeness and truth remain host responsibilities.
 For incremental metadata gates, provide the separate revision-bound metadata
-inventory; embedded host metadata is rejected when these gates are selected.
+inventory. If a host projection also embeds metadata, its values must exactly
+match that inventory. The projection's observed-field coverage remains in force:
+an unobserved field is not treated as absent. A mismatch is not checked.
 The v1 `content-change` evaluator also accepts this explicit media type and
 binds the whole JSON as content. It does not currently attach source positions
 for these findings, and rejects embedded metadata when metadata gates are
