@@ -1989,7 +1989,7 @@ words, inclusive. Configure `range_min_words` and `range_max_words` together
 (from 1 to 1000) on `similar_sentence_lengths`, with `run_length = 2` and
 `tolerance_words = 0`. This range mode is mutually exclusive with
 `min_difference_percent`; compose separate gates to review both conditions.
-The report includes the configured range and `pairs_assessed`. Missing paragraphs,
+The report includes the configured range, `pairs_assessed` and `range_pairs`. Missing paragraphs,
 unsupported word boundaries or no comparable pair are `not_checked`.
 Quote handling, segmentation and Arabic opt-in are the same as the adjacent
 length review. Paragraph classification is not inferred: lists may be observed

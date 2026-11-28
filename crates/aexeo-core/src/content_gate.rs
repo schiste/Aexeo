@@ -3746,6 +3746,9 @@ impl ContentPreset {
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("similar_runs".into(), flagged);
+                        if range_min_words.is_some() {
+                            measurements.insert("range_pairs".into(), flagged);
+                        }
                         if min_difference_percent.is_some() || range_min_words.is_some() {
                             measurements.insert("pairs_assessed".into(), pairs_assessed);
                             if pairs_assessed == 0 && reason.is_none() {
@@ -8673,6 +8676,7 @@ terms = ["bad"]
             .unwrap();
         assert_eq!(report.gates[0].status, GateStatus::Failed);
         assert_eq!(report.gates[0].measurements["pairs_assessed"], 1);
+        assert_eq!(report.gates[0].measurements["range_pairs"], 1);
         assert_eq!(report.gates[0].measurements["range_min_words"], 3);
         assert_eq!(report.gates[0].measurements["range_max_words"], 4);
         assert!(!report.gates[0].blocking);
