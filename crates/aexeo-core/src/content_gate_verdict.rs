@@ -3070,6 +3070,87 @@ pub fn verify_change_evidence_verdict(
     Ok(())
 }
 
+/// A host-asserted native position attached to one finding of an exact verdict.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChangeNativeLocation {
+    pub entity_id: String,
+    pub source_sha256: String,
+    pub check_id: String,
+    pub verdict_finding_index: usize,
+    pub source: &'static str,
+    pub path: Vec<serde_json::Value>,
+    pub utf16_offset: usize,
+}
+
+/// Coverage of a host-provided native map; counts concern returned findings only.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChangeNativeCoverage {
+    pub entity_id: String,
+    pub source_sha256: String,
+    pub source_map_available: bool,
+    pub findings: usize,
+    pub mapped: usize,
+}
+
+/// An optional host-native companion to a v1 verdict, not a publication receipt.
+/// The digest is SHA-256 of `serde_json::to_vec(&verdict)`. It binds the companion
+/// to that serialization, not the authenticity, freshness or accuracy of host paths.
+#[derive(Debug, serde::Serialize)]
+pub struct ChangeNativeReport {
+    pub schema: &'static str,
+    pub verdict: Verdict,
+    pub verdict_sha256: String,
+    pub coverage: Vec<ChangeNativeCoverage>,
+    pub locations: Vec<ChangeNativeLocation>,
+}
+
+#[derive(Default)]
+struct ChangeNativeCapture {
+    coverage: Vec<ChangeNativeCoverage>,
+    locations: Vec<ChangeNativeLocation>,
+}
+
+/// Evaluate once and return any validated host-supplied native positions separately.
+/// Host paths are observations from the exact supplied source, not authenticated CMS
+/// state. Missing maps and unmapped findings remain explicit in the coverage list.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_change_with_native_locations<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    host: ChangeEvaluationHost<'_, '_>,
+    collection: Option<ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
+    evidence: Option<&ChangeEvidenceInventory>,
+) -> Result<ChangeNativeReport> {
+    use sha2::{Digest, Sha256};
+    let mut capture = ChangeNativeCapture::default();
+    let verdict = evaluate_change_internal(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        host,
+        collection,
+        html_scope,
+        evidence,
+        Some(&mut capture),
+    )?;
+    let verdict_sha256 = format!("{:x}", Sha256::digest(serde_json::to_vec(&verdict)?));
+    Ok(ChangeNativeReport {
+        schema: "aexeo.native-change-report/v1",
+        verdict,
+        verdict_sha256,
+        coverage: capture.coverage,
+        locations: capture.locations,
+    })
+}
+
 /// Evaluate a change with explicitly supplied per-entity evidence. Callers
 /// independently establish source provenance, freshness and publication safety.
 #[allow(clippy::too_many_arguments)]
@@ -3096,6 +3177,7 @@ pub fn evaluate_change_with_evidence<P: ConfinedContentFiles>(
         collection,
         html_scope,
         Some(inventory),
+        None,
     )
 }
 
@@ -3127,6 +3209,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
         collection,
         html_scope,
         None,
+        None,
     )
 }
 
@@ -3142,6 +3225,7 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
     collection: Option<ChangeCollection<'_>>,
     html_scope: HtmlContentScope,
     evidence: Option<&ChangeEvidenceInventory>,
+    mut native_capture: Option<&mut ChangeNativeCapture>,
 ) -> Result<Verdict> {
     use sha2::{Digest, Sha256};
     preset.validate()?;
@@ -3218,7 +3302,11 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
         if item_preset.gates.is_empty() {
             continue;
         }
+        let native_source_digest = (native_capture.is_some()
+            && entry.media_type == crate::content_adapter::MEDIA_TYPE)
+            .then(|| format!("{:x}", Sha256::digest(text.as_bytes())));
         let mut literal_projection = None;
+        let mut native_source_map = None;
         let mut heading_levels = None;
         let mut paragraph_list_items = None;
         let wants_lists = item_preset
@@ -3267,6 +3355,9 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                     continue;
                 }
                 literal_projection = adapted.literal_text;
+                if native_capture.is_some() {
+                    native_source_map = adapted.native_source_map;
+                }
                 structured_lists = adapted.lists;
                 heading_levels = adapted.headings;
                 paragraph_list_items = adapted.paragraph_list_items;
@@ -3492,6 +3583,25 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                 });
         let plain_index = needs_plain_index
             .then(|| crate::text_index::LineIndex::new(input.text.as_deref().unwrap_or_default()));
+        let native_coverage_index = if let (Some(capture), Some(source_sha256)) =
+            (native_capture.as_deref_mut(), native_source_digest)
+        {
+            let index = capture.coverage.len();
+            capture.coverage.push(ChangeNativeCoverage {
+                entity_id: entry.entity_id.clone(),
+                source_sha256,
+                source_map_available: native_source_map.is_some(),
+                findings: 0,
+                mapped: 0,
+            });
+            Some(index)
+        } else {
+            None
+        };
+        let native_index = native_source_map
+            .as_ref()
+            .and(input.text.as_deref())
+            .map(crate::text_index::LineIndex::new);
         for (definition, gate) in item_preset.gates.iter().zip(report.gates) {
             let hierarchy_positions = if let (
                 crate::content_gate::ContentGate::HeadingHierarchy { initial_level, .. },
@@ -3571,6 +3681,41 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                         })
                 });
             let check_id = scoped_id("gate", &entry.entity_id, &gate.gate_id);
+            if let (Some(capture), Some(coverage_index)) =
+                (native_capture.as_deref_mut(), native_coverage_index)
+            {
+                let coverage = &mut capture.coverage[coverage_index];
+                coverage.findings += gate.findings.len();
+                if let Some(map) = native_source_map.as_ref() {
+                    let observed = crate::content_adapter::NativeStructureObservations {
+                        headings: input.headings.as_deref(),
+                        levels: heading_levels.as_deref(),
+                        destinations: destinations.as_deref(),
+                        links: observations.as_deref(),
+                        lists: structured_lists.as_deref(),
+                    };
+                    let positions = crate::content_adapter::native_gate_positions(
+                        map,
+                        definition,
+                        &gate,
+                        &observed,
+                        input.text.as_deref(),
+                        native_index.as_ref(),
+                    );
+                    coverage.mapped += positions.len();
+                    for (index, path, utf16_offset) in positions {
+                        capture.locations.push(ChangeNativeLocation {
+                            entity_id: entry.entity_id.clone(),
+                            source_sha256: coverage.source_sha256.clone(),
+                            check_id: check_id.clone(),
+                            verdict_finding_index: findings.len() + index,
+                            source: "host_supplied_native_path",
+                            path: path.to_vec(),
+                            utf16_offset,
+                        });
+                    }
+                }
+            }
             omitted = omitted.saturating_add(
                 gate.measurements
                     .get(FINDINGS_OMITTED)
@@ -3837,6 +3982,162 @@ mod tests {
             "entries":[{"entity_id":"article", "operation":"create", "media_type":"text/plain",
                 "after":{"inline":"abc", "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}]
         })).unwrap()
+    }
+
+    #[test]
+    fn native_change_report_binds_exact_verdict_and_preserves_partial_mapping() {
+        use sha2::{Digest, Sha256};
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let source = "🙂 bad ugly";
+        let projection = serde_json::json!({"schema":"aexeo.content-adapter/v1", "text":source,
+            "native_source_map":{"spans":[{"start":0,"end":"🙂 bad".len(),"path":["body",3,"text"],"utf16_start":2}]}}).to_string();
+        let set_source = |change: &mut Change, text: &str| {
+            let state = change.entries[0].after.as_mut().unwrap();
+            state.inline = Some(text.into());
+            state.sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
+        };
+        set_source(&mut change, &projection);
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad','ugly']\nblocking=false\n").unwrap();
+        let run = |change: &Change| {
+            evaluate_change_with_native_locations(
+                change,
+                &mut NoFiles,
+                &preset,
+                "2026-01-01T00:00:00Z",
+                4096,
+                4096,
+                ChangeEvaluationHost::default(),
+                None,
+                HtmlContentScope::Document,
+                None,
+            )
+            .unwrap()
+        };
+        let report = run(&change);
+        let legacy = evaluate_change(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            4096,
+        )
+        .unwrap();
+        assert_eq!(report.verdict, legacy);
+        assert_eq!(
+            report.verdict_sha256,
+            format!("{:x}", Sha256::digest(serde_json::to_vec(&legacy).unwrap()))
+        );
+        assert_eq!(report.coverage.len(), 1);
+        assert!(report.coverage[0].source_map_available);
+        assert_eq!(
+            (report.coverage[0].findings, report.coverage[0].mapped),
+            (2, 1)
+        );
+        assert_eq!(report.locations.len(), 1);
+        let location = &report.locations[0];
+        assert_eq!(location.verdict_finding_index, 0);
+        assert_eq!(
+            location.check_id,
+            report.verdict.findings[0]
+                .check_id
+                .as_ref()
+                .unwrap()
+                .as_str()
+        );
+        assert_eq!(location.utf16_offset, 5);
+        assert_eq!(
+            location.path,
+            serde_json::json!(["body", 3, "text"])
+                .as_array()
+                .unwrap()
+                .clone()
+        );
+        assert!(
+            report
+                .verdict
+                .findings
+                .iter()
+                .all(|finding| finding.location.is_none())
+        );
+        let without_map =
+            serde_json::json!({"schema":"aexeo.content-adapter/v1", "text":source}).to_string();
+        set_source(&mut change, &without_map);
+        let unlocated = run(&change);
+        assert!(!unlocated.coverage[0].source_map_available);
+        assert_eq!(
+            (unlocated.coverage[0].findings, unlocated.coverage[0].mapped),
+            (2, 0)
+        );
+        assert!(unlocated.locations.is_empty());
+        assert_ne!(report.verdict_sha256, unlocated.verdict_sha256);
+        change.entries[0].after.as_mut().unwrap().sha256 = "0".repeat(64);
+        assert!(
+            evaluate_change_with_native_locations(
+                &change,
+                &mut NoFiles,
+                &preset,
+                "2026-01-01T00:00:00Z",
+                4096,
+                4096,
+                ChangeEvaluationHost::default(),
+                None,
+                HtmlContentScope::Document,
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn native_change_positions_index_findings_across_entities() {
+        use sha2::{Digest, Sha256};
+        let mut change = change();
+        change.entries[0].media_type = crate::content_adapter::MEDIA_TYPE.into();
+        let projection = serde_json::json!({
+            "schema": "aexeo.content-adapter/v1",
+            "text": "bad ugly",
+            "native_source_map": {"spans": [{"start": 0, "end": 3, "path": ["body", 0], "utf16_start": 0}]}
+        }).to_string();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(projection.clone());
+        state.sha256 = format!("{:x}", Sha256::digest(projection.as_bytes()));
+        let mut second = change.entries[0].clone();
+        second.entity_id = "second-article".into();
+        change.entries.push(second);
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad','ugly']\nblocking=false\n").unwrap();
+        let report = evaluate_change_with_native_locations(
+            &change,
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            4096,
+            8192,
+            ChangeEvaluationHost::default(),
+            None,
+            HtmlContentScope::Document,
+            None,
+        )
+        .unwrap();
+        assert_eq!(report.coverage.len(), 2);
+        assert_eq!(report.locations.len(), 2);
+        assert_eq!(
+            report
+                .locations
+                .iter()
+                .map(|location| location.verdict_finding_index)
+                .collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        for location in &report.locations {
+            let finding = &report.verdict.findings[location.verdict_finding_index];
+            assert_eq!(
+                finding.check_id.as_deref(),
+                Some(location.check_id.as_str())
+            );
+        }
+        assert_ne!(report.locations[0].entity_id, report.locations[1].entity_id);
     }
 
     #[test]
