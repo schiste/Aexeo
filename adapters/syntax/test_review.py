@@ -49,6 +49,21 @@ class Model:
 
 
 class TestSyntaxAdapter(unittest.TestCase):
+    def test_linguistic_starter_uses_syntax_adapter_contract(self):
+        root = Path(review.__file__).resolve().parents[2]
+        preset_path = root / "crates/aexeo-core/presets/linguistic-observations.toml"
+        if not preset_path.exists():
+            self.skipTest("repository preset is not included in the standalone adapter archive")
+        preset = tomllib.loads(preset_path.read_text(encoding="utf-8"))
+        gates = {gate["extension"]: gate for gate in preset["gates"]}
+        model = Model([Sentence(0, 6, 0), Sentence(7, 13, 2)])
+        for extension in ("syntax.opening_pos", "syntax.clause_alternation"):
+            params = dict(gates[extension]["parameters"], model="en_core_web_sm", model_version="3.8.0", language="en")
+            review.parameters(params)
+            result = review.evaluate({"text": "Alpha. Bravo."}, params, model)
+            self.assertEqual(result[0]["extension"], extension)
+            self.assertEqual(result[0]["parameters"], params)
+
     def test_opening_example_parameters_match_their_policies(self):
         root = Path(review.__file__).parent
         for suffix in ("", "-fr"):

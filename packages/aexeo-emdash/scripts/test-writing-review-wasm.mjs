@@ -34,6 +34,7 @@ assert.equal(missingMedium.gates.find((gate) => gate.gate_id === "editorial.medi
 const linguistic = await evaluateContent(document, "linguistic-observations");
 assert.deepEqual(linguistic.gates.map((gate) => gate.gate_id), [
   "linguistic.register", "linguistic.idiom", "linguistic.reference_fidelity",
+  "linguistic.opening_categories", "linguistic.clause_structure",
 ]);
 assert.ok(linguistic.gates.every((gate) => gate.status === "not_checked" && gate.blocking === false));
 const projected = await projectContentInput(document);

@@ -417,9 +417,10 @@ A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensio
 ### Optional linguistic observation contract
 
 `linguistic-observations` is an opt-in, advisory starter with separate custom
-extensions `linguistic.register`, `linguistic.idiom`, and
-`linguistic.reference_fidelity`. It executes no evaluator. Without an explicitly
-installed provider, all three gates are `not_checked`. Compose it with a writing
+extensions `linguistic.register`, `linguistic.idiom`,
+`linguistic.reference_fidelity`, `syntax.opening_pos`, and
+`syntax.clause_alternation`. It executes no evaluator. Without an explicitly
+installed provider, all five gates are `not_checked`. Compose it with a writing
 profile only when you want those separate coverage results; the default writing
 profiles are unchanged.
 
@@ -1875,6 +1876,18 @@ or punctuation may be missed or misidentified. It assumes space-separated
 conjunctions and cannot establish coverage for every language or script. Its
 results are prompts for human review, never instructions to remove items.
 The Rust enum gains two optional fields; exhaustive constructors must supply them.
+
+The `linguistic-observations` starter also exposes advisory slots for
+`syntax.opening_pos` and `syntax.clause_alternation`, supported by the optional
+[local syntax adapter](../adapters/syntax/README.md). Override each entire gate
+with an installed model, its version, language and appropriate dependency labels;
+`unspecified` and `und` are placeholders. The adapter ships French and English
+configuration examples. The preset does not install or invoke the adapter.
+Without a matching result, or when analysis is unavailable, each slot is
+`not_checked`. Parser labels are observations, not proof of grammatical category
+or a requirement to alternate sentence structures. Sentence-asymmetry and
+medium-sentence-pairs measure word counts independently; compose them only where
+their segmentation fits the language.
 
 These checks cannot infer whether abstract phrasing is necessary, whether a
 phrase is translationese, whether a parallel construction is intentional, or
