@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
-from verify_portable_verdict import validate_similar_sentence_lengths_gate, validate_inline_list_gate, validate_forbidden_terms_gate, validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
+from verify_portable_verdict import verify_plain_duplicate_paragraph_statuses, validate_duplicate_paragraph_gate, validate_similar_sentence_lengths_gate, validate_inline_list_gate, validate_forbidden_terms_gate, validate_paragraph_length_gate, validate_heading_gate, verify_host_candidate_projection, verify_plain_punctuation_statuses, verify_metadata_statuses, verify_final_newline_statuses, compare, plain_text_word_count, plain_text_paragraph_count, verify_plain_paragraph_count_statuses, verify_plain_word_count_statuses, verify_plain_character_count_statuses, require_policy_coverage, validate_link_evidence, validate_schema, verify_link_observation_statuses, validate_candidate_evidence
 
 
 class PortableComparison(unittest.TestCase):
@@ -602,6 +602,59 @@ class PortableComparison(unittest.TestCase):
         check['status'] = 'passed'
         verify_plain_character_count_statuses(policy, verdict, after, {})
 
+    def test_duplicate_paragraph_statuses_and_normalization(self):
+        gate = dict(kind='duplicate_paragraphs', id='words', severity='warning',
+                    blocking=False, max_occurrences=1, min_chars=4, case_insensitive=False)
+        check = {'id': 'gate:2:é:words', 'status': 'passed'}
+        verdict = {'checks': [check]}
+        cases = [('', 'passed'), ('one', 'passed'), ('one\n\none', 'passed'),
+                 ('hello  world\r\n\r\nhello\nworld', 'failed'),
+                 ('Café ici\n\nCafé\u00a0ici', 'failed'),
+                 ('hello\n\nhello\n', 'failed'),
+                 ('hello\n\nHELLO', 'passed'), ('ab\x1cc\n\nab c', 'passed')]
+        for source, expected in cases:
+            with self.subTest(source=source):
+                after = [{'entity_id': 'é', 'media_type': 'text/plain', 'source': source}]
+                check['status'] = expected
+                verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, {})
+                check['status'] = 'passed' if expected == 'failed' else 'failed'
+                with self.assertRaisesRegex(VerificationError, 'duplicate paragraphs status differs'):
+                    verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, {})
+        gate['case_insensitive'] = True
+        after[0]['source'] = 'hello\n\nHELLO'
+        check['status'] = 'failed'
+        verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, {})
+        after[0]['source'] = 'Café\n\nCAFÉ'
+        with self.assertRaisesRegex(VerificationError, 'non-ASCII'):
+            verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, {})
+        check['status'] = 'not_checked'
+        verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, {})
+
+    def test_duplicate_paragraph_bounds_and_policy(self):
+        gate = dict(kind='duplicate_paragraphs', id='words', severity='warning',
+                    blocking=False, max_occurrences=1, min_chars=4, case_insensitive=False)
+        validate_duplicate_paragraph_gate(gate)
+        for invalid in (dict(gate, max_occurrences=0), dict(gate, min_chars=True),
+                        dict(gate, case_insensitive='yes'), dict(gate, extra=1)):
+            with self.subTest(gate=invalid), self.assertRaises(VerificationError):
+                validate_duplicate_paragraph_gate(invalid)
+        verdict = {'checks': [{'id': 'gate:2:é:words', 'status': 'passed'}]}
+        after = [{'entity_id': 'é', 'media_type': 'text/plain', 'source': 'x' * (16 * 1024 + 1)}]
+        with self.assertRaisesRegex(VerificationError, 'evaluator limit'):
+            verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, {})
+        after[0]['source'] = 'same\n\nsame\n\nsame'
+        gate['max_occurrences'] = 2
+        verdict['checks'][0]['status'] = 'failed'
+        cache = {}
+        verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, cache)
+        verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, cache)
+        self.assertEqual(cache['_work'], len(after[0]['source'].encode('utf-8')))
+        after[0]['source'] = 'hello'
+        verdict['checks'][0]['status'] = 'passed'
+        cache = {'_work': 64 * 1024 * 1024}
+        with self.assertRaisesRegex(VerificationError, 'work limit'):
+            verify_plain_duplicate_paragraph_statuses({'gates': [gate]}, verdict, after, cache)
+
     def test_repeated_punctuation_plain_paragraphs(self):
         gate = dict(kind='repeated_punctuation', id='words', severity='warning',
                     blocking=False, mark='—', max_per_paragraph=1)
@@ -1117,6 +1170,8 @@ class PortableComparison(unittest.TestCase):
                 policy['gates'][0].update(max_chars=10)
             elif kind == 'repeated_punctuation':
                 policy['gates'][0].update(mark='—', max_per_paragraph=1)
+            elif kind == 'duplicate_paragraphs':
+                policy['gates'][0].update(max_occurrences=1, min_chars=4, case_insensitive=False)
             elif kind == 'inline_triple_candidates':
                 policy['gates'][0].update(conjunction='and', delimiters='.!?')
             elif kind == 'similar_sentence_lengths':

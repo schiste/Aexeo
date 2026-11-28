@@ -334,8 +334,11 @@ it also counts LF/CRLF-separated blocks using the evaluator's whitespace and
 100,000-paragraph limit. It does not rebuild Markdown or HTML projections for
 these checks. Paragraph recomputation is currently specific to the Python
 comparator; do not assume a native runner performs it. It also recomputes
-checked `repeated_punctuation` outcomes for plain-text paragraphs with bounded
-work. Other formats and native runners do not gain this verification. Both the Python comparator
+checked `repeated_punctuation` and `duplicate_paragraphs` outcomes for
+plain-text paragraphs with bounded work. Case-insensitive duplicate checking
+requires ASCII normalized paragraphs because Unicode case tables may differ
+between runtimes; otherwise the comparator rejects the checked result. Other
+formats and native runners do not gain this verification. Both the Python comparator
 and the Aexeo candidate helper compare checked `metadata_age` results with the
 bound metadata date and fixed `as_of` policy date, including rejecting checked
 results for missing, malformed or future dates. This calculation does not prove

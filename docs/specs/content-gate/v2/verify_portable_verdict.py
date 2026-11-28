@@ -413,6 +413,109 @@ def verify_plain_punctuation_statuses(policy, verdict, after, counts):
                 raise VerificationError('plain-text repeated punctuation status differs from source')
 
 
+def validate_duplicate_paragraph_gate(gate):
+    if gate.get('kind') != 'duplicate_paragraphs':
+        return
+    if (set(gate) != {'kind', 'id', 'severity', 'blocking', 'max_occurrences',
+                      'min_chars', 'case_insensitive'}
+            or gate['severity'] not in ('warning', 'error')
+            or type(gate['case_insensitive']) is not bool
+            or any(type(gate[key]) is not int or not 1 <= gate[key] <= (1 << 64) - 1
+                   for key in ('max_occurrences', 'min_chars'))):
+        raise VerificationError('invalid resolved duplicate paragraphs gate')
+
+
+def verify_plain_duplicate_paragraph_statuses(policy, verdict, after, cache):
+    # Independently compare bounded, unchanged plain-text paragraph outcomes.
+    checks = {check['id']: check for check in verdict['checks']}
+    for gate in policy['gates']:
+        if gate['kind'] != 'duplicate_paragraphs':
+            continue
+        validate_duplicate_paragraph_gate(gate)
+        for item in after:
+            if item['media_type'] != 'text/plain':
+                continue
+            entity = item['entity_id']
+            check = checks[f'gate:{len(entity.encode("utf-8"))}:{entity}:{gate["id"]}']
+            if check['status'] not in ('passed', 'failed'):
+                continue
+            key = (entity, gate['min_chars'], gate['case_insensitive'])
+            if key not in cache:
+                source = item['source']
+                size = len(source.encode('utf-8'))
+                if size > 16 * 1024 * 1024:
+                    raise VerificationError('duplicate paragraph source exceeds comparison limit')
+                cache['_work'] = cache.get('_work', 0) + size
+                if cache['_work'] > 64 * 1024 * 1024:
+                    raise VerificationError('duplicate paragraph comparison work limit exceeded')
+                counts = {}
+                key_bytes = 0
+                paragraphs = 0
+                highest = 0
+                cursor = 0
+                start = None
+                block_end = 0
+                while cursor < len(source):
+                    end = source.find('\n', cursor)
+                    if end < 0:
+                        end = len(source)
+                    content_end = end
+                    while content_end > cursor and source[content_end - 1] == '\r':
+                        content_end -= 1
+                    if _rust_blank(source[cursor:content_end]):
+                        if start is not None:
+                            # Include the last paragraph before the separator.
+                            block = source[start:block_end]
+                            start = None
+                        else:
+                            block = None
+                    else:
+                        if start is None:
+                            start = cursor
+                        block_end = content_end
+                        block = None
+                    cursor = end + 1
+                    if cursor >= len(source) and start is not None:
+                        block = source[start:block_end]
+                        start = None
+                    if block is None:
+                        continue
+                    paragraphs += 1
+                    if paragraphs > 100_000 or len(block.encode('utf-8')) > 16 * 1024:
+                        raise VerificationError('duplicate paragraph evaluator limit exceeded')
+                    words, current = [], []
+                    for char in block:
+                        if char.isspace() and char not in '\x1c\x1d\x1e\x1f':
+                            if current:
+                                words.append(''.join(current))
+                                current = []
+                        else:
+                            current.append(char)
+                    if current:
+                        words.append(''.join(current))
+                    normalized = ' '.join(words)
+                    if len(normalized) < gate['min_chars']:
+                        continue
+                    if gate['case_insensitive']:
+                        # Python and Rust can use different Unicode case tables.
+                        if not normalized.isascii():
+                            raise VerificationError('non-ASCII case-insensitive paragraphs are not independently supported')
+                        normalized = normalized.lower()
+                    length = len(normalized.encode('utf-8'))
+                    if length > 16 * 1024:
+                        raise VerificationError('duplicate paragraph evaluator limit exceeded')
+                    if normalized not in counts:
+                        key_bytes += length
+                        if len(counts) >= 10_000 or key_bytes > 4 * 1024 * 1024:
+                            raise VerificationError('duplicate paragraph evaluator limit exceeded')
+                    counts[normalized] = counts.get(normalized, 0) + 1
+                    highest = max(highest, counts[normalized])
+                cache[key] = highest
+            expected = 'failed' if cache[key] > gate['max_occurrences'] else 'passed'
+            if check['status'] != expected:
+                raise VerificationError('plain-text duplicate paragraphs status differs from source')
+
+
 def _calendar_day(value):
     """Ordinal for Rust's four-digit proleptic Gregorian dates, including year zero."""
     if not isinstance(value, str) or re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value) is None:
@@ -744,6 +847,7 @@ def require_policy_coverage(policy, change, has_collection, verdict, has_link_ob
         validate_forbidden_terms_gate(gate)
         validate_inline_list_gate(gate)
         validate_similar_sentence_lengths_gate(gate)
+        validate_duplicate_paragraph_gate(gate)
         if kind == 'unique_collection_metadata':
             required = {'kind', 'id', 'severity', 'blocking', 'field'}
             if (not required <= set(gate) or set(gate) - required - {'group_by'}
@@ -866,6 +970,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
             validate_heading_gate(gate)
             validate_paragraph_length_gate(gate)
             validate_similar_sentence_lengths_gate(gate)
+            validate_duplicate_paragraph_gate(gate)
     if not isinstance(policy, dict) or 'name' not in policy:
         raise VerificationError('resolved policy name is unavailable')
     text(policy['name'], empty=False)
@@ -912,6 +1017,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     character_counts = {}
     paragraph_counts = {}
     punctuation_counts = {}
+    duplicate_paragraph_counts = {}
     for envelope in (previous, fresh):
         if not hmac.compare_digest(envelope['binding_sha256'], current_binding):
             raise VerificationError('candidate input binding differs')
@@ -930,6 +1036,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         verify_plain_character_count_statuses(policy, verdict, after, character_counts)
         verify_plain_paragraph_count_statuses(policy, verdict, after, paragraph_counts)
         verify_plain_punctuation_statuses(policy, verdict, after, punctuation_counts)
+        verify_plain_duplicate_paragraph_statuses(policy, verdict, after, duplicate_paragraph_counts)
         verify_metadata_statuses(policy, verdict, change)
         verify_final_newline_statuses(policy, verdict, after)
         if links is not None:
@@ -950,7 +1057,9 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     if telemetry_counts is not None:
         telemetry_counts.update(policy_gate_count=coverage_counts[0], policy_check_count=coverage_counts[1],
                                 punctuation_source_mark_pairs_checked=len(punctuation_counts) - ('_work' in punctuation_counts),
-                                punctuation_bytes_checked=punctuation_counts.get('_work', 0))
+                                punctuation_bytes_checked=punctuation_counts.get('_work', 0),
+                                duplicate_paragraph_sources_checked=len(duplicate_paragraph_counts) - ('_work' in duplicate_paragraph_counts),
+                                duplicate_paragraph_bytes_checked=duplicate_paragraph_counts.get('_work', 0))
     return {'input_binding': 'match', 'fresh_verdict_match': True,
             'required_check_count': len(required_checks), 'publication_authorized': False}
 

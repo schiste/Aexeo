@@ -343,6 +343,13 @@ class PortableCliInterop(unittest.TestCase):
             ('unicode_blank', 'One — here.\r\n\u00a0\r\nNext — here.', 1, None, 'passed', False),
         ])
 
+    def test_real_duplicate_paragraph_verdicts_match_python_comparator(self):
+        # Native parity requires an independently updated Aethyme runner.
+        self._check_real_plain_count_verdicts('duplicate_paragraphs', [
+            ('different', 'Hello world.\n\nAnother paragraph.', 1, None, 'passed', False),
+            ('duplicate', 'Café ici.\r\n\r\nCafé\u00a0ici.', 1, None, 'failed', False),
+        ])
+
     def test_real_metadata_age_verdicts_match_python_comparator(self):
         # Native parity requires an independently updated Aethyme runner.
         self._check_real_plain_count_verdicts('metadata_age', [
@@ -372,12 +379,13 @@ class PortableCliInterop(unittest.TestCase):
                     + ("blocking=false\n" if kind == "final_newline" else
                        f"field='reviewed'\nas_of='2024-03-01'\nmax_days={minimum}\nblocking=false\n" if kind == 'metadata_age' else
                        f"mark='—'\nmax_per_paragraph={minimum}\nblocking=false\n" if kind == 'repeated_punctuation' else
+                       f"max_occurrences={minimum}\nmin_chars=4\ncase_insensitive=false\nblocking=false\n" if kind == 'duplicate_paragraphs' else
                        f"min={minimum}\nmax={maximum}\nblocking=false\n")
                     + (f"ignore_whitespace={str(ignore_whitespace).lower()}\n" if kind == 'character_count' else '')
                     + "[[gates]]\nid='always'\nkind='word_count'\nmin=1\n", encoding='utf-8')
                 common = executable + ['content-change', '--preset', 'test', '--preset-source',
                     'test=' + str(root / 'preset'), '--offline-receipt', '--evaluator-identity', 'build']
-                if kind in ('paragraph_count', 'repeated_punctuation'):
+                if kind in ('paragraph_count', 'repeated_punctuation', 'duplicate_paragraphs'):
                     common.append('--plain-text-paragraphs')
                 env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
                 bundle_run = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
@@ -407,7 +415,7 @@ class PortableCliInterop(unittest.TestCase):
                 native_env = dict(os.environ)
                 native_env.pop('AETHYME_GATE_WORKER_ID', None)
                 native_binary = os.environ.get('AETHYME_CLI_BIN')
-                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary and kind not in ('final_newline', 'metadata_age', 'repeated_punctuation') else None
+                native = [native_binary, 'content-gate', 'compare-v2', str(root / 'manifest')] if native_binary and kind not in ('final_newline', 'metadata_age', 'repeated_punctuation', 'duplicate_paragraphs') else None
                 for command in filter(None, (verify, native)):
                     result = subprocess.run(command, env=native_env, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -418,6 +426,13 @@ class PortableCliInterop(unittest.TestCase):
                     event = json.loads(measured.stderr)
                     self.assertEqual(event['punctuation_source_mark_pairs_checked'], 1)
                     self.assertEqual(event['punctuation_bytes_checked'], len(source.encode('utf-8')))
+                    self.assertNotIn(source, measured.stderr)
+                if kind == 'duplicate_paragraphs':
+                    measured = subprocess.run(verify + ['--telemetry'], env=native_env, capture_output=True, text=True)
+                    self.assertEqual(measured.returncode, 0, measured.stdout + measured.stderr)
+                    event = json.loads(measured.stderr)
+                    self.assertEqual(event['duplicate_paragraph_sources_checked'], 1)
+                    self.assertEqual(event['duplicate_paragraph_bytes_checked'], len(source.encode('utf-8')))
                     self.assertNotIn(source, measured.stderr)
                 if expected == 'failed':
                     check['status'] = 'passed'
