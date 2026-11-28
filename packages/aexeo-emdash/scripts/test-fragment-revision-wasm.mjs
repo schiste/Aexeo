@@ -86,3 +86,20 @@ const unchecked = await noProvider.routes["audit-revision"].handler({ ...linkCtx
 assert.equal(unchecked.report.gates[0].status, "not_checked");
 assert.equal(unchecked.assurance.runtime_providers, "not_invoked");
 console.log("WASM revision-specific link observation test passed");
+
+// The candidate-specific observer receives the candidate identity and must echo it.
+const candidateCalls = [];
+const candidatePlugin = createPlugin({ revisionAudits: true, contentPreset: { name: "revision-links", sources: { "revision-links": policy }, fragmentFieldsByCollection: { posts: { content: "revision-links" } } } }, {
+  revisionLinkObservations: async () => { throw new Error("revision observer must not run for a candidate"); },
+  candidateLinkObservations: async request => { candidateCalls.push(request); return { candidate_sha256_json: request.candidate_sha256_json, observations: ["not_found"] }; },
+});
+const proposed = [{ _type: "block", markDefs: [{ _type: "link", _key: "p", href: "https://example.org/proposed" }], children: [{ _type: "span", text: "Proposed link", marks: ["p"] }] }];
+const candidateAudit = await candidatePlugin.routes["audit-candidate"].handler({ ...linkCtx, input: { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: proposed } });
+assert.equal(candidateAudit.status, "evaluated");
+assert.equal(candidateAudit.report.gates[0].status, "failed");
+assert.equal(candidateAudit.assurance.runtime_providers, "candidate_link_observer_invoked");
+assert.equal(candidateAudit.assurance.publication_authorization, "not_granted");
+assert.equal(candidateCalls[0].candidate_sha256_json, candidateAudit.candidate.sha256_json);
+assert.deepEqual(candidateCalls[0].destinations, ["https://example.org/proposed"]);
+assert.equal(historical.data.content[0].markDefs[0].href, "https://example.org/historical");
+console.log("WASM candidate-specific link observation test passed");

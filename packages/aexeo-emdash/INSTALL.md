@@ -846,6 +846,18 @@ optional historical locale and link observation providers and their limits.
 
 Enable revision audits and explicitly map each field to its preset in `contentPreset.fragmentFieldsByCollection`, for example `{ posts: { intro: "fragment-readable" } }`. Call `audit_revision` with `collection`, `id`, `revision` and `field: "intro"`. The saved report identifies fragment scope, field and preset. An unconfigured or unavailable field returns `not_checked`; omit `field` for the existing whole-content audit. The host must expose the MCP tool with its revision access and permissions. This review does not establish factual accuracy or authorize publication.
 
+### Observe links in an unsaved fragment
+
+Trusted configured runtimes can opt in separately with `candidateLinkObservations`.
+For `audit_candidate` it receives the base revision, field, candidate JSON SHA-256,
+locale, preset and ordered destinations. Return the same `candidate_sha256_json`
+and one `reachable`, `not_found`, `not_checked` or `not_applicable` observation per
+destination. A mismatched digest, invalid response, provider failure or unavailable
+projection leaves the link gate `not_checked`. The revision-only and current-content
+observers are never substituted. Protect destinations and identifiers; the host is
+responsible for permissions, network policy, timeouts and freshness. An observed link
+does not authorize publication or establish that the candidate is saved.
+
 External content providers receive `metadata_coverage` when the adapter supplies
 coverage information. `observed_fields` identifies fields whose values or
 absence were observed; `unavailable_fields` overrides it. Missing keys outside

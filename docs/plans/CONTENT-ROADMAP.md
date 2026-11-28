@@ -626,6 +626,10 @@ registry before considering the release delivered.
   ([#1030](https://github.com/schiste/Aexeo/pull/1030)). This does not
   establish that paths identify the current CMS revision; portable v1 change
   verdicts still do not carry these native paths.
+- [x] Allow a separately opted-in EmDash candidate link observer for unsaved
+  fragments. Bind observations to the candidate JSON digest and projected
+  destinations, retain unchecked results on failure and emit aggregate telemetry.
+  The host remains responsible for authorization, network safety and freshness.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
   The single-content CLI accepts source- and destination-bound host link

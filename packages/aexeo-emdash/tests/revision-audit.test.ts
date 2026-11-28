@@ -95,6 +95,88 @@ describe("revision audits", () => {
     expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ candidate: result.candidate });
   });
 
+  it("binds an opt-in candidate link observer to the proposed fragment", async () => {
+    const { ctx, revision } = host();
+    const candidate = [{ _type: "block", children: [{ _type: "span", text: "Proposed link." }] }];
+    const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    const checked = { ...report, gates: [{ ...initial.gates[0]!, status: "passed" as const }] };
+    const evaluate = vi.fn(async (...args: any[]) => args[6] ? checked : initial);
+    const projectLinks = vi.fn(async (document: any) => ({ document, destinations: ["https://private.example/link"] }));
+    const observer = vi.fn(async (request: any) => ({ candidate_sha256_json: request.candidate_sha256_json, observations: ["reachable" as const] }));
+    const revisionObserver = vi.fn();
+    const telemetry = vi.fn();
+    const result = await auditCandidate(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate }, {
+      preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } } },
+      evaluate, projectLinks, candidateLinkObservations: observer, revisionLinkObservations: revisionObserver, onLinkProviderTelemetry: telemetry,
+    });
+    expect(result.status).toBe("evaluated");
+    if (result.status !== "evaluated") throw new Error("expected report");
+    expect(result.report).toEqual(checked);
+    expect(result.assurance).toMatchObject({ runtime_providers: "candidate_link_observer_invoked", publication_authorization: "not_granted" });
+    expect(observer).toHaveBeenCalledWith({ collection: "posts", id: "one", revision: "rev1", field: "content", locale: "en", preset: "article",
+      candidate_sha256_json: result.candidate?.sha256_json, destinations: ["https://private.example/link"] });
+    expect(JSON.stringify(projectLinks.mock.calls)).toContain("Proposed link.");
+    expect(JSON.stringify(projectLinks.mock.calls)).not.toContain("Historical sentence.");
+    expect(evaluate.mock.calls[1]?.[6]).toMatchObject({ observations: ["reachable"] });
+    expect(revisionObserver).not.toHaveBeenCalled();
+    expect(telemetry).toHaveBeenCalledWith(expect.objectContaining({ status: "success" }));
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain("private.example");
+    expect(revision.data.content[0]?.children[0]?.text).toBe("Historical sentence.");
+  });
+
+  it("keeps candidate links unchecked for stale, failed, invalid or unavailable observations", async () => {
+    const { ctx } = host();
+    const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    for (const mode of ["stale", "failed", "invalid", "sparse", "unavailable"] as const) {
+      const observer = vi.fn(async (request: any) => {
+        if (mode === "failed") throw new Error("private provider error");
+        return { candidate_sha256_json: mode === "stale" ? "stale" : request.candidate_sha256_json,
+          observations: mode === "sparse" ? Array(1) : [mode === "invalid" ? "bad" : "reachable"] } as never;
+      });
+      const evaluate = vi.fn(async () => initial);
+      const telemetry = vi.fn();
+      const result = await auditCandidate(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: "proposed" }, {
+        preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } } }, evaluate,
+        projectLinks: async (document) => mode === "unavailable" ? null : { document, destinations: ["https://private.example"] },
+        candidateLinkObservations: observer, onLinkProviderTelemetry: telemetry,
+      });
+      expect(result.status).toBe("evaluated");
+      if (result.status !== "evaluated") throw new Error("expected report");
+      expect(result.report.gates[0]?.status).toBe("not_checked");
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledTimes(mode === "unavailable" ? 0 : 1);
+      expect(JSON.stringify(result)).not.toContain("private provider error");
+      expect(JSON.stringify(telemetry.mock.calls)).not.toContain("private.example");
+    }
+  });
+
+  it("isolates candidate observations from revision audits and reports revision locale", async () => {
+    const { ctx } = host();
+    const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+    const observer = vi.fn(async (request: any) => ({ candidate_sha256_json: request.candidate_sha256_json, observations: ["not_checked" as const] }));
+    const options = { preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } } },
+      evaluate: async () => initial, revisionLocale: async () => "fr", candidateLinkObservations: observer,
+      projectLinks: async (document: any) => ({ document, destinations: ["/link"] }) };
+    const revision = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, options);
+    expect(revision.status).toBe("evaluated");
+    expect(observer).not.toHaveBeenCalled();
+    const result = await auditCandidate(ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: "proposed" }, options);
+    expect(result.status).toBe("evaluated");
+    if (result.status !== "evaluated") throw new Error("expected report");
+    expect(result.assurance.runtime_providers).toBe("revision_locale_and_candidate_link_observer_invoked");
+    expect(observer).toHaveBeenCalledWith(expect.objectContaining({ locale: "fr" }));
+  });
+
+  it("does not call a candidate link observer when no link gate needs it", async () => {
+    const observer = vi.fn();
+    const result = await auditCandidate(host().ctx as never, { collection: "posts", id: "one", revision: "rev1", field: "content", candidate: "proposed" }, {
+      preset: { name: "article", fragmentFieldsByCollection: { posts: { content: "article" } } },
+      evaluate: async () => report, projectLinks: vi.fn(), candidateLinkObservations: observer,
+    });
+    expect(result.status).toBe("evaluated");
+    expect(observer).not.toHaveBeenCalled();
+  });
+
   it("rejects oversized or unconfigured candidate fields without evaluating", async () => {
     const { ctx } = host();
     const evaluate = vi.fn(async () => report);
