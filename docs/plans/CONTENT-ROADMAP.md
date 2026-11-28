@@ -125,6 +125,14 @@ publishing 0.9.5 and host-side validation remain open.
   revision access on the target host, then verify its connected MCP actions and
   permissions against a real revision. Repository support alone does not expose
   an action through an already connected host.
+  - Release candidate update, 2026-11-28: [#1025](https://github.com/schiste/Aexeo/pull/1025)
+    merged the 0.9.8 package version and the composable writing-review presets.
+    TypeScript, 428 plugin tests, the real-WASM suite, an isolated installed
+    package smoke test, and PR CI including configured workerd passed. The
+    tested archive has SHA-256
+    `8e10753d42142235d7a4a236685fd2a811cadb0dbe037de75840534550418889`;
+    its source tree matches the merge commit. Registry `latest` was 0.9.6 at
+    verification; 0.9.8 publication, installation and host validation remain open.
   - Release update, 2026-11-26: npm `@aeptus/aexeo-emdash@0.9.6`
     is published and is the `latest` dist-tag. Its registry integrity matches
     the locally built archive from the `v0.0.27` source tree. The package
@@ -873,9 +881,12 @@ registry before considering the release delivered.
   candidate `fb0fe26744ed`, including all eight supported host gates and
   rejection of modified candidate bytes. The Aexeo test is merged in
   [#998](https://github.com/schiste/Aexeo/pull/998); native support was merged
-  in [Aethyme #2004](https://github.com/schiste/Aethyme/pull/2004) and remains
-  pending delivery in an installed Aethyme release. This offline test does not
-  establish provenance or authorize publication.
+  in [Aethyme #2004](https://github.com/schiste/Aethyme/pull/2004). Aethyme
+  [0.8.188](https://github.com/schiste/Aethyme/releases/tag/v0.8.188) is published;
+  its macOS ARM archive matched the signed manifest and the build artifact. The
+  duplicate-heading cross-process test in [#1016](https://github.com/schiste/Aexeo/pull/1016)
+  passed against that binary and rejected modified candidate bytes. This test
+  does not establish host provenance, source freshness or publication authority.
   Additional host observations and gates remain unsupported; this does not
   establish freshness, host provenance, or publication authority.
   The conservative HTML source mapper preserves positions through explicitly
