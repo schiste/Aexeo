@@ -1018,6 +1018,12 @@ registry before considering the release delivered.
   sandboxed EmDash saves and refreshes to the sidecar.
 - [ ] Validate sandbox sidecar preset configuration, real host permissions and
   representative records before relying on the deployed workflow.
+  On 2026-11-28, connected revision audits still returned a generic error for
+  two existing records; unavailable-revision and unconfigured-fragment controls
+  responded correctly. A locally built 0.9.9 archive passed plugin and WASM
+  tests, including tests run against the extracted archive. Registry publication,
+  host installation and a connected retest remain outstanding. See
+  [Preview validation](CMS-PREVIEW-VALIDATION-2026-11.md).
 - [ ] Source and factuality evaluation after the basic gates are validated.
   A composable, advisory source-review-age gate checks an explicit reference
   date against a claim- and source-bound review record, with aggregate age
