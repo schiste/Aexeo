@@ -386,17 +386,33 @@ def bounded_json(value, limit):
     return "".join(parts)
 
 
-def serve(source, destination, load_spacy):
-    """Process a bounded sequence of private JSON lines on local stdio."""
-    cache = ModelCache()
-    spacy = None
-    for _ in range(MAX_REQUESTS):
-        line = source.readline(MAX_JSON_BYTES + 1)
-        if not line:
-            return 0
-        if len(line) > MAX_JSON_BYTES:
-            print(json.dumps({"status": "invalid", "results": []}), file=destination, flush=True)
-            return 2  # Do not treat the remainder of an oversized line as a request.
+class SyntaxReviewSession:
+    """Opt-in local Python host; each request is isolated and input-bound.
+
+    Responses have the same shape as the stdio protocol. A processed response
+    is not itself a passing gate: missing results remain not_checked in Aexeo.
+    """
+
+    def __init__(self, load_spacy=None):
+        self._load_spacy = load_spacy if load_spacy is not None else import_spacy
+        self._cache = ModelCache()
+        self._spacy = None
+        self._requests = 0
+
+    def observe(self, input_data, raw_parameters, *, text_complete):
+        """Evaluate a detached snapshot; no source is modified or transmitted."""
+        try:
+            line = bounded_json({"input": input_data, "parameters": raw_parameters,
+                                 "text_complete": text_complete}, MAX_JSON_BYTES - 1).encode("utf-8") + b"\n"
+        except (OutputTooLarge, TypeError, ValueError, RecursionError):
+            return {"status": "invalid", "results": []}
+        return strict_json(self._process_line(line))
+
+    def _process_line(self, line):
+        """Process a single bounded UTF-8 JSON line using the server contract."""
+        if self._requests >= MAX_REQUESTS or len(line) > MAX_JSON_BYTES:
+            return json.dumps({"status": "invalid", "results": []})
+        self._requests += 1
         try:
             request = strict_json(line)
             if (not isinstance(request, dict) or set(request) != {"input", "parameters", "text_complete"}
@@ -409,21 +425,33 @@ def serve(source, destination, load_spacy):
                 response = {"status": "not_checked", "results": []}
             else:
                 try:
-                    if spacy is None:
-                        spacy = load_spacy()
-                    response = {"status": "processed", "results": evaluate_batch(request["input"], configs, spacy, cache)}
+                    if self._spacy is None:
+                        self._spacy = self._load_spacy()
+                    response = {"status": "processed", "results": evaluate_batch(request["input"], configs, self._spacy, self._cache)}
                 except Exception as exc:  # Do not expose request text.
                     print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
                     response = {"status": "not_checked", "results": []}
             try:
-                encoded = bounded_json(response, MAX_JSON_BYTES)
+                return bounded_json(response, MAX_JSON_BYTES)
             except OutputTooLarge:
-                encoded = json.dumps({"status": "not_checked", "results": []})
+                return json.dumps({"status": "not_checked", "results": []})
         except (ValueError, TypeError, RecursionError):
-            encoded = json.dumps({"status": "invalid", "results": []})
+            return json.dumps({"status": "invalid", "results": []})
+
+
+def serve(source, destination, load_spacy):
+    """Process a bounded sequence of private JSON lines on local stdio."""
+    session = SyntaxReviewSession(load_spacy)
+    for _ in range(MAX_REQUESTS):
+        line = source.readline(MAX_JSON_BYTES + 1)
+        if not line:
+            return 0
+        encoded = session._process_line(line)
         print(encoded, file=destination, flush=True)
+        if len(line) > MAX_JSON_BYTES:
+            return 2  # Do not treat the remainder of an oversized line as a request.
         # Do not retain the last request or response while waiting for input.
-        line = request = response = configs = encoded = None
+        line = encoded = None
     return 0
 
 

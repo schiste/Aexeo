@@ -131,3 +131,31 @@ not prevent a later valid request unless its line is oversized. A model error
 never reuses a different model. Keep pipes private, drain stdout and stderr, and
 close stdin or terminate the process when the session ends. No result establishes
 model provenance, semantic accuracy or coverage of omitted content.
+
+## Reuse directly from a Python agent
+
+A local Python host can import `review.py` and create one `SyntaxReviewSession`
+for up to 100 observations. It uses the same bounded validation, model reuse,
+and per-request reparsing as `--serve`, without starting a separate process:
+
+```python
+# With adapters/syntax on PYTHONPATH. Input must be the exact ContentInput
+# exported for this candidate, including metadata and source text.
+from review import SyntaxReviewSession
+
+session = SyntaxReviewSession()
+response = session.observe(exported_input, preset_parameters, text_complete=True)
+# Privately save response["results"] as JSON and pass its path to
+# content-revise: --extension-results initially, then extension_results in
+# each submit or patch proposal. Inspect each gate in Aexeo's report.
+```
+
+Re-export each proposed candidate with the same input format, HTML scope and
+metadata before observing it; for `content-revise`, use `content -` with the
+candidate on stdin so the input identity matches. Set `text_complete=True`
+only when that candidate's coverage is independently established. `processed`
+is not a gate verdict, and unavailable checks can be omitted from `results`.
+No model is installed or loaded until the first complete request; model errors
+remain unavailable. Returned results are detached snapshots, but they contain
+private content and must be handled accordingly. The session cannot authenticate
+the parser or guarantee that an editorial suggestion preserves meaning.
