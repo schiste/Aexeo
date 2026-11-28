@@ -49,6 +49,17 @@ class Model:
 
 
 class TestSyntaxAdapter(unittest.TestCase):
+    def test_source_positions_match_unicode_and_newline_prefix_semantics(self):
+        text = "Été 😀.\r\nمرحبا.\n\nfin\rseul."
+        positions = review.SourcePositions(text)
+        offsets = list(range(len(text) + 1)) + list(reversed(range(len(text) + 1)))
+        for offset in offsets:
+            prefix = text[:offset]
+            self.assertEqual(positions.at(offset), {
+                "line": prefix.count("\n") + 1,
+                "column": len(prefix.rsplit("\n", 1)[-1]) + 1,
+            })
+
     def test_linguistic_starter_uses_syntax_adapter_contract(self):
         root = Path(review.__file__).resolve().parents[2]
         preset_path = root / "crates/aexeo-core/presets/linguistic-observations.toml"
@@ -216,6 +227,15 @@ class TestSyntaxAdapter(unittest.TestCase):
         self.assertEqual(review.distance(root, root), 0)
         self.assertGreater(review.distance(root, (("NOUN", "ROOT"), ())), 0)
         self.assertEqual(review.distance(root, leaf), review.distance(leaf, root))
+
+    def test_multiple_multiline_findings_keep_source_positions(self):
+        text = "Été.\r\nAgain.\n😀 More.\nFin."
+        pieces = ["Été.", "Again.", "😀 More.", "Fin."]
+        sentences = [Sentence(text.index(piece), text.index(piece) + len(piece), i * 2)
+                     for i, piece in enumerate(pieces)]
+        result = review.evaluate({"text": text}, PARAMS, Model(sentences))
+        self.assertEqual([(item["line"], item["column"]) for item in result[0]["diagnostics"]],
+                         [(2, 1), (3, 1), (4, 1)])
 
     def test_result_bound_to_input_and_unicode_location(self):
         text = "Été. Again. More."
