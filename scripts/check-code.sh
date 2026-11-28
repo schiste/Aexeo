@@ -18,6 +18,9 @@ aexeo_run_timed "${prefix}review-evidence-integration" "cache-light" \
     python3 scripts/test-review-evidence-integration.py "${CARGO_TARGET_DIR:-target}/debug/aexeo-cli"
 aexeo_run_timed "${prefix}syntax-revision-integration" "cache-light" \
     python3 scripts/test-syntax-revision-workflow.py "${CARGO_TARGET_DIR:-target}/debug/aexeo-cli"
+aexeo_run_timed "${prefix}evidence-batch-integration" "cache-light" \
+    env PYTHONPATH=adapters/jev AEXEO_TEST_CLI="${CARGO_TARGET_DIR:-target}/debug/aexeo-cli" \
+    python3 -m unittest test_audit_batch.BatchAuditTests.test_real_cli_reports_known_and_missing_reviews
 # The markdown-* fixtures run through --input-format markdown.
 for fixture in duplicate-headings heading-length link-destinations required-metadata \
     markdown-duplicate-headings markdown-evidence-anchors markdown-forbidden-terms \
