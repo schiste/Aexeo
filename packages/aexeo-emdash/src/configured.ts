@@ -59,8 +59,8 @@ import type { Finding, SiteIntelligenceScore } from "./types.js";
 import { definePlugin } from "emdash";
 import { z } from "zod";
 import { auditCandidate, auditRevision, getRevisionAudit } from "./revision-audit.js";
-import type { CandidateLinkObservationProvider, RevisionLinkObservationProvider, RevisionLocaleProvider, RevisionLocaleTelemetry } from "./revision-audit.js";
-export type { CandidateLinkObservationProvider, RevisionLinkObservationProvider, RevisionLocaleProvider, RevisionLocaleTelemetry } from "./revision-audit.js";
+import type { CandidateLinkObservationProvider, RevisionExternalGateProvider, RevisionLinkObservationProvider, RevisionLocaleProvider, RevisionLocaleTelemetry } from "./revision-audit.js";
+export type { CandidateLinkObservationProvider, RevisionExternalGateProvider, RevisionLinkObservationProvider, RevisionLocaleProvider, RevisionLocaleTelemetry } from "./revision-audit.js";
 import { getReviewDisposition, getReviewHistory, setReviewDisposition, type ReviewRequest } from "./review-dispositions.js";
 
 const candidateSchema = z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128), candidate: z.json() });
@@ -227,6 +227,8 @@ export interface ConfiguredPluginRuntime {
   fragmentLinkObservations?: FragmentLinkObservationProvider;
   /** Separate opt-in observer for historical revision audits. */
   revisionLinkObservations?: RevisionLinkObservationProvider;
+  /** Explicit provider for historical revision gates; never used on candidates. */
+  revisionExternalGates?: RevisionExternalGateProvider;
   /** Separate opt-in observer bound to an unsaved candidate fragment. */
   candidateLinkObservations?: CandidateLinkObservationProvider;
   /** Trusted host projection for the locale of the exact historical revision. */
@@ -314,7 +316,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128).optional() }),
         handler: async (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string; field?: string } }) => {
           const startedAt = Date.now();
-          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, titleFieldsByCollection: options.titleFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, projectLinks: projectLinkDestinations, revisionLinkObservations: runtime.revisionLinkObservations, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onLinkProviderTelemetry: runtime.onLinkProviderTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
+          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, titleFieldsByCollection: options.titleFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent, projectLinks: projectLinkDestinations, projectContent: projectContentInput, revisionExternalGates: runtime.revisionExternalGates, onExternalGateTelemetry: runtime.onExternalGateTelemetry, revisionLinkObservations: runtime.revisionLinkObservations, revisionLocale: runtime.revisionLocale, onRevisionLocaleTelemetry: runtime.onRevisionLocaleTelemetry, onLinkProviderTelemetry: runtime.onLinkProviderTelemetry, onContentEvaluationTelemetry: runtime.onContentEvaluationTelemetry });
           try { ctx.log?.info("aexeo.revision_audit", { status: result.status, ...(result.status === "not_checked" ? { reason: result.reason } : { revision_status: result.revision_status }), scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },

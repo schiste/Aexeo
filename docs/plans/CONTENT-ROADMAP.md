@@ -652,6 +652,11 @@ registry before considering the release delivered.
   observer; results are projected from the historical snapshot, and provider
   errors and incomplete projections remain unchecked. The host is responsible
   for observer authorization, network policy, privacy, and freshness.
+  Configured revision audits can additionally opt in to revision-specific custom
+  gate providers. Their results are checked against the historical projection,
+  retained alongside link observations and never applied to unsaved candidates.
+  Provider execution and its outcome are distinct from trust, freshness and
+  publication authorization; the host still owns those guarantees.
   Incremental item and composed collection checks also accept complete,
   source-bound observation inventories for each candidate; changed observations
   force reevaluation even for unchanged content ([PR #797](https://github.com/schiste/Aexeo/pull/797)).

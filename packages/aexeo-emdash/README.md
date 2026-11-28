@@ -278,7 +278,9 @@ No audit ID is returned for those failures; inspect host-side diagnostics before
 retrying. These outcomes do not identify the underlying failure cause. A stale or unknown status
 is not evidence of current content. Source paths refer only to the revision
 snapshot. Historical rendered HTML and SEO-panel fields are unavailable, and
-runtime evidence and external-gate providers are not invoked. The ordinary
+runtime evidence and current-content external-gate providers are not invoked.
+An explicitly configured revision extension provider can run for historical
+revisions as described below. The ordinary
 current-content link observer is not used for historical revisions. An optional
 revision-specific link observer is described below. Inspect each gate's
 `not_checked` status. These checks do not establish factual accuracy
@@ -288,6 +290,22 @@ older stored report is not permission to publish. These indicators do not
 independently enforce a publication gate or prevent a change after an audit.
 Reports contain editorial findings and require the same access controls and
 retention care as the source content.
+
+A host can explicitly supply `revisionExternalGates` as a runtime dependency
+of `createPlugin` to run custom extension gates for a historical revision or
+configured historical fragment. The callback receives `{ collection, id,
+revision, field?, locale, preset, input }`, where `input` is the exact projected
+content and can contain private information. It returns the usual
+`ExternalGateResult[]`, including the unchanged input and matching extension
+and parameters. Aexeo evaluates and checks the returned binding against the
+projection; a missing, invalid, mismatched or failed provider leaves the gate
+`not_checked`. The host owns authorization, privacy, timeouts, provider behavior
+and source freshness. `onExternalGateTelemetry` receives duration and status,
+without content or identifiers. The ordinary `externalGates` provider is not
+called, and the revision-specific provider is never called for an unsaved
+candidate. Invocation does not authorize publication or validate the provider's
+judgment. A report's `assurance.runtime_providers` identifies invocation,
+including combinations with explicitly installed locale or link observers.
 
 A trusted configured-mode host can separately opt in to link observations for
 revision audits by passing `revisionLinkObservations` as a runtime dependency
