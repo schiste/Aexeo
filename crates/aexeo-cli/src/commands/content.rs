@@ -989,8 +989,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             let evidence_sources_sha256 = input
                 .evidence_sources
                 .as_ref()
-                .map(|sources| super::feedback::metadata_hash(&serde_json::to_value(sources)?))
-                .transpose()?;
+                .map(super::feedback::evidence_sources_hash);
             output["input_format"] = serde_json::json!(
                 args.get_one::<String>("input-format")
                     .map(String::as_str)

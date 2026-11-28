@@ -12,28 +12,49 @@ use serde_json::{Map, Value, json};
 
 use crate::commands::common::required_arg;
 
-pub(super) fn metadata_hash(value: &Value) -> Result<String> {
-    let object = value
-        .as_object()
-        .context("metadata must be an object of string fields")?;
-    let mut fields: Vec<_> = object.iter().collect();
-    fields.sort_unstable_by(|a, b| a.0.cmp(b.0));
+fn hash_string_fields<'a>(fields: impl IntoIterator<Item = (&'a str, &'a str)>) -> String {
     let mut context = ring::digest::Context::new(&SHA256);
     for (key, value) in fields {
-        let value = value
-            .as_str()
-            .context("metadata must be an object of string fields")?;
         for field in [key.as_bytes(), value.as_bytes()] {
             context.update(&(field.len() as u64).to_be_bytes());
             context.update(field);
         }
     }
-    Ok(context
+    context
         .finish()
         .as_ref()
         .iter()
         .map(|b| format!("{b:02x}"))
-        .collect())
+        .collect()
+}
+
+pub(super) fn metadata_hash(value: &Value) -> Result<String> {
+    let object = value
+        .as_object()
+        .context("metadata must be an object of string fields")?;
+    let mut fields = object
+        .iter()
+        .map(|(key, value)| {
+            Ok((
+                key.as_str(),
+                value
+                    .as_str()
+                    .context("metadata must be an object of string fields")?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    fields.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    Ok(hash_string_fields(fields))
+}
+
+pub(super) fn evidence_sources_hash(
+    sources: &std::collections::BTreeMap<String, String>,
+) -> String {
+    hash_string_fields(
+        sources
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    )
 }
 
 pub(super) fn text_hash(text: &[u8]) -> String {
