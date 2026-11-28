@@ -41,6 +41,23 @@ class PortableComparison(unittest.TestCase):
         policy = {'gates': [{'kind': 'word_count', 'id': 'words', 'min': 2}]}
         verdict = {'checks': [{'id': 'gate:1:a:words', 'status': 'passed'}], 'findings': []}
         self.assertTrue(verify_host_candidate_projection(policy, verdict, after))
+        for metadata, observed, valid in (
+            ({'description': 'value'}, ['description'], True),
+            ({}, [], True),
+            ({'description': 'value'}, [], False),
+            ({}, ['description', 'description'], False),
+            ({'description': 3}, None, False),
+            (None, ['description'], False),
+        ):
+            projection = {'schema': 'aexeo.content-adapter/v1', 'text': 'one two',
+                          'metadata': metadata, 'observed_metadata_fields': observed}
+            candidate = dict(after[0], source=json.dumps(projection))
+            with self.subTest(metadata=metadata, observed=observed):
+                if valid:
+                    self.assertTrue(verify_host_candidate_projection(policy, verdict, [candidate]))
+                else:
+                    with self.assertRaises(VerificationError):
+                        verify_host_candidate_projection(policy, verdict, [candidate])
         forged = copy.deepcopy(verdict)
         forged['checks'][0]['status'] = 'failed'
         with self.assertRaises(VerificationError):

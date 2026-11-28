@@ -2169,9 +2169,12 @@ must independently verify the complete change inputs, including metadata, becaus
 the v1 verdict subject does not bind all decision inputs. The experimental v2 Rust verifier and independent Python comparator
 accept only a narrow host subset: the JSON object must contain exactly the
 schema and string text fields, optionally with ordered UTF-8 byte boundaries
-in `block_ends`, a string array of observed `headings`, and ordered,
-nonoverlapping `paragraphs` ranges using UTF-8 byte offsets. The preset must
-contain only word-count, character-count, paragraph-count, paragraph-length,
+in `block_ends`, a string array of observed `headings`, ordered,
+nonoverlapping `paragraphs` ranges using UTF-8 byte offsets, and valid
+`metadata` with optional `observed_metadata_fields`. These metadata fields
+are validated but are not assessed by this portable host profile. Native Aethyme
+interoperability for host projections containing metadata has not been established.
+The preset must contain only word-count, character-count, paragraph-count, paragraph-length,
 paragraph-character-length, required-headings, heading-length or
 heading-hierarchy gates. Optional heading levels must align
 with the observed headings and range from 1 to 6. Missing observations cannot
