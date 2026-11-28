@@ -170,6 +170,12 @@ class TestSyntaxAdapter(unittest.TestCase):
         results = review.evaluate({"text": text}, params, model)
         self.assertEqual(len(results[0]["diagnostics"]), 1)
         self.assertIn("matching observed markers", results[0]["diagnostics"][0]["message"])
+        for noun, word in zip(nouns, ("alpha", "beta", "gamma", "delta")):
+            noun.text = word
+        form_params = {**params, "noun_forms": "alpha,beta,gamma"}
+        self.assertEqual(review.evaluate({"text": text}, form_params, model)[0]["diagnostics"], [])
+        form_params["min_items"] = "3"
+        self.assertIn("matching configured forms", review.evaluate({"text": text}, form_params, model)[0]["diagnostics"][0]["message"])
         markers[-1].text = "a"
         self.assertEqual(review.evaluate({"text": text}, params, model)[0]["diagnostics"], [])
         self.assertEqual(len(review.evaluate({"text": text}, {**params, "min_items": "3"}, model)[0]["diagnostics"]), 1)
@@ -178,6 +184,31 @@ class TestSyntaxAdapter(unittest.TestCase):
         for invalid in ("", "det,,case", "det,det", "det, case"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 review.parameters({**params, "marker_labels": invalid})
+
+    def test_configured_noun_forms_filter_coordinated_heads(self):
+        params = {"analysis": "coordinated_nouns", "model": "en_core_web_sm",
+                  "model_version": "3.8.0", "language": "en", "min_sentences": "1",
+                  "max_tokens": "80", "coordination_labels": "conj", "min_items": "3",
+                  "noun_forms": "technologie,données,sécurité,conformité"}
+        text = "Technologie, données, sécurité et conformité."
+        sentence = Sentence(0, len(text), 0)
+        nouns = [Token(i, "NOUN", "ROOT" if i == 0 else "conj") for i in range(4)]
+        for token, word in zip(nouns, ("TECHNOLOGIE", "donne\u0301es", "sécurité", "conformité")):
+            token.text = word
+        for noun in nouns[1:]:
+            noun.head = nouns[0]
+            nouns[0].children.append(noun)
+        sentence[:] = nouns
+        model = Model([sentence])
+        result = review.evaluate({"text": text}, params, model)
+        self.assertIn("4 coordinated noun heads matching configured forms", result[0]["diagnostics"][0]["message"])
+        nouns[-1].text = "activité"
+        self.assertIn("3 coordinated noun heads", review.evaluate({"text": text}, params, model)[0]["diagnostics"][0]["message"])
+        self.assertEqual(review.evaluate({"text": text}, {**params, "min_items": "4"}, model)[0]["diagnostics"], [])
+        for invalid in ("", "one,,two", "One,one", "two words", "a" * 65,
+                        ",".join(str(i) for i in range(129))):
+            with self.subTest(forms=invalid), self.assertRaises(ValueError):
+                review.parameters({**params, "noun_forms": invalid})
 
     def test_ordered_subtree_distance(self):
         leaf = (("NOUN", "nsubj"), ())

@@ -38,8 +38,8 @@ def parameters(raw):
         raise ValueError("unsupported analysis")
     if "analysis" in raw:
         required.add("analysis")
-    if mode == "coordinated_nouns" and "marker_labels" in raw:
-        required.add("marker_labels")
+    if mode == "coordinated_nouns":
+        required.update(key for key in ("marker_labels", "noun_forms") if key in raw)
     if mode == "opening_pos" and "opening_tokens" in raw:
         required.add("opening_tokens")
     if set(raw) != required or not all(isinstance(v, str) and v for v in raw.values()):
@@ -67,6 +67,12 @@ def parameters(raw):
             raise ValueError("invalid coordinated noun parameters")
         if "marker_labels" in raw and not valid_labels(raw["marker_labels"].split(",")):
             raise ValueError("invalid noun marker labels")
+        if "noun_forms" in raw:
+            forms = raw["noun_forms"].split(",")
+            normalized = [unicodedata.normalize("NFC", form.casefold()) for form in forms]
+            if (len(forms) > 128 or len(set(normalized)) != len(forms)
+                    or any(not form or len(form) > 64 or any(c.isspace() or unicodedata.category(c).startswith("C") for c in form) for form in forms)):
+                raise ValueError("invalid noun forms")
     return threshold, minimum, max_tokens
 
 
@@ -217,9 +223,15 @@ def evaluate(input_data, raw_parameters, nlp):
         minimum_items = int(raw_parameters["min_items"])
         marker_labels = (set(raw_parameters["marker_labels"].split(","))
                          if "marker_labels" in raw_parameters else None)
+        noun_forms = ({unicodedata.normalize("NFC", form.casefold())
+                       for form in raw_parameters["noun_forms"].split(",")}
+                      if "noun_forms" in raw_parameters else None)
         for sentence, (start, _) in zip(sentences, bounds):
             sentence_ids = {token.i for token in sentence} if marker_labels is not None else None
             for group in coordinated_noun_groups(sentence, labels):
+                if noun_forms is not None:
+                    group = [noun for noun in group
+                             if unicodedata.normalize("NFC", noun.text.casefold()) in noun_forms]
                 counts = shared_marker_counts(group, marker_labels, sentence_ids) if marker_labels is not None else [len(group)]
                 for count in counts:
                     if count < minimum_items:
@@ -227,6 +239,8 @@ def evaluate(input_data, raw_parameters, nlp):
                     prefix = text[:start]
                     description = ("coordinated noun heads with matching observed markers"
                                    if marker_labels is not None else "coordinated noun heads")
+                    if noun_forms is not None:
+                        description += " matching configured forms"
                     findings.append({"message": f"The parser found {count} {description}; review the list in context.",
                                      "line": prefix.count("\n") + 1,
                                      "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
