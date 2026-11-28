@@ -89,6 +89,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   To check build provenance, rebuild the same Git tree in a second worktree
   with a clean output directory and compare archive hashes. A match on one
   machine with shared tooling or caches is not independent attestation.
+- When preparing an installed-package smoke test, stop on any script-generation
+  or copy failure, verify the intended script is nonempty, and assert a known
+  success marker. A shell can otherwise run an empty script successfully after
+  a failed command, giving a false positive for the packaged artifact.
+
 - When verifying a downloaded CI artifact, check whether the download flattened
   paths referenced by its checksum file. Compare the recorded digest with the
   actual corresponding file; a missing-file error is not a successful check.
