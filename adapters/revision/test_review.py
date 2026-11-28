@@ -24,6 +24,29 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(len(result["diagnostics"]), 1)
         self.assertIn("Observed 1", result["diagnostics"][0]["message"])
 
+    def test_unicode_caseless_is_opt_in_and_preserves_bound_input(self):
+        config = {"source": "prior", "pairs": json.dumps([{"before": "Difficultés", "after": "Équipe"}]), "minimum": "1", "matching": "unicode_caseless"}
+        data = {"text": "Une e\u0301quipe agit.", "evidence_sources": {"prior": "Les DIFFICULTE\u0301S persistent."}}
+        result = review.evaluate(data, config)[0]
+        self.assertEqual(result["diagnostics"], [])
+        self.assertEqual(result["input"], data)
+        self.assertEqual(result["parameters"], config)
+        data["text"] += " Les difficultés restent."
+        self.assertEqual(len(review.evaluate(data, config)[0]["diagnostics"]), 1)
+        exact = {key: value for key, value in config.items() if key != "matching"}
+        self.assertEqual(len(review.evaluate(data, exact)[0]["diagnostics"]), 1)
+
+    def test_unicode_caseless_rejects_colliding_pairs(self):
+        for pairs in (
+            [{"before": "Équipe", "after": "e\u0301QUIPE"}],
+            [{"before": "Équipe", "after": "premier"}, {"before": "e\u0301quipe", "after": "second"}],
+            [{"before": "first", "after": "Straße"}, {"before": "second", "after": "STRASSE"}],
+        ):
+            with self.subTest(pairs=pairs), self.assertRaises(ValueError):
+                review.parameters({"source": "prior", "pairs": json.dumps(pairs), "minimum": "1", "matching": "unicode_caseless"})
+        with self.assertRaises(ValueError):
+            review.parameters({**self.config, "matching": "language_guess"})
+
     def test_missing_prior_and_oversized_inputs_are_unavailable(self):
         with self.assertRaises(review.Unavailable):
             review.evaluate({"text": "draft"}, self.config)

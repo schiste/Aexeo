@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import sys
+import unicodedata
 
 EXTENSION = "revision.literal_pairs"
 MAX_INPUT_BYTES = 32 * 1024 * 1024
@@ -15,9 +16,18 @@ class Unavailable(Exception):
     """A complete comparison cannot be made from the supplied snapshots."""
 
 
+def normalize(text):
+    """Apply language-independent Unicode caseless matching and NFC."""
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", text).casefold())
+
+
 def parameters(raw):
-    if not isinstance(raw, dict) or set(raw) != {"source", "pairs", "minimum"} or not all(isinstance(value, str) and value for value in raw.values()):
+    required = {"source", "pairs", "minimum"}
+    if not isinstance(raw, dict) or not required <= set(raw) or set(raw) - required - {"matching"} or not all(isinstance(value, str) and value for value in raw.values()):
         raise ValueError("expected source, pairs and minimum string parameters")
+    matching = raw.get("matching", "exact")
+    if matching not in ("exact", "unicode_caseless"):
+        raise ValueError("unknown matching mode")
     try:
         pairs = strict_json(raw["pairs"])
         minimum = int(raw["minimum"])
@@ -32,6 +42,8 @@ def parameters(raw):
         before, after = pair["before"], pair["after"]
         if not all(isinstance(term, str) and 1 <= len(term) <= 200 and term.strip() == term for term in (before, after)):
             raise ValueError("pair terms must be bounded nonempty strings without surrounding whitespace")
+        if matching == "unicode_caseless":
+            before, after = normalize(before), normalize(after)
         if before == after or before in before_seen or after in after_seen:
             raise ValueError("pair terms must differ and be unique on each side")
         before_seen.add(before)
@@ -49,6 +61,9 @@ def evaluate(input_data, config):
     before, after = sources[config["source"]], input_data["text"]
     if any(len(text.encode("utf-8")) > MAX_TEXT_BYTES for text in (before, after)):
         raise Unavailable("draft exceeds comparison limit")
+    if config.get("matching", "exact") == "unicode_caseless":
+        before, after = normalize(before), normalize(after)
+        pairs = [{"before": normalize(pair["before"]), "after": normalize(pair["after"])} for pair in pairs]
     count = sum(pair["before"] in before and pair["before"] not in after and pair["after"] in after for pair in pairs)
     diagnostics = []
     if count < minimum:
