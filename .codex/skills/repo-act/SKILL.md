@@ -284,6 +284,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   before the asynchronous hook’s five-second budget under load; use a bounded
   wait and keep assertions on the actual result. A longer test wait does not
   prevent or excuse a real production hook timeout.
+- For non-transactional review writes, test failures before and after each
+  storage mutation, including a write that persists before its call throws.
+  Check history and current state separately; a failed call does not prove that
+  nothing was written. Test that clients receive an unconfirmed outcome and
+  that diagnostics and telemetry omit private content and sensitive identifiers.
 - EmDash Vitest runs in the plugin test host, whose filesystem is sandboxed;
   checks that must read repository files should run as a separate Node script
   outside the host. Test paths containing spaces as well as CI paths.
