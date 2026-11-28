@@ -35,6 +35,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   commands run by the broker and may be unset in the interactive shell. Check that
   a variable is nonempty before using it as an output directory, and quote paths
   with spaces.
+- If `sccache` fails with `path must be shorter than SUN_LEN` when session
+  scratch sets a long `TMPDIR`, rerun the affected Cargo command with
+  `RUSTC_WRAPPER=''` while keeping the session scratch paths. This disables
+  the wrapper for that command only; verify the command completes.
 - Python discovery and interop tests can invoke Cargo in subprocesses. Inspect
   the selected tests and pass absolute `TMPDIR` and `CARGO_TARGET_DIR` in the
   parent environment, even when the command itself is Python. Run a single
