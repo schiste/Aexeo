@@ -96,6 +96,21 @@ Implied or shared markers, postpositions, affixes and parse errors may be missed
 A match does not establish abstract meaning, excessive parallelism or poor style;
 absence of a match does not establish their absence. Review the passage in context.
 
+## Optional configured noun forms
+
+For `coordinated_nouns`, an optional `noun_forms` string restricts the
+count to exact surface forms from a comma-separated host-provided list. Matching
+uses Unicode NFC normalization and case folding; it does not lemmatize or infer
+meaning. Supply the same string in the preset and the parameters JSON. For
+example, `noun_forms = "technologie,données,sécurité,conformité"` counts only
+those model-labelled heads, including within a group with other nouns. Combine
+it with `marker_labels` to count only matching forms sharing the same observed
+markers. Entries are single non-whitespace forms, at most 64 characters each,
+with at most 128 distinct normalized forms. Inflections must be configured
+explicitly. Locale, list completeness and suitability remain the host's
+responsibility. The list is not a classifier for abstract nouns, and a clean
+result does not prove abstract nouns are absent or the passage needs no review.
+
 ## Batch several observations
 
 The parameters JSON may also contain an array of 1–16 distinct parameter maps.

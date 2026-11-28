@@ -41,6 +41,10 @@ Verification: variance and opening rules passed their individual full CI and Aet
 - [x] Compose the existing French structural, opening POS, clause-pattern and
   literal revision checks in an opt-in example with exact adapter parameters.
   Its reported observations are advisory and inputs remain explicitly supplied.
+- [x] Allow coordinated-noun observations to use explicit locale-specific
+  surface-form lists, optionally combined with shared marker checks. Matching is
+  bounded, case-folded and NFC-normalized; it does not classify abstract meaning
+  or cover unlisted inflections.
 - [ ] Establish and test configurable locale-aware observation contracts for
   abstract-noun patterns, parallel grammatical forms, register, idiom and
   semantic equivalence. Until available, these are not checked, even if literal
