@@ -1030,11 +1030,20 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertEqual(rejected.returncode, 2, rejected.stderr)
 
     def test_host_gates_with_real_cli_and_independent_comparator(self):
+        self._check_host_gates_with_real_cli_and_independent_comparator(with_metadata=False)
+
+    def test_host_gates_with_metadata_and_real_cli(self):
+        self._check_host_gates_with_real_cli_and_independent_comparator(with_metadata=True)
+
+    def _check_host_gates_with_real_cli_and_independent_comparator(self, *, with_metadata):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
-        source = json.dumps({'schema': 'aexeo.content-adapter/v1', 'text': 'é x',
-                             'paragraphs': [{'start': 0, 'end': 2}, {'start': 3, 'end': 4}],
-                             'headings': ['Titre'], 'heading_levels': [1]},
-                            ensure_ascii=False, separators=(',', ':'))
+        projection = {'schema': 'aexeo.content-adapter/v1', 'text': 'é x',
+                      'paragraphs': [{'start': 0, 'end': 2}, {'start': 3, 'end': 4}],
+                      'headings': ['Titre'], 'heading_levels': [1]}
+        if with_metadata:
+            projection.update(metadata={'title': 'Example'},
+                              observed_metadata_fields=['title', 'description'])
+        source = json.dumps(projection, ensure_ascii=False, separators=(',', ':'))
         digest = hashlib.sha256(source.encode()).hexdigest()
         media = 'application/vnd.aexeo.content-adapter+json'
         change = json.loads(fixture['artifacts']['change'])

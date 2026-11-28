@@ -2172,8 +2172,12 @@ schema and string text fields, optionally with ordered UTF-8 byte boundaries
 in `block_ends`, a string array of observed `headings`, ordered,
 nonoverlapping `paragraphs` ranges using UTF-8 byte offsets, and valid
 `metadata` with optional `observed_metadata_fields`. These metadata fields
-are validated but are not assessed by this portable host profile. Native Aethyme
-interoperability for host projections containing metadata has not been established.
+are validated but are not assessed by this portable host profile. An end-to-end
+test passed with an Aexeo CLI from commit `baa69f95` and an Aethyme CLI from
+commit `b58e7bff` ([Aethyme #2071](https://github.com/schiste/Aethyme/pull/2071)),
+including rejection of modified candidate bytes. The Aethyme fix is merged at
+`dace2e75`; check the deployed Aethyme version before relying on this support.
+This does not establish host provenance, freshness or publication authorization.
 The preset must contain only word-count, character-count, paragraph-count, paragraph-length,
 paragraph-character-length, required-headings, heading-length or
 heading-hierarchy gates. Optional heading levels must align
