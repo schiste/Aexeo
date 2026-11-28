@@ -138,6 +138,13 @@ def evaluate(input_data, raw_parameters, nlp):
     bounds = [sentence_bounds(text, sentence) for sentence in sentences]
     if any(bounds[i - 1][1] > bounds[i][0] for i in range(1, len(bounds))):
         raise Unavailable("overlapping sentence offsets")
+    # A parser must account for every non-whitespace character. Otherwise an
+    # apparently clean result could silently omit part of the supplied text.
+    gaps = [(0, bounds[0][0]), *[(bounds[i - 1][1], bounds[i][0])
+                                for i in range(1, len(bounds))],
+            (bounds[-1][1], len(text))]
+    if any(text[start:end].strip() for start, end in gaps):
+        raise Unavailable("sentence spans omit projected text")
     findings = []
     mode = raw_parameters.get("analysis", "similarity")
     opening_pos = []
