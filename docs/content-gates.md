@@ -2231,7 +2231,9 @@ mapped; separate `source_mapping_unavailable_items` and
 `source_mapping_unavailable_proposals` counters distinguish those cases.
 
 For host adapter JSON, an item with a valid native map additionally has
-`native_coverage` in its source-mapping item. Its locations carry
+`native_status = "available"` and `native_coverage` in its source-mapping
+item; an omitted or invalid native map reports `native_status = "unavailable"`.
+Its locations carry
 `host_supplied_native_path`, the host path and a zero-based UTF-16 offset;
 they are not line and column positions in the JSON. Accordingly the ordinary
 source mapping can remain unavailable even when native coverage is available.

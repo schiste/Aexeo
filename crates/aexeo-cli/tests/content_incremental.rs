@@ -1719,6 +1719,7 @@ fn incremental_native_locations_are_partial_utf16_and_do_not_claim_file_position
         for id in ["a", "b"] {
             let item = &row["source_mapping"]["items"][id];
             assert_eq!(item["status"], "unavailable");
+            assert_eq!(item["native_status"], "available");
             let coverage = &item["native_coverage"];
             assert_eq!(
                 (
@@ -1741,6 +1742,36 @@ fn incremental_native_locations_are_partial_utf16_and_do_not_claim_file_position
     assert_eq!(telemetry["native_source_mapping_mapped"], 4);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("body"));
     assert!(lines(&run(&input, &[]))[0].get("source_mapping").is_none());
+}
+
+#[test]
+fn incremental_native_locations_report_unavailable_when_map_is_missing() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("terms");
+    input["preset_sources"] = json!({"terms":"version=1\nname='terms'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['abc']\nblocking=false\n"});
+    let source = r#"{"schema":"aexeo.content-adapter/v1","text":"abc"}"#;
+    let digest = "f2b62f3db65bb778f8a2afd2afa67ae8c55efd67e4629cb9e05852368d9d6ac8";
+    let media = aexeo_core::content_adapter::MEDIA_TYPE;
+    let update = |item: &mut Value| {
+        item["media_type"] = json!(media);
+        item["source"] = json!(source);
+        item["sha256"] = json!(digest);
+    };
+    update(&mut input["snapshot"]["items"][0]);
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        update(&mut proposal["after"][0]);
+        proposal["change"]["entries"][0]["media_type"] = json!(media);
+        proposal["change"]["entries"][0]["after"] = json!({"inline":source,"sha256":digest});
+    }
+    let output = run(&input, &["--source-locations", "--telemetry"]);
+    assert_eq!(output.status.code(), Some(0));
+    let rows = lines(&output);
+    let item = &rows[0]["source_mapping"]["items"]["a"];
+    assert_eq!(item["native_status"], "unavailable");
+    assert!(item.get("native_coverage").is_none());
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["native_source_mapping_unavailable"], 4);
 }
 
 #[test]

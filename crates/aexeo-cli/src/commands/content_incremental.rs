@@ -983,10 +983,16 @@ pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
                                     Some(coverage) => {
                                         native_mapping_eligible += coverage.eligible;
                                         native_mapping_mapped += coverage.mapped;
+                                        item_mapping["native_status"] =
+                                            serde_json::json!("available");
                                         item_mapping["native_coverage"] =
                                             serde_json::to_value(coverage)?;
                                     }
-                                    None => native_mapping_unavailable += 1,
+                                    None => {
+                                        native_mapping_unavailable += 1;
+                                        item_mapping["native_status"] =
+                                            serde_json::json!("unavailable");
+                                    }
                                 }
                             }
                             mapping.insert(item.entity_id.clone(), item_mapping);
