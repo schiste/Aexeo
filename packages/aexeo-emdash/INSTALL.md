@@ -807,8 +807,7 @@ receives only a status and duration. `locale_status` compares the selected local
 to the latest current record and does not prove historical correctness.
 
 If a historical revision has missing or malformed data instead of an object,
-the revision audit returns `not_checked` with reason `revision_data_invalid`. A failed initial CMS read returns `not_checked` with reason `revision_read_failed`, without exposing the host error. If a later current-record read fails, an evaluated report remains available but revision and locale status are `unknown` until a subsequent read succeeds.
-It does not evaluate or store a report for that revision.
+the revision audit returns `not_checked` with reason `revision_data_invalid`. A failed initial CMS read returns `not_checked` with reason `revision_read_failed`, without exposing the host error. Neither case evaluates or stores a report. A projection failure reports `revision_projection_failed`; an unavailable audit identifier reports `revision_audit_id_unavailable`; a candidate digest failure reports `candidate_digest_unavailable`. These bounded reasons identify the stage, not the underlying cause. If a later current-record read fails, an evaluated report remains available but revision and locale status are `unknown` until a subsequent read succeeds.
 
 ### Audit an exact CMS revision over MCP
 

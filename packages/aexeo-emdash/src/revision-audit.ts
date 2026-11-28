@@ -72,7 +72,12 @@ export async function auditCandidate(ctx: RevisionContext, input: CandidateAudit
     return { status: "not_checked", reason: "candidate_invalid" } as const;
   }
   if (encoded.byteLength > MAX_CANDIDATE_BYTES) return { status: "not_checked", reason: "candidate_too_large" } as const;
-  const hash = await crypto.subtle.digest("SHA-256", encoded);
+  let hash: ArrayBuffer;
+  try {
+    hash = await crypto.subtle.digest("SHA-256", encoded);
+  } catch {
+    return { status: "not_checked", reason: "candidate_digest_unavailable" } as const;
+  }
   const digest = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
   return auditRevisionInternal(ctx, input, options, { value, digest });
 }
@@ -135,11 +140,17 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
   // A revision stores field data, not the historical SEO panel or rendered HTML.
   const item: EmdashContentItem = { id, type: collection, slug: null, status: "draft", locale: localeAtAudit,
     data: candidate === undefined ? snapshot.data : { ...snapshot.data, [field!]: candidate.value } };
-  const adapted = adaptContentItem(item, { route: `/revision/${encodeURIComponent(id)}`, blockMappings: options.blockMappings,
-    ...(contentFields === undefined ? {} : { contentFields }),
-    ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }),
-    ...(options.titleFieldsByCollection?.[collection] === undefined ? {} : { titleFields: options.titleFieldsByCollection[collection] }),
-    ...(options.metadataFieldsByCollection?.[collection] === undefined ? {} : { metadataFields: options.metadataFieldsByCollection[collection] }) });
+  let adapted: ReturnType<typeof adaptContentItem>;
+  try {
+    adapted = adaptContentItem(item, { route: `/revision/${encodeURIComponent(id)}`, blockMappings: options.blockMappings,
+      ...(contentFields === undefined ? {} : { contentFields }),
+      ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }),
+      ...(options.titleFieldsByCollection?.[collection] === undefined ? {} : { titleFields: options.titleFieldsByCollection[collection] }),
+      ...(options.metadataFieldsByCollection?.[collection] === undefined ? {} : { metadataFields: options.metadataFieldsByCollection[collection] }) });
+  } catch {
+    // Projection errors can include host content; expose only the failed stage.
+    return { status: "not_checked", reason: "revision_projection_failed", revision } as const;
+  }
   const listStructureAttested = field === undefined
     ? collectionListStructureAttested(options.preset?.revisionListStructureCompleteByCollection, collection)
     : fragmentListStructureAttested(options.preset?.revisionFragmentListStructureCompleteByCollection, collection, field);
@@ -185,7 +196,12 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
     if (reason) report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "link_reachability" && gate.status === "not_checked" ? { ...gate, reason } : gate) };
   }
   const latest = await currentOrUnknown(ctx, collection, id);
-  const auditId = crypto.randomUUID();
+  let auditId: string;
+  try {
+    auditId = crypto.randomUUID();
+  } catch {
+    return { status: "not_checked", reason: "revision_audit_id_unavailable", revision } as const;
+  }
   const localeProviderInvoked = options.revisionLocale !== undefined;
   const runtimeProviders = localeProviderInvoked
     ? revisionObserverInvoked ? "revision_locale_and_link_observer_invoked" as const : "revision_locale_provider_invoked" as const

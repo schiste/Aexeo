@@ -256,6 +256,9 @@ stores a report in plugin KV; the second retrieves it and checks whether the
 revision is still the current draft or publication. Evaluation and report-storage
 failures return `not_checked` with `revision_evaluation_failed` or
 `revision_audit_storage_failed` respectively, without exposing exception details.
+Projection and audit-ID failures similarly report `revision_projection_failed` or
+`revision_audit_id_unavailable`; a candidate digest failure reports
+`candidate_digest_unavailable`. These identify a stage, not its root cause.
 No audit ID is returned for those failures; inspect host-side diagnostics before
 retrying. These outcomes do not identify the underlying failure cause. A stale or unknown status
 is not evidence of current content. Source paths refer only to the revision
