@@ -56,6 +56,9 @@ pub struct LinkEvidence {
     /// and sorted. Other tokens, such as `noopener`, do not qualify a link.
     #[serde(default)]
     pub rel: Vec<String>,
+    /// Whether rel attributes were observed. Absent in older evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rel_observed: Option<bool>,
     /// Optional one-based coordinates in the supplied HTML, not the CMS source.
     pub line: Option<usize>,
     pub column: Option<usize>,
@@ -523,6 +526,7 @@ fn extract_from_dom(
                     hidden_inline_style: Some(scope.hidden_inline_style),
                     collapsed_details: Some(scope.collapsed_details),
                     rel: crawl_rel_tokens(attribute(&node, "rel")),
+                    rel_observed: Some(true),
                     line: position.map(|(line, _)| line),
                     column: position.map(|(_, column)| column),
                     resolution,

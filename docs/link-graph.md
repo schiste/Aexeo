@@ -112,8 +112,14 @@ Each link's evidence has a `rel` list with its `nofollow`, `ugc` and `sponsored`
 tokens. Destinations and pages report `followed_source_pages`, the sources with
 at least one link free of those tokens, and `source_pages_by_rel`, the sources
 per token. A page with `distinct_source_pages` above zero and
-`followed_source_pages` at zero is linked only through qualified links. A
-page-level `nofollow` robots directive does not change these counts.
+`followed_source_pages` at zero has only observed qualified links when
+`rel_coverage_complete` is `true`. The counts are lower bounds when that field
+is `false`; an absent field in an older report means coverage is unknown, not
+complete. Link evidence includes `rel_observed`; when absent or false, its
+empty or missing `rel` list does not establish an unqualified link. Regenerate
+older reports for full `rel` coverage. The opt-in telemetry includes the
+aggregate `rel_unobserved_link_count`. A page-level `nofollow` robots directive
+does not change these counts.
 
 A page whose `requested_url` differs reports it as `redirected_from`, with the
 other pages linking to it as `redirected_source_pages`, and raises

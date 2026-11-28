@@ -209,9 +209,19 @@ fn hidden_link_evidence_and_private_telemetry_are_reported() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let destination = &report["links"]["destinations"][0];
     assert_eq!(destination["evidence"][0]["hidden_attribute"], true);
+    assert_eq!(destination["evidence"][0]["rel_observed"], true);
+    assert_eq!(destination["rel_coverage_complete"], true);
+    let target = report["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| page["url"] == "https://example.org/b")
+        .unwrap();
+    assert_eq!(target["rel_coverage_complete"], true);
     assert_eq!(destination["conditional_source_pages"], 1);
     assert_eq!(destination["nonconditional_source_pages"], 0);
     let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(event["rel_unobserved_link_count"], 0);
     assert_eq!(event["hidden_attribute_link_count"], 1);
     assert_eq!(event["hidden_attribute_unobserved_link_count"], 0);
     assert_eq!(event["hidden_inline_style_link_count"], 1);

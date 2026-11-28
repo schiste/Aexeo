@@ -76,11 +76,15 @@ pub struct ObservedPageLinks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_only_inbound: Option<bool>,
     /// Sources with a link free of `nofollow`, `ugc` and `sponsored`. Zero while
-    /// `distinct_source_pages` is positive means every observed link is qualified.
+    /// `distinct_source_pages` is positive is conclusive only when
+    /// `rel_coverage_complete` is true.
     #[serde(default)]
     pub followed_source_pages: usize,
     #[serde(default)]
     pub source_pages_by_rel: std::collections::BTreeMap<String, usize>,
+    /// Whether every observed inbound link has an observed rel attribute state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rel_coverage_complete: Option<bool>,
     /// Observed destinations that differ from this page's URL only by a trailing
     /// slash, percent-encoding spelling or an empty query. They are not counted
     /// above: the URLs are not proven equivalent.
@@ -1685,6 +1689,10 @@ fn build_link_report_with(
                 source_pages_by_rel: inbound
                     .map(|destination| destination.source_pages_by_rel.clone())
                     .unwrap_or_default(),
+                rel_coverage_complete: Some(
+                    inbound
+                        .is_none_or(|destination| destination.rel_coverage_complete == Some(true)),
+                ),
                 near_variant_destinations: near_variant_key(&page.url)
                     .and_then(|key| near_variants.get(&key).cloned())
                     .unwrap_or_default(),

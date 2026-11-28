@@ -19,12 +19,17 @@ pub struct DestinationLinks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonconditional_source_pages: Option<usize>,
     /// Source pages with at least one link carrying no `nofollow`, `ugc` or
-    /// `sponsored` token. Zero with sources present means every link is qualified.
+    /// `sponsored` token. A zero with sources present is conclusive only when
+    /// `rel_coverage_complete` is true.
     #[serde(default)]
     pub followed_source_pages: usize,
     /// Source pages with at least one link carrying each `rel` token.
     #[serde(default)]
     pub source_pages_by_rel: BTreeMap<String, usize>,
+    /// True only when every incoming link has an observed rel attribute state.
+    /// Absent on older reports; false means rel counts are incomplete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rel_coverage_complete: Option<bool>,
     /// Individual observations retain anchor, source, component and locale.
     pub evidence: Vec<LinkEvidence>,
 }
@@ -46,6 +51,7 @@ struct Accumulator {
     contexts: BTreeMap<LinkContext, BTreeSet<Rc<str>>>,
     followed: BTreeSet<Rc<str>>,
     rel: BTreeMap<String, BTreeSet<Rc<str>>>,
+    rel_unobserved: bool,
     evidence: Vec<LinkEvidence>,
 }
 
@@ -94,15 +100,19 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
                     .entry(link.context)
                     .or_default()
                     .insert(Rc::clone(&source));
-                if link.rel.is_empty() {
-                    destination.followed.insert(Rc::clone(&source));
-                }
-                for token in &link.rel {
-                    destination
-                        .rel
-                        .entry(token.clone())
-                        .or_default()
-                        .insert(Rc::clone(&source));
+                if link.rel_observed == Some(true) {
+                    if link.rel.is_empty() {
+                        destination.followed.insert(Rc::clone(&source));
+                    }
+                    for token in &link.rel {
+                        destination
+                            .rel
+                            .entry(token.clone())
+                            .or_default()
+                            .insert(Rc::clone(&source));
+                    }
+                } else {
+                    destination.rel_unobserved = true;
                 }
                 destination.evidence.push(link);
             }
@@ -126,6 +136,7 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
                     .map(|(context, sources)| (context, sources.len()))
                     .collect(),
                 followed_source_pages: accumulator.followed.len(),
+                rel_coverage_complete: Some(!accumulator.rel_unobserved),
                 source_pages_by_rel: accumulator
                     .rel
                     .into_iter()
@@ -321,6 +332,46 @@ mod tests {
     }
 
     #[test]
+    fn historical_unobserved_rel_is_never_counted_as_followed() {
+        let source = "https://example.org/source";
+        let current = extract_links(
+            "<main><a href='/target'>link</a></main>",
+            source,
+            "https://example.org",
+            None,
+        );
+        assert_eq!(current[0].rel_observed, Some(true));
+        let mut old = serde_json::to_value(&current[0]).unwrap();
+        old.as_object_mut().unwrap().remove("rel_observed");
+        old.as_object_mut().unwrap().remove("rel");
+        let old: LinkEvidence = serde_json::from_value(old).unwrap();
+        let unknown = count_links(vec![old.clone()]);
+        assert_eq!(unknown.destinations[0].distinct_source_pages, 1);
+        assert_eq!(unknown.destinations[0].followed_source_pages, 0);
+        assert_eq!(unknown.destinations[0].rel_coverage_complete, Some(false));
+        let mixed = count_links(vec![old.clone(), current[0].clone()]);
+        assert_eq!(mixed.destinations[0].followed_source_pages, 1);
+        assert_eq!(mixed.destinations[0].rel_coverage_complete, Some(false));
+        let index =
+            IncrementalLinkCounts::new(BTreeMap::from([(source.into(), vec![old])])).unwrap();
+        let candidate = index
+            .evaluate(&BTreeMap::from([(source.into(), Some(current))]))
+            .unwrap();
+        let target = candidate.destinations["https://example.org/target"]
+            .as_ref()
+            .unwrap();
+        assert_eq!(target.followed_source_pages, 1);
+        assert_eq!(target.rel_coverage_complete, Some(true));
+        let mut old_report = serde_json::to_value(target).unwrap();
+        old_report
+            .as_object_mut()
+            .unwrap()
+            .remove("rel_coverage_complete");
+        let old_report: DestinationLinks = serde_json::from_value(old_report).unwrap();
+        assert_eq!(old_report.rel_coverage_complete, None);
+    }
+
+    #[test]
     fn repeated_sources_keep_distinct_counts_across_rel_and_contexts() {
         let mut links = extract_links(
             "<nav><a href='/target' rel='nofollow'>menu</a></nav><main><a href='/target'>one</a><a href='/target' rel='nofollow ugc'>two</a><a href='/other'>other</a></main>",
@@ -351,6 +402,7 @@ mod tests {
         assert_eq!(target.source_pages_by_context[&LinkContext::Body], 2);
         assert_eq!(target.source_pages_by_context[&LinkContext::Navigation], 1);
         assert_eq!(target.followed_source_pages, 1);
+        assert_eq!(target.rel_coverage_complete, Some(true));
         assert_eq!(target.source_pages_by_rel["nofollow"], 1);
         assert_eq!(target.source_pages_by_rel["ugc"], 2);
         assert_eq!(target.evidence.len(), 5);
