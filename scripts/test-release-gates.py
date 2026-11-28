@@ -131,7 +131,7 @@ class SyntaxReleaseTests(unittest.TestCase):
                 self.assertEqual(set(bundle.getnames()), {
                     "LICENSE", "adapters/revision/README.md", "adapters/revision/example.toml",
                     "adapters/revision/example-parameters.json", "adapters/revision/example-fr.toml",
-                    "adapters/revision/example-fr-parameters.json", "adapters/revision/review.py",
+                    "adapters/revision/example-fr-parameters.json", "adapters/revision/combined-writing-review-fr.toml", "adapters/revision/review.py",
                     "adapters/revision/test_review.py",
                 })
                 for member in bundle.getmembers():
@@ -142,6 +142,20 @@ class SyntaxReleaseTests(unittest.TestCase):
             result = subprocess.run([sys.executable, "-S", "-m", "unittest", "discover", "-s", str(root / "adapters/revision"), "-v"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertRegex(result.stderr, r"Ran [1-9][0-9]* tests?")
+
+    def test_composed_french_example_matches_adapter_parameters(self):
+        root = ROOT / "adapters/revision"
+        preset = tomllib.loads((root / "combined-writing-review-fr.toml").read_text(encoding="utf-8"))
+        self.assertEqual(preset["extends"], ["writing-review-fr"])
+        expected = {
+            "revision.literal_pairs": root / "example-fr-parameters.json",
+            "syntax.opening_pos": root.parent / "syntax/opening-pos-parameters-fr.json",
+            "syntax.clause_alternation": root.parent / "syntax/clause-alternation-parameters-fr.json",
+        }
+        self.assertEqual({gate["extension"] for gate in preset["gates"]}, set(expected))
+        for gate in preset["gates"]:
+            self.assertFalse(gate["blocking"])
+            self.assertEqual(gate["parameters"], json.loads(expected[gate["extension"]].read_text(encoding="utf-8")))
 
     def test_release_workflow_includes_archive_in_checksum_manifest(self):
         workflow = WORKFLOWS[1].read_text()

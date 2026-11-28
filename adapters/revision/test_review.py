@@ -39,20 +39,6 @@ class ReviewTests(unittest.TestCase):
             self.assertEqual(preset["gates"][0]["parameters"], params)
             review.parameters(params)
 
-    def test_composed_french_example_matches_adapter_parameters(self):
-        root = Path(review.__file__).parent
-        preset = tomllib.loads((root / "combined-writing-review-fr.toml").read_text(encoding="utf-8"))
-        self.assertEqual(preset["extends"], ["writing-review-fr"])
-        expected = {
-            "revision.literal_pairs": root / "example-fr-parameters.json",
-            "syntax.opening_pos": root.parent / "syntax/opening-pos-parameters-fr.json",
-            "syntax.clause_alternation": root.parent / "syntax/clause-alternation-parameters-fr.json",
-        }
-        self.assertEqual({gate["extension"] for gate in preset["gates"]}, set(expected))
-        for gate in preset["gates"]:
-            self.assertFalse(gate["blocking"])
-            self.assertEqual(gate["parameters"], json.loads(expected[gate["extension"]].read_text(encoding="utf-8")))
-
     def test_cli_requires_explicit_coverage_attestation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

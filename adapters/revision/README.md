@@ -17,7 +17,8 @@ Supply `--drafts-complete` only after independently establishing coverage of bot
 
 `combined-writing-review-fr.toml` combines the built-in `writing-review-fr`
 profile with the French literal revision, opening POS and clause alternation
-examples. It is an opt-in illustration, not a universal French standard. The
+examples. The standalone revision archive does not contain the syntax adapter;
+obtain its separate release archive before following this combined workflow. It is an opt-in illustration, not a universal French standard. The
 underlying checks are advisory and report unavailable observations separately;
 installing a preset does not run the Python adapters. Select and pin an
 appropriate locally installed model and set identical parameters in the preset
