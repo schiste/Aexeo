@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import clef
 import json_input
+import review
 
 
 class StrictJsonTests(unittest.TestCase):
@@ -44,6 +45,11 @@ class StrictJsonTests(unittest.TestCase):
             opener.return_value.open.return_value = io.BytesIO(body)
             with self.assertRaises(ValueError):
                 clef.fetch_review("claim", "source", clef.MODEL, "uncertain", 0.8, "")
+        jev_body = body.replace(b"llm-clef-flash", b"jev-test")
+        with patch("urllib.request.build_opener") as opener:
+            opener.return_value.open.return_value = io.BytesIO(jev_body)
+            with self.assertRaises(ValueError):
+                review.fetch_review("claim", "source", "jev-test", "uncertain", 0.8, "key")
 
 
 if __name__ == "__main__":
