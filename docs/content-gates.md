@@ -414,6 +414,46 @@ term = "example"
 
 A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensions`, providing diagnostics in projected-text coordinates. The engine supplies each finding's rule ID and severity from the preset. Returning `None`, or running in an adapter that has no extension host, reports `not_checked`. Extension code executes in the host process and must be trusted; the preset is data and cannot execute a program by itself. CLI and direct EmDash callers may supply external results explicitly; configured EmDash hosts can install a runtime provider as described in the [installation guide](../packages/aexeo-emdash/INSTALL.md). The sandbox worker can call an explicitly configured [service binding](../packages/aexeo-crawl-worker/README.md). Built-in gates remain portable across these adapters.
 
+### Optional linguistic observation contract
+
+`linguistic-observations` is an opt-in, advisory starter with separate custom
+extensions `linguistic.register`, `linguistic.idiom`, and
+`linguistic.reference_fidelity`. It executes no evaluator. Without an explicitly
+installed provider, all three gates are `not_checked`. Compose it with a writing
+profile only when you want those separate coverage results; the default writing
+profiles are unchanged.
+
+The locale `und`, register `unspecified`, and reference name `original` are
+placeholders, not language support or editorial defaults. Inherit the starter and
+replace each complete gate by ID to specify a supported locale, the intended
+register, and the name of the host-supplied reference in `evidence_sources`.
+For example, a French standard-B2B host could override the register gate:
+
+```toml
+version = 1
+name = "French linguistic review"
+extends = ["writing-review-fr", "linguistic-observations"]
+
+[[gates]]
+id = "linguistic.register"
+kind = "custom"
+extension = "linguistic.register"
+blocking = false
+[gates.parameters]
+locale = "fr-FR"
+register = "standard-b2b"
+```
+
+A trusted provider must return unavailable when it lacks the exact projected
+text, locale support, register policy, or, for reference fidelity, the named
+reference. It should report specific spans for human review and preserve meaning
+and factual claims in any suggested edit. Aexeo binds supplied external results
+to the exact projected input and parameters, but cannot verify that a provider
+actually assessed the requested language, read the reference, or returned a
+correct judgment. An empty diagnostic list is the provider's pass, not proof of
+translation quality, factual accuracy, or detector outcome. The provider must
+not submit an empty result to represent missing observations.
+
 ### Explicit external extension results
 
 The CLI and the direct EmDash content API can consume results produced by an

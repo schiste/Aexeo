@@ -218,6 +218,10 @@ impl GateAccumulator {
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "linguistic-observations".into(),
+            include_str!("../presets/linguistic-observations.toml").into(),
+        ),
+        (
             "writing-review".into(),
             include_str!("../presets/writing-review.toml").into(),
         ),
@@ -654,6 +658,90 @@ mod tests {
             );
         }
         assert_eq!(input.text.as_deref(), Some(text));
+    }
+
+    #[test]
+    fn linguistic_observations_are_composable_and_unavailable_without_provider() {
+        use crate::content_gate::{
+            ContentGateExtensions, ContentInput, ExtensionDiagnostic, GateStatus,
+        };
+        struct RegisterReview;
+        impl ContentGateExtensions for RegisterReview {
+            fn evaluate(
+                &self,
+                extension: &str,
+                parameters: &BTreeMap<String, String>,
+                input: &ContentInput,
+            ) -> anyhow::Result<Option<Vec<ExtensionDiagnostic>>> {
+                if extension != "linguistic.register"
+                    || parameters.get("locale").map(String::as_str) != Some("fr-FR")
+                    || parameters.get("register").map(String::as_str) != Some("standard-b2b")
+                    || input.text.as_deref() != Some("Texte à relire.")
+                {
+                    return Ok(None);
+                }
+                Ok(Some(vec![ExtensionDiagnostic {
+                    message: "Review the register in context".into(),
+                    line: 1,
+                    column: 1,
+                }]))
+            }
+        }
+        let mut sources = builtin_content_presets();
+        sources.insert(
+            "fr-review".into(),
+            r#"version=1
+name="French review"
+extends=["linguistic-observations"]
+[[gates]]
+id="linguistic.register"
+kind="custom"
+extension="linguistic.register"
+blocking=false
+[gates.parameters]
+locale="fr-FR"
+register="standard-b2b"
+"#
+            .into(),
+        );
+        let preset = resolve_content_preset("fr-review", &sources).unwrap();
+        assert_eq!(preset.gates.len(), 3);
+        assert!(preset.gates.iter().all(|gate| !gate.blocking()));
+        let input = ContentInput {
+            id: "draft".into(),
+            text: Some("Texte à relire.".into()),
+            ..Default::default()
+        };
+        let missing = preset.evaluate(&input).unwrap();
+        assert!(
+            missing
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+        let reviewed = preset
+            .evaluate_with_extensions(&input, None, Some(&RegisterReview))
+            .unwrap();
+        assert_eq!(reviewed.gates[0].status, GateStatus::Failed);
+        assert_eq!(reviewed.gates[0].findings[0].rule_id, "linguistic.register");
+        assert!(
+            reviewed.gates[1..]
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+        let changed = ContentInput {
+            text: Some("Autre texte.".into()),
+            ..input
+        };
+        let unobserved = preset
+            .evaluate_with_extensions(&changed, None, Some(&RegisterReview))
+            .unwrap();
+        assert!(
+            unobserved
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
     }
 
     #[test]
