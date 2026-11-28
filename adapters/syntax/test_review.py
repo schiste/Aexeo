@@ -109,6 +109,42 @@ class TestSyntaxAdapter(unittest.TestCase):
             with self.subTest(limit=invalid), self.assertRaises(ValueError):
                 review.parameters({**params, "short_max_words": invalid})
 
+    def test_coordinated_noun_review_counts_chains_and_respects_threshold(self):
+        params = {"analysis": "coordinated_nouns", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "1", "max_tokens": "80", "coordination_labels": "conj", "min_items": "4"}
+        text = "Tech, data, security and compliance."
+        sentence = Sentence(0, len(text), 0)
+        first, second = sentence
+        first.pos_, first.dep_ = "NOUN", "ROOT"
+        second.pos_, second.dep_ = "NOUN", "conj"
+        third, fourth = Token(2, "NOUN", "conj"), Token(3, "NOUN", "conj")
+        third.head, fourth.head = second, first
+        second.children = [third]
+        first.children.append(fourth)
+        sentence.extend([third, fourth])
+        result = review.evaluate({"text": text}, params, Model([sentence]))
+        self.assertEqual(result[0]["extension"], "syntax.coordinated_nouns")
+        self.assertEqual(len(result[0]["diagnostics"]), 1)
+        self.assertIn("4 coordinated noun heads", result[0]["diagnostics"][0]["message"])
+        self.assertEqual(result[0]["diagnostics"][0]["column"], 1)
+        self.assertEqual(review.evaluate({"text": text}, {**params, "min_items": "5"}, Model([sentence]))[0]["diagnostics"], [])
+        fourth.pos_ = "VERB"
+        self.assertEqual(review.evaluate({"text": text}, params, Model([sentence]))[0]["diagnostics"], [])
+        for bad in ({"min_items": "1"}, {"min_items": "101"}, {"min_items": "x"},
+                    {"coordination_labels": "conj,conj"}, {"coordination_labels": "conj, bad"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                review.parameters({**params, **bad})
+        with self.assertRaises(review.Unavailable):
+            review.evaluate({"text": text}, params, Model([Sentence(0, 4, 0)]))
+
+    def test_coordinated_noun_examples_match_parameters(self):
+        root = Path(review.__file__).parent
+        for suffix in ("", "-fr"):
+            config = tomllib.loads((root / f"coordinated-nouns-example{suffix}.toml").read_text(encoding="utf-8"))
+            params = json.loads((root / f"coordinated-nouns-parameters{suffix}.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["gates"][0]["parameters"], params)
+            self.assertEqual(config["gates"][0]["extension"], "syntax.coordinated_nouns")
+            review.parameters(params)
+
     def test_ordered_subtree_distance(self):
         leaf = (("NOUN", "nsubj"), ())
         root = (("VERB", "ROOT"), (leaf,))

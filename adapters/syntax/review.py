@@ -27,6 +27,8 @@ def parameters(raw):
         required.add("max_distance")
     elif mode == "clause_alternation":
         required.update({"subordinate_labels", "short_max_words"})
+    elif mode == "coordinated_nouns":
+        required.update({"coordination_labels", "min_items"})
     elif mode != "opening_pos":
         raise ValueError("unsupported analysis")
     if "analysis" in raw:
@@ -38,15 +40,40 @@ def parameters(raw):
         minimum = int(raw["min_sentences"])
         max_tokens = int(raw["max_tokens"])
         short_max_words = int(raw["short_max_words"]) if mode == "clause_alternation" else None
+        min_items = int(raw["min_items"]) if mode == "coordinated_nouns" else None
     except ValueError as exc:
         raise ValueError("invalid numeric parameters") from exc
-    if (threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 1)) or not 2 <= minimum <= MAX_SENTENCES or not 1 <= max_tokens <= 100:
+    if (threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 1)) or not (1 if mode == "coordinated_nouns" else 2) <= minimum <= MAX_SENTENCES or not 1 <= max_tokens <= 100:
         raise ValueError("numeric parameters are out of range")
     if mode == "clause_alternation":
         labels = raw["subordinate_labels"].split(",")
         if not 1 <= short_max_words <= 100 or len(labels) > 32 or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:.-]{0,63}", label) for label in labels) or len(set(labels)) != len(labels):
             raise ValueError("invalid clause alternation parameters")
+    if mode == "coordinated_nouns":
+        labels = raw["coordination_labels"].split(",")
+        if (not 2 <= min_items <= 100 or len(labels) > 32
+                or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:.-]{0,63}", label) for label in labels)
+                or len(set(labels)) != len(labels)):
+            raise ValueError("invalid coordinated noun parameters")
     return threshold, minimum, max_tokens
+
+
+def coordinated_noun_groups(sentence, labels):
+    """Count noun-headed conjunction chains without inferring meaning."""
+    nouns = {"NOUN", "PROPN"}
+    ids = {token.i for token in sentence}
+    for token in sentence:
+        if token.pos_ not in nouns or (token.dep_ in labels and token.head.pos_ in nouns):
+            continue
+        pending = [token]
+        count = 0
+        while pending:
+            current = pending.pop()
+            count += 1
+            pending.extend(child for child in current.children
+                           if child.i in ids and child.dep_ in labels and child.pos_ in nouns)
+        if count > 1:
+            yield count
 
 
 def tree_for(sentence):
@@ -147,6 +174,20 @@ def evaluate(input_data, raw_parameters, nlp):
         raise Unavailable("sentence spans omit projected text")
     findings = []
     mode = raw_parameters.get("analysis", "similarity")
+    if mode == "coordinated_nouns":
+        labels = set(raw_parameters["coordination_labels"].split(","))
+        minimum_items = int(raw_parameters["min_items"])
+        for sentence, (start, _) in zip(sentences, bounds):
+            for count in coordinated_noun_groups(sentence, labels):
+                if count >= minimum_items:
+                    prefix = text[:start]
+                    findings.append({"message": f"The parser found {count} coordinated noun heads; review the list in context.",
+                                     "line": prefix.count("\n") + 1,
+                                     "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
+                    if len(findings) > 1000:
+                        raise Unavailable("too many diagnostics")
+        return [{"extension": "syntax.coordinated_nouns", "parameters": raw_parameters,
+                 "input": input_data, "diagnostics": findings}]
     opening_pos = []
     if mode == "opening_pos":
         for sentence in sentences:
