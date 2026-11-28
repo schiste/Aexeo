@@ -427,6 +427,9 @@ Options:
       --verify-verdict <verify-verdict>
           Re-evaluate and compare a previous verdict before writing a fresh verdict
 
+      --native-report
+          Write an opt-in report containing the v1 verdict and host-supplied native locations; not publication authorization
+
       --baseline-verdict <baseline-verdict>
           Add an advisory entity-based finding comparison with a previous v1 verdict; does not change the verdict status
 

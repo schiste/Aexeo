@@ -71,6 +71,101 @@ fn host_change_cli_binds_projection_and_withholds_unmapped_locations() {
 }
 
 #[test]
+fn native_report_cli_binds_final_verdict_and_exposes_only_observed_positions() {
+    use ring::digest::{SHA256, digest};
+    let hash = |bytes: &[u8]| {
+        digest(&SHA256, bytes)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let source = serde_json::json!({"schema":"aexeo.content-adapter/v1", "text":"bad ugly",
+        "native_source_map":{"spans":[{"start":0,"end":3,"path":["body",0],"utf16_start":0}]}})
+    .to_string();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "application/vnd.aexeo.content-adapter+json".into();
+    change["entries"][0]["after"] =
+        serde_json::json!({"inline":source,"sha256":hash(source.as_bytes())});
+    let policy = "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad','ugly']\nblocking=false\n";
+    assert_eq!(run(dir.path(), &change, policy, &[]).status.code(), Some(0));
+    let baseline = dir.path().join("baseline.json");
+    fs::copy(dir.path().join("verdict.json"), &baseline).unwrap();
+    let output = run(
+        dir.path(),
+        &change,
+        policy,
+        &[
+            "--native-report",
+            "--baseline-verdict",
+            baseline.to_str().unwrap(),
+            "--telemetry",
+        ],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(report["schema"], "aexeo.native-change-report/v1");
+    assert!(report["verdict"]["extensions"]["aexeo.advisory-entity-baseline.v1"].is_object());
+    let verdict: aexeo_contracts::content_gate_protocol::Verdict =
+        serde_json::from_value(report["verdict"].clone()).unwrap();
+    assert_eq!(
+        report["verdict_sha256"],
+        hash(&serde_json::to_vec(&verdict).unwrap())
+    );
+    assert_eq!(report["coverage"][0]["findings"], 2);
+    assert_eq!(report["coverage"][0]["mapped"], 1);
+    assert_eq!(
+        report["locations"][0]["path"],
+        serde_json::json!(["body", 0])
+    );
+    let index = report["locations"][0]["verdict_finding_index"]
+        .as_u64()
+        .unwrap() as usize;
+    assert_eq!(
+        report["locations"][0]["check_id"],
+        report["verdict"]["findings"][index]["check_id"]
+    );
+    let telemetry = String::from_utf8_lossy(&output.stderr);
+    assert!(telemetry.contains("content_change_native_locations"));
+    assert!(!telemetry.contains("bad ugly"));
+    let report_bytes = fs::read(dir.path().join("verdict.json")).unwrap();
+    let output = run(
+        dir.path(),
+        &change,
+        policy,
+        &[
+            "--native-report",
+            "--offline-receipt",
+            "--evaluator-identity",
+            "build",
+        ],
+    );
+    assert_ne!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read(dir.path().join("verdict.json")).unwrap(),
+        report_bytes
+    );
+    change["entries"][0]["after"]["inline"] = "tampered".into();
+    assert_ne!(
+        run(dir.path(), &change, policy, &["--native-report"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        fs::read(dir.path().join("verdict.json")).unwrap(),
+        report_bytes
+    );
+}
+
+#[test]
 fn change_evidence_cli_evaluates_and_revalidates_without_exposing_sources() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='source'\nkind='evidence_anchors'\nsource='s'\nclaim='abc'\nquote='quote'\nblocking=true\n";

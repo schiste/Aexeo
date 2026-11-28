@@ -2179,8 +2179,34 @@ inventory. If a host projection also embeds metadata, its values must exactly
 match that inventory. The projection's observed-field coverage remains in force:
 an unobserved field is not treated as absent. A mismatch is not checked.
 The v1 `content-change` evaluator also accepts this explicit media type and
-binds the whole JSON as content. It does not currently attach source positions
-for these findings. With metadata gates, embedded host values must exactly match
+binds the whole JSON as content. Its v1 verdict does not attach native positions.
+The opt-in Rust `evaluate_change_with_native_locations` API evaluates once and
+returns the unchanged v1 verdict alongside a native-location report. Each
+location has its verdict finding index, check ID, host path, UTF-16 offset and
+source digest; the companion also includes SHA-256 of `serde_json::to_vec` of
+the returned verdict. Coverage counts returned findings and mapped findings for
+each successfully parsed host projection evaluated with item gates, and makes
+missing maps explicit. Invalid projections, unsupported media, delete-only
+entries and items without applicable gates are not listed in that coverage;
+inspect the verdict checks as well. Host assertions do not authenticate paths,
+CMS revisions, freshness or publication readiness. The experimental portable
+verifier does not currently expose this companion.
+
+For the CLI, pass `--native-report` to `content-change` with the usual change,
+preset and output environment variables. This opt-in mode writes a single
+`aexeo.native-change-report/v1` object at `CONTENT_GATE_VERDICT_FILE`; its
+`verdict` field contains the v1 verdict and `locations` contains the native
+positions. The usual exit codes still reflect that embedded verdict. Without the
+option, the output remains the ordinary v1 verdict. The report is not accepted
+as a bare `--verify-verdict` or `--baseline-verdict` input: extract its `verdict`
+first. This option cannot be combined with offline receipts or link-observation
+export. `verdict_sha256` is the SHA-256 of the final verdict serialized using
+Rust `serde_json::to_vec`, after any CLI annotations; it is not a hash of the
+pretty-printed report or a cross-language canonical JSON digest. Paths may be
+private; optional telemetry emits aggregate counts only. The report does not
+establish freshness, identity or authority to publish.
+
+With metadata gates, embedded host values must exactly match
 the change entry's metadata; observed-field coverage remains in force. The host
 must independently verify the complete change inputs, including metadata, because
 the v1 verdict subject does not bind all decision inputs. The experimental v2 Rust verifier and independent Python comparator
