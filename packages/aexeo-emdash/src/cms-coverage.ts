@@ -20,17 +20,21 @@ export function isLegacyCmsObservableFinding(finding: Finding, bodyComplete = tr
 }
 
 export function hasCompleteBody(document: EmdashDocument): boolean {
-  return document.body !== undefined && (document.body_capabilities === undefined ||
-    ["text", "headings", "paragraphs", "links"].every((capability) =>
-      document.body_capabilities?.includes(capability as "text" | "headings" | "paragraphs" | "links")));
+  return cmsBodyCoverage(document) === "complete";
 }
 
 /** Coverage of the body supplied for one evaluation, not of the rendered page. */
 export type CmsBodyCoverage = "complete" | "partial" | "unavailable";
 
 export function cmsBodyCoverage(document: EmdashDocument): CmsBodyCoverage {
-  if (document.body === undefined || document.body_capabilities?.length === 0) return "unavailable";
-  return hasCompleteBody(document) ? "complete" : "partial";
+  // Persisted CMS records may predate the current TypeScript contract.
+  if (!Array.isArray(document.body)) return "unavailable";
+  const capabilities: unknown = document.body_capabilities;
+  if (capabilities === undefined) return "complete"; // Legacy complete-body projection.
+  if (!Array.isArray(capabilities) || capabilities.length === 0 ||
+      !capabilities.every((capability) => typeof capability === "string")) return "unavailable";
+  return ["text", "headings", "paragraphs", "links"].every((capability) =>
+    capabilities.includes(capability)) ? "complete" : "partial";
 }
 
 /** Short editor-facing explanation; absent coverage is a legacy or failed result. */
