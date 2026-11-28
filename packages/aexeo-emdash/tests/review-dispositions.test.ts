@@ -37,9 +37,47 @@ describe("revision-bound editorial review", () => {
     const kv = store();
     const set = kv.set;
     kv.set = async (key, value) => { if (key.startsWith("revision-review:")) throw new Error("write failed"); await set(key, value); };
-    await expect(setReviewDisposition(kv as never, request)).rejects.toThrow("write failed");
+    expect(await setReviewDisposition(kv as never, request)).toMatchObject({ status: "unconfirmed", reason: "current_review_write_failed", event_id: expect.any(String) });
     expect(await getReviewDisposition(kv as never, request)).toEqual({ status: "not_recorded" });
     expect(await getReviewHistory(kv as never, request)).toMatchObject({ status: "available", events: [expect.anything()] });
+  });
+  it("does not conflate read errors with missing reviews or expose storage errors", async () => {
+    const kv = store();
+    kv.get = async () => { throw new Error("private storage details"); };
+    expect(await setReviewDisposition(kv as never, request)).toEqual({ status: "not_recorded", reason: "audit_read_failed" });
+    expect(await getReviewDisposition(kv as never, request)).toEqual({ status: "not_available", reason: "review_read_failed" });
+    expect(await getReviewHistory(kv as never, request)).toEqual({ status: "not_available", reason: "audit_read_failed" });
+    const listFailure = store();
+    listFailure.list = async () => { throw new Error("private list details"); };
+    expect(await getReviewHistory(listFailure as never, request)).toEqual({ status: "not_available", reason: "history_read_failed" });
+  });
+  it("does not claim no history exists when a history write fails after persisting", async () => {
+    const kv = store();
+    const set = kv.set;
+    kv.set = async (key, value) => { await set(key, value); if (key.startsWith("revision-review-history:")) throw new Error("private write details"); };
+    const result = await setReviewDisposition(kv as never, request);
+    expect(result).toMatchObject({ status: "unconfirmed", reason: "history_write_failed", event_id: expect.any(String) });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(await getReviewDisposition(kv as never, request)).toEqual({ status: "not_recorded" });
+    expect(await getReviewHistory(kv as never, request)).toMatchObject({ status: "available", events: [expect.anything()] });
+  });
+  it("leaves the current write unconfirmed even if it persisted before failing", async () => {
+    const kv = store();
+    const set = kv.set;
+    kv.set = async (key, value) => { await set(key, value); if (key.startsWith("revision-review:")) throw new Error("private write details"); };
+    const result = await setReviewDisposition(kv as never, request);
+    expect(result).toMatchObject({ status: "unconfirmed", reason: "current_review_write_failed", event_id: expect.any(String) });
+    expect(await getReviewDisposition(kv as never, request)).toMatchObject({ status: "recorded" });
+    expect(await getReviewHistory(kv as never, request)).toMatchObject({ status: "available", events: [expect.objectContaining({ event_id: "event_id" in result ? result.event_id : "missing" })] });
+  });
+  it("does not write when the event identifier cannot be generated", async () => {
+    const kv = store();
+    const set = vi.spyOn(kv, "set");
+    const uuid = vi.spyOn(crypto, "randomUUID").mockImplementation(() => { throw new Error("private random error"); });
+    try {
+      expect(await setReviewDisposition(kv as never, request)).toEqual({ status: "not_recorded", reason: "review_id_unavailable" });
+      expect(set).not.toHaveBeenCalled();
+    } finally { uuid.mockRestore(); }
   });
   it("rejects missing explanations and nonexistent findings", async () => {
     const kv = store();
@@ -69,5 +107,19 @@ describe("review route and MCP contract", () => {
     expect(await plugin.routes["audit-revision"]!.handler({ kv, content: {}, input: { collection: "secret", id: "private", revision: "hidden" }, log: { info } })).toMatchObject({ status: "not_checked" });
     expect(info).toHaveBeenCalledWith("aexeo.revision_audit", { status: "not_checked", reason: "revision_access_unavailable", scope: "content", duration_ms: expect.any(Number), gates: 0 });
     expect(JSON.stringify(info.mock.calls)).not.toContain("private");
+  });
+  it("logs only aggregate read outcomes and ignores logging failures", async () => {
+    const { createPlugin } = await import("../src/configured.js");
+    const plugin = createPlugin({}) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    const kv = store();
+    const info = vi.fn();
+    expect(await plugin.routes["get-revision-review"]!.handler({ kv, input: request, log: { info } })).toEqual({ status: "not_recorded" });
+    expect(await plugin.routes["get-revision-review-history"]!.handler({ kv, input: request, log: { info } })).toMatchObject({ status: "available" });
+    expect(info).toHaveBeenCalledWith("aexeo.review_read", { status: "not_recorded", duration_ms: expect.any(Number) });
+    expect(info).toHaveBeenCalledWith("aexeo.review_history_read", { status: "available", duration_ms: expect.any(Number) });
+    expect(JSON.stringify(info.mock.calls)).not.toContain(request.explanation.trim());
+    expect(JSON.stringify(info.mock.calls)).not.toContain(request.gate_id);
+    info.mockImplementation(() => { throw new Error("telemetry unavailable"); });
+    expect(await plugin.routes["get-revision-review"]!.handler({ kv, input: request, log: { info } })).toEqual({ status: "not_recorded" });
   });
 });

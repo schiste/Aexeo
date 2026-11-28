@@ -381,6 +381,16 @@ the current record failed, and concurrent ordering is not guaranteed. These
 annotations are advisory and cannot authorize publication or provide a tamper-proof
 audit trail.
 
+If a review write call fails, `set_review` returns `unconfirmed` with the failed
+stage and its `event_id`: a failed storage call may still have persisted its
+write. Check both the history for that event and the current review before
+deciding whether to retry. History is not guaranteed complete, and concurrent
+writers can change the current review. Storage read failures return an explicit
+`not_available` or `not_recorded` reason rather than a missing-review result;
+storage error details are not returned.
+Configured review-read telemetry contains only status and duration; logging
+errors do not change the response.
+
 ### Composable writing review
 
 The optional `writing-review` preset combines structural and sentence-length
