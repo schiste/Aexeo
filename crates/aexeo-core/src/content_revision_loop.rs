@@ -143,10 +143,11 @@ where
         } else {
             signature = Some(current);
         }
-        if let Some(selected) = &selected_ids {
-            if selected.iter().any(|id| !ids.contains(id)) {
-                bail!("selected gate is absent from the evaluation");
-            }
+        if selected_ids
+            .as_ref()
+            .is_some_and(|selected| selected.iter().any(|id| !ids.contains(id)))
+        {
+            bail!("selected gate is absent from the evaluation");
         }
         let selected = report.gates.iter().filter(|gate| {
             selected_ids
