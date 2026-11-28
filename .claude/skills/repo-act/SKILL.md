@@ -27,6 +27,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   does not exercise the host bundle. When reproducing a regression, verify
   the test also fails with the previous import and passes with the fix.
 
+- When preparing an installed-package smoke test, stop on any script-generation
+  or copy failure, verify the intended script is nonempty, and assert a known
+  success marker. A shell can otherwise run an empty script successfully after
+  a failed command, giving a false positive for the packaged artifact.
+
 ## Validation Checklist
 
 - Run the fastest relevant test command first.
