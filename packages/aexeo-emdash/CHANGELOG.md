@@ -4,7 +4,7 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.9.9]
 
 - Return sanitized read errors and explicit unconfirmed outcomes for failed editorial review writes, with an event ID for reconciliation. Log aggregate review-read status and duration.
 - Return a sanitized `not_checked` result if reading a stored revision audit fails, distinct from a missing audit.
