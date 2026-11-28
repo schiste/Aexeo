@@ -76,6 +76,9 @@ blocked.
    `.venv/` from the main checkout; preparation is explicit. Put temporary
    test environments in this session's scratch directory: another session's
    scratch can be removed as soon as that session is cleaned.
+   Before finishing a session, copy any artifact still needed for a pending
+   publication or user action to a suitable retained location outside session
+   scratch, verify its digest, and give that retained path to the next actor.
    When Rust checks on the session worktree and the broker's merge-candidate
    checkout run in parallel, use separate `CARGO_TARGET_DIR` subdirectories
    under this session's scratch, or run them sequentially. If an artifact is
