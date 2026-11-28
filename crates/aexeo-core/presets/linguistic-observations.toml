@@ -28,3 +28,23 @@ blocking = false
 [gates.parameters]
 locale = "und"
 reference = "original"
+
+# A provider must analyze sentence boundaries and grammatical categories for
+# the configured locale. A missing or unsupported provider stays not_checked.
+[[gates]]
+id = "linguistic.opening_categories"
+kind = "custom"
+extension = "linguistic.opening_categories"
+blocking = false
+[gates.parameters]
+locale = "und"
+
+# Clause analysis is language-dependent; this slot does not imply that an
+# analyzer is installed or that every sentence must alternate mechanically.
+[[gates]]
+id = "linguistic.clause_structure"
+kind = "custom"
+extension = "linguistic.clause_structure"
+blocking = false
+[gates.parameters]
+locale = "und"

@@ -705,8 +705,20 @@ register="standard-b2b"
             .into(),
         );
         let preset = resolve_content_preset("fr-review", &sources).unwrap();
-        assert_eq!(preset.gates.len(), 3);
+        assert_eq!(preset.gates.len(), 5);
         assert!(preset.gates.iter().all(|gate| !gate.blocking()));
+        assert!(
+            preset
+                .gates
+                .iter()
+                .any(|gate| gate.id() == "linguistic.opening_categories")
+        );
+        assert!(
+            preset
+                .gates
+                .iter()
+                .any(|gate| gate.id() == "linguistic.clause_structure")
+        );
         let input = ContentInput {
             id: "draft".into(),
             text: Some("Texte à relire.".into()),
