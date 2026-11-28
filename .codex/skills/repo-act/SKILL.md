@@ -16,6 +16,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run Aethyme Explore on the user task before broad manual search.
 - Verify answer candidates before concluding when trust_policy is not answer-safe.
 - Identify the nearest fast test or validation command before editing.
+- When an adapter is distributed as a standalone archive, run its tests from
+  an extracted archive. Keep cross-adapter checks in the whole-repository
+  release suite unless every required fixture is shipped in that archive.
 - For GitHub Actions, check the conclusion of the exact run, job and step
   before reporting a failure: an error annotation can come from an informative
   check while the job succeeds. Preserve and investigate the annotation rather
