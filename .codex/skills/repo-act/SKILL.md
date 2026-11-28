@@ -19,6 +19,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run hyphenated Python test scripts directly, for example
   `python3 scripts/test-content-review-note.py`: `unittest discover` can select
   zero tests. Confirm the reported test count.
+- For `cargo test -- --exact`, include the full module-qualified test name and
+  confirm that the intended test ran; a partial name can succeed with zero tests.
 - When changing CLI arguments or help, run `aexeo-cli docs check .` on the
   built candidate and regenerate the reference with `aexeo-cli docs generate .`
   if needed. Claim every generated path before writing and review the diff.
