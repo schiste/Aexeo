@@ -190,6 +190,27 @@ def sentence_structure(text, sentences):
     return trees, bounds
 
 
+class SourcePositions:
+    """Track projected Unicode locations without rescanning earlier findings."""
+
+    def __init__(self, text):
+        self.text = text
+        self.offset = 0
+        self.line = 1
+        self.line_start = 0
+
+    def at(self, offset):
+        # Findings normally follow source order. Keep out-of-order lookups correct.
+        if offset < self.offset:
+            self.offset, self.line, self.line_start = 0, 1, 0
+        self.line += self.text.count("\n", self.offset, offset)
+        last_newline = self.text.rfind("\n", self.offset, offset)
+        if last_newline != -1:
+            self.line_start = last_newline + 1
+        self.offset = offset
+        return {"line": self.line, "column": offset - self.line_start + 1}
+
+
 def evaluate(input_data, raw_parameters, nlp):
     threshold, minimum, max_tokens = parameters(raw_parameters)
     if not isinstance(input_data, dict) or not isinstance(input_data.get("text"), str):
@@ -217,6 +238,7 @@ def evaluate(input_data, raw_parameters, nlp):
     else:
         trees, bounds = sentence_structure(text, sentences)
     findings = []
+    positions = SourcePositions(text)
     mode = raw_parameters.get("analysis", "similarity")
     if mode == "coordinated_nouns":
         labels = set(raw_parameters["coordination_labels"].split(","))
@@ -236,14 +258,12 @@ def evaluate(input_data, raw_parameters, nlp):
                 for count in counts:
                     if count < minimum_items:
                         continue
-                    prefix = text[:start]
                     description = ("coordinated noun heads with matching observed markers"
                                    if marker_labels is not None else "coordinated noun heads")
                     if noun_forms is not None:
                         description += " matching configured forms"
                     findings.append({"message": f"The parser found {count} {description}; review the list in context.",
-                                     "line": prefix.count("\n") + 1,
-                                     "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
+                                     **positions.at(start)})
                     if len(findings) > 1000:
                         raise Unavailable("too many diagnostics")
         return [{"extension": "syntax.coordinated_nouns", "parameters": raw_parameters,
@@ -293,8 +313,7 @@ def evaluate(input_data, raw_parameters, nlp):
             if score > threshold:
                 continue
             message = f"Adjacent sentences have similar dependency structures (distance {score:.3f}, threshold {threshold:.3f}); review whether the parallelism is intentional."
-        prefix = text[:current_start]
-        findings.append({"message": message, "line": prefix.count("\n") + 1, "column": len(prefix.rsplit("\n", 1)[-1]) + 1})
+        findings.append({"message": message, **positions.at(current_start)})
     if not compared:
         raise Unavailable("no adjacent sentences within a paragraph")
     if len(findings) > 1000:
