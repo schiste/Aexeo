@@ -1193,6 +1193,12 @@ missing fields retain observed prose but make body capabilities unavailable.
   states against the independently checked candidate source, as well as inline
   states. Wrong host bytes and independently supplied bytes are rejected. This
   does not retrieve URIs or establish source provenance or freshness.
+- [x] Exercise host projections with and without metadata using real Aexeo and
+  Aethyme CLI binaries, including rejection of altered candidate bytes and an
+  explicit non-authorization result. Aethyme support merged in
+  [#2071](https://github.com/schiste/Aethyme/pull/2071); availability in a
+  deployed release remains to be checked independently. This test does not
+  establish provenance, freshness or publication authority.
 - [ ] Establish equivalent referenced-content interoperability in other hosts;
   URI fetching, snapshot provenance and publication authorization remain separate
   concerns.
