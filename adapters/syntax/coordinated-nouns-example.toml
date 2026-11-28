@@ -1,0 +1,18 @@
+version = 1
+name = "Advisory coordinated noun review"
+
+[[gates]]
+id = "editorial.coordinated_nouns"
+kind = "custom"
+extension = "syntax.coordinated_nouns"
+severity = "warning"
+blocking = false
+[gates.parameters]
+analysis = "coordinated_nouns"
+model = "en_core_web_sm"
+model_version = "3.8.0"
+language = "en"
+min_sentences = "1"
+max_tokens = "80"
+coordination_labels = "conj"
+min_items = "4"

@@ -106,6 +106,10 @@ class SyntaxReleaseTests(unittest.TestCase):
                     "adapters/syntax/clause-alternation-parameters.json",
                     "adapters/syntax/clause-alternation-example-fr.toml",
                     "adapters/syntax/clause-alternation-parameters-fr.json",
+                    "adapters/syntax/coordinated-nouns-example.toml",
+                    "adapters/syntax/coordinated-nouns-parameters.json",
+                    "adapters/syntax/coordinated-nouns-example-fr.toml",
+                    "adapters/syntax/coordinated-nouns-parameters-fr.json",
                 })
                 for member in bundle.getmembers():
                     self.assertTrue(member.isfile())
