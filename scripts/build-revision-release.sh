@@ -24,5 +24,5 @@ archive="$out/aexeo-revision-adapter-v$version.tar.gz"
 COPYFILE_DISABLE=1 tar -czf "$archive" -C "$root" LICENSE \
   adapters/revision/README.md adapters/revision/example.toml \
   adapters/revision/example-parameters.json adapters/revision/example-fr.toml \
-  adapters/revision/example-fr-parameters.json adapters/revision/review.py adapters/revision/test_review.py
+  adapters/revision/example-fr-parameters.json adapters/revision/combined-writing-review-fr.toml adapters/revision/review.py adapters/revision/test_review.py
 printf '%s\n' "$archive"

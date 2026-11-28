@@ -26,3 +26,22 @@ Verification: variance and opening rules passed their individual full CI and Aet
 - [x] Provide an optional comparison of configured literal phrase pairs against an explicit prior snapshot, bound to both drafts and the configuration. Test missing coverage and a changed prior snapshot end to end. This observes strings only; it cannot establish that one phrase replaced another.
 - [ ] Design and evaluate language-specific idiom/register and semantic-equivalence review. A configured literal match cannot establish correct translation, concrete truth or an improvement in style. Until an appropriate assessment is supplied, do not claim that these requirements were checked.
 - [ ] Review CI, validate the current merge candidate, and publish through the repository's normal release process.
+
+## Requested deterministic writing policy
+
+- [x] Compose the existing French structural, opening POS, clause-pattern and
+  literal revision checks in an opt-in example with exact adapter parameters.
+  Its reported observations are advisory and inputs remain explicitly supplied.
+- [ ] Establish and test configurable locale-aware observation contracts for
+  abstract-noun patterns, parallel grammatical forms, register, idiom and
+  semantic equivalence. Until available, these are not checked, even if literal
+  or statistical checks pass. Evaluate each language against reviewed examples.
+- [ ] Investigate an opt-in adjacent medium-length sentence gate with bounded
+  ranges and classified prose. Document segmentation, sampling, partial coverage
+  and per-profile configuration before treating it as a policy condition.
+- [ ] Validate any cross-draft change count and its claimed meaning against
+  actual editorial annotations. Literal phrase pairs do not establish a rewrite,
+  concreteness, preservation of the source meaning or factual correctness.
+- [ ] Gather representative reviewed content and calibrate the proposed limits;
+  no universal wording or fixed rhythm guarantees a natural voice or a detector
+  outcome. Retain purposeful parallelism, essential claims and causal links.
