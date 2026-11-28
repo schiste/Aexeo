@@ -1,0 +1,63 @@
+version = 1
+name = "English composable writing and revision review example"
+extends = ["writing-review-en"]
+
+# All checks are advisory; external observations must be supplied explicitly.
+
+[[gates]]
+id = "editorial.literal_revision_pairs"
+kind = "custom"
+extension = "revision.literal_pairs"
+severity = "warning"
+blocking = false
+[gates.parameters]
+source = "prior"
+pairs = '[{"before":"difficulties","after":"limited time"},{"before":"assistance","after":"help"}]'
+minimum = "2"
+
+[[gates]]
+id = "editorial.opening_pos"
+kind = "custom"
+extension = "syntax.opening_pos"
+severity = "warning"
+blocking = false
+[gates.parameters]
+analysis = "opening_pos"
+model = "en_core_web_sm"
+model_version = "3.8.0"
+language = "en"
+min_sentences = "2"
+max_tokens = "80"
+
+[[gates]]
+id = "editorial.clause_alternation"
+kind = "custom"
+extension = "syntax.clause_alternation"
+severity = "warning"
+blocking = false
+[gates.parameters]
+analysis = "clause_alternation"
+model = "en_core_web_sm"
+model_version = "3.8.0"
+language = "en"
+min_sentences = "2"
+max_tokens = "80"
+subordinate_labels = "advcl,relcl,ccomp"
+short_max_words = "11"
+
+[[gates]]
+id = "editorial.coordinated_nouns"
+kind = "custom"
+extension = "syntax.coordinated_nouns"
+severity = "warning"
+blocking = false
+[gates.parameters]
+analysis = "coordinated_nouns"
+model = "en_core_web_sm"
+model_version = "3.8.0"
+language = "en"
+min_sentences = "1"
+max_tokens = "80"
+coordination_labels = "conj"
+min_items = "4"
+marker_labels = "det"

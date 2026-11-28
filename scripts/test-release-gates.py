@@ -139,7 +139,8 @@ class SyntaxReleaseTests(unittest.TestCase):
                 self.assertEqual(set(bundle.getnames()), {
                     "LICENSE", "adapters/revision/README.md", "adapters/revision/example.toml",
                     "adapters/revision/example-parameters.json", "adapters/revision/example-fr.toml",
-                    "adapters/revision/example-fr-parameters.json", "adapters/revision/combined-writing-review-fr.toml", "adapters/revision/review.py",
+                    "adapters/revision/example-fr-parameters.json", "adapters/revision/combined-writing-review-fr.toml",
+                    "adapters/revision/combined-writing-review-en.toml", "adapters/revision/review.py",
                     "adapters/revision/test_review.py",
                 })
                 for member in bundle.getmembers():
@@ -162,6 +163,22 @@ class SyntaxReleaseTests(unittest.TestCase):
             "syntax.coordinated_nouns": root.parent / "syntax/coordinated-nouns-parameters-fr.json",
         }
         self.assertEqual({gate["extension"] for gate in preset["gates"]}, set(expected))
+        for gate in preset["gates"]:
+            self.assertFalse(gate["blocking"])
+            self.assertEqual(gate["parameters"], json.loads(expected[gate["extension"]].read_text(encoding="utf-8")))
+
+    def test_composed_english_example_matches_adapter_parameters(self):
+        root = ROOT / "adapters/revision"
+        preset = tomllib.loads((root / "combined-writing-review-en.toml").read_text(encoding="utf-8"))
+        self.assertEqual(preset["extends"], ["writing-review-en"])
+        expected = {
+            "revision.literal_pairs": root / "example-parameters.json",
+            "syntax.opening_pos": root.parent / "syntax/opening-pos-parameters.json",
+            "syntax.clause_alternation": root.parent / "syntax/clause-alternation-parameters.json",
+            "syntax.coordinated_nouns": root.parent / "syntax/shared-noun-markers-parameters.json",
+        }
+        self.assertEqual({gate["extension"] for gate in preset["gates"]}, set(expected))
+        self.assertEqual(len(preset["gates"]), len(expected))
         for gate in preset["gates"]:
             self.assertFalse(gate["blocking"])
             self.assertEqual(gate["parameters"], json.loads(expected[gate["extension"]].read_text(encoding="utf-8")))

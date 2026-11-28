@@ -13,26 +13,32 @@ aexeo-cli content draft.md --preset revision --preset-source revision=adapters/r
 
 Supply `--drafts-complete` only after independently establishing coverage of both snapshots. Without it, with an unavailable source, or with oversized drafts, the adapter emits no result and the custom gate is `not_checked`. Invalid configuration or unreadable JSON exits nonzero; never interpret a failure as a pass. Both snapshots are capped at 200,000 UTF-8 bytes, the input JSON at 32 MiB, the parameters JSON at 16 KiB, and pairs at 100. Run `python3 -m unittest discover -s adapters/revision -v` for offline tests.
 
-## Composed French writing review
+## Composed writing review
 
 `combined-writing-review-fr.toml` combines the built-in `writing-review-fr`
 profile with the French literal revision, opening POS, clause alternation and
-coordinated-noun examples. The standalone revision archive does not contain the syntax adapter;
-obtain its separate release archive before following this combined workflow. It is an opt-in illustration, not a universal French standard. The
+coordinated-noun examples. `combined-writing-review-en.toml` composes the English
+writing starter with the English revision, opening POS, clause alternation and
+shared noun-marker examples. The English noun check only counts matching observed
+markers; the French example retains its broader noun count for compatibility. The standalone revision archive does not contain the syntax adapter;
+obtain its separate release archive before following this combined workflow. These are opt-in illustrations, not universal language standards. The
 underlying checks are advisory and report unavailable observations separately;
 installing a preset does not run the Python adapters. Select and pin an
 appropriate locally installed model and set identical parameters in the preset
 and parameter files. See `../syntax/README.md` for model and coverage requirements.
 
-For a complete, independently checked current and prior snapshot, with the
-example French model installed, one workflow from the repository root is:
+For complete, independently checked current and prior snapshots, with the
+example model installed, use the workflow below from the repository root. The
+commands select French; for English set `preset=adapters/revision/combined-writing-review-en.toml`
+and `revision_params=adapters/revision/example-parameters.json` instead:
 
 ```sh
 umask 077
 preset=adapters/revision/combined-writing-review-fr.toml
+revision_params=adapters/revision/example-fr-parameters.json
 aexeo-cli content draft.md --input-format markdown --preset review --preset-source review="$preset" --evidence-source prior=earlier.md --export-adapter-input > input.json
-python3 adapters/revision/review.py input.json adapters/revision/example-fr-parameters.json --drafts-complete > revision.json
-python3 -c 'import json, tomllib; from pathlib import Path; p = tomllib.loads(Path("adapters/revision/combined-writing-review-fr.toml").read_text()); Path("syntax-parameters.json").write_text(json.dumps([g["parameters"] for g in p["gates"] if g["extension"].startswith("syntax.")]))'
+python3 adapters/revision/review.py input.json "$revision_params" --drafts-complete > revision.json
+python3 -c 'import json, sys, tomllib; from pathlib import Path; p = tomllib.loads(Path(sys.argv[1]).read_text()); Path("syntax-parameters.json").write_text(json.dumps([g["parameters"] for g in p["gates"] if g["extension"].startswith("syntax.")]))' "$preset"
 python3 adapters/syntax/review.py input.json syntax-parameters.json --text-complete > syntax.json
 python3 -c 'import json; from pathlib import Path; files = ("revision.json", "syntax.json"); Path("results.json").write_text(json.dumps(sum((json.loads(Path(f).read_text()) for f in files), []), ensure_ascii=False))'
 aexeo-cli content draft.md --input-format markdown --preset review --preset-source review="$preset" --evidence-source prior=earlier.md --extension-results results.json --format json
