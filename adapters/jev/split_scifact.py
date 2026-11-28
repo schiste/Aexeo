@@ -2,6 +2,7 @@
 """Split SciFact cases without sharing claims or documents between partitions."""
 import argparse
 import json
+from json_input import loads as strict_json
 import math
 from pathlib import Path
 import random
@@ -70,7 +71,7 @@ def main():
     parser.add_argument("--seed", type=int, required=True)
     args = parser.parse_args()
     try:
-        examples = json.loads(args.examples.read_text(encoding="utf-8"))
+        examples = strict_json(args.examples.read_text(encoding="utf-8"))
         print(json.dumps(split(examples, args.holdout_fraction, args.seed), ensure_ascii=False))
     except (OSError, ValueError, TypeError) as error:
         parser.exit(2, "split failed: " + str(error) + "\n")

@@ -2,6 +2,7 @@
 """Measure saved model reviews against independently labeled examples, offline."""
 import argparse
 import json
+from json_input import loads as strict_json
 import math
 from pathlib import Path
 
@@ -89,8 +90,8 @@ def main():
     parser.add_argument("reviews", type=Path)
     args = parser.parse_args()
     try:
-        examples = json.loads(args.examples.read_text(encoding="utf-8"))
-        reviews = json.loads(args.reviews.read_text(encoding="utf-8"))
+        examples = strict_json(args.examples.read_text(encoding="utf-8"))
+        reviews = strict_json(args.reviews.read_text(encoding="utf-8"))
         print(json.dumps(evaluate(examples, reviews), indent=2))
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(2, "evaluation failed: " + str(error) + "\n")

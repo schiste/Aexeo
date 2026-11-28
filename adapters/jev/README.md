@@ -24,6 +24,8 @@ aexeo-cli content article.md --preset my-preset --preset-source my-preset=review
   --evidence-source study=study.txt --evidence-source study-review=study-review.json
 ```
 
+JSON inputs, checkpoints and provider responses reject duplicate object keys at every depth and non-finite numbers. Invalid batch files and checkpoints are rejected before any provider request; an invalid provider response does not produce a review. This detects ambiguous encoding, not false or unauthenticated evidence.
+
 Run the offline tests with `python3 -m unittest discover -s adapters/jev -v`. They use a mock response; they do not validate the provider's availability, calibration, accuracy, or live API behavior.
 
 ## Measure against independent labels
