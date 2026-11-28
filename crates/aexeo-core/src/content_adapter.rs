@@ -562,6 +562,43 @@ impl HostSourceMap {
     }
 }
 
+/// Map one gate's findings to host-asserted native paths. These coordinates
+/// describe the host projection, not authenticated CMS state.
+pub fn native_gate_positions<'a>(
+    map: &'a NativeSourceMap,
+    gate: &crate::content_gate::ContentGate,
+    result: &crate::content_gate::ContentGateResult,
+    observed: &NativeStructureObservations<'_>,
+    text: Option<&str>,
+    index: Option<&LineIndex>,
+) -> Vec<(usize, &'a [serde_json::Value], usize)> {
+    let mut positions = Vec::new();
+    if let Some(paths) = map.structure_positions(gate, result, observed) {
+        positions.extend(
+            paths
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, path)| path.map(|path| (i, path, 0))),
+        );
+    }
+    if crate::source_mapping::prose_gate_has_positions(gate)
+        && let (Some(text), Some(index)) = (text, index)
+    {
+        positions.extend(
+            result
+                .findings
+                .iter()
+                .enumerate()
+                .filter_map(|(i, finding)| {
+                    let offset = index.offset(text, finding.line, finding.column)?;
+                    let (path, utf16) = map.position(text, offset)?;
+                    Some((i, path, utf16))
+                }),
+        );
+    }
+    positions
+}
+
 pub struct AdapterProjection {
     pub input: ContentInput,
     pub literal_text: Option<String>,

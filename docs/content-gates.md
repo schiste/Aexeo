@@ -2230,6 +2230,18 @@ item mappings and whole proposals whose item reports or candidate could not be
 mapped; separate `source_mapping_unavailable_items` and
 `source_mapping_unavailable_proposals` counters distinguish those cases.
 
+For host adapter JSON, an item with a valid native map additionally has
+`native_status = "available"` and `native_coverage` in its source-mapping
+item; an omitted or invalid native map reports `native_status = "unavailable"`.
+Its locations carry
+`host_supplied_native_path`, the host path and a zero-based UTF-16 offset;
+they are not line and column positions in the JSON. Accordingly the ordinary
+source mapping can remain unavailable even when native coverage is available.
+The snapshot digest binds the supplied adapter JSON but does not authenticate
+the host's paths or their correspondence to the CMS revision. Missing spans or
+structural paths remain unmapped. Opt-in telemetry reports only aggregate
+native eligible, mapped and unavailable counts; paths and content are omitted.
+
 For referenced file states, explicitly authorize an absolute `--content-root`;
 its value must match the change's `content_root`. For URI states, also supply
 `--host-content-map INDEX=PATH` for the zero-based proposal index. Each map is a

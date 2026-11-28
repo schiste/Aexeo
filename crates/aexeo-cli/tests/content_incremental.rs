@@ -1686,6 +1686,146 @@ fn opt_in_source_locations_follow_candidate_and_reused_snapshots() {
 }
 
 #[test]
+fn incremental_native_locations_are_partial_utf16_and_do_not_claim_file_positions() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("terms");
+    input["preset_sources"] = json!({"terms":"version=1\nname='terms'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad','ugly']\nblocking=false\n"});
+    let source = json!({"schema":"aexeo.content-adapter/v1", "text":"🙂 bad ugly",
+        "native_source_map":{"spans":[{"start":0,"end":"🙂 bad".len(),
+        "path":["body",3,"text"],"utf16_start":2}]}})
+    .to_string();
+    let digest = "557c20bcbf12691c7d5404da1e2c7c150a69a76014b48cbb70d3d883192385bd";
+    let media = aexeo_core::content_adapter::MEDIA_TYPE;
+    let update = |item: &mut Value| {
+        item["media_type"] = json!(media);
+        item["source"] = json!(source);
+        item["sha256"] = json!(digest);
+    };
+    update(&mut input["snapshot"]["items"][0]);
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        update(&mut proposal["after"][0]);
+        proposal["change"]["entries"][0]["media_type"] = json!(media);
+        proposal["change"]["entries"][0]["after"] = json!({"inline":source,"sha256":digest});
+    }
+    let output = run(&input, &["--source-locations", "--telemetry"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for row in lines(&output) {
+        for id in ["a", "b"] {
+            let item = &row["source_mapping"]["items"][id];
+            assert_eq!(item["status"], "unavailable");
+            assert_eq!(item["native_status"], "available");
+            let coverage = &item["native_coverage"];
+            assert_eq!(
+                (
+                    coverage["eligible"].as_u64(),
+                    coverage["mapped"].as_u64(),
+                    coverage["unmapped"].as_u64()
+                ),
+                (Some(2), Some(1), Some(1))
+            );
+            assert_eq!(coverage["source_sha256"], digest);
+            assert_eq!(coverage["locations"][0]["path"], json!(["body", 3, "text"]));
+            assert_eq!(
+                coverage["locations"][0]["source"],
+                "host_supplied_native_path"
+            );
+            assert_eq!(coverage["locations"][0]["utf16_offset"], 5);
+        }
+    }
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["native_source_mapping_mapped"], 4);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("body"));
+    assert!(lines(&run(&input, &[]))[0].get("source_mapping").is_none());
+}
+
+#[test]
+fn incremental_native_locations_report_unavailable_when_map_is_missing() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("terms");
+    input["preset_sources"] = json!({"terms":"version=1\nname='terms'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['abc']\nblocking=false\n"});
+    let source = r#"{"schema":"aexeo.content-adapter/v1","text":"abc"}"#;
+    let digest = "f2b62f3db65bb778f8a2afd2afa67ae8c55efd67e4629cb9e05852368d9d6ac8";
+    let media = aexeo_core::content_adapter::MEDIA_TYPE;
+    let update = |item: &mut Value| {
+        item["media_type"] = json!(media);
+        item["source"] = json!(source);
+        item["sha256"] = json!(digest);
+    };
+    update(&mut input["snapshot"]["items"][0]);
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        update(&mut proposal["after"][0]);
+        proposal["change"]["entries"][0]["media_type"] = json!(media);
+        proposal["change"]["entries"][0]["after"] = json!({"inline":source,"sha256":digest});
+    }
+    let output = run(&input, &["--source-locations", "--telemetry"]);
+    assert_eq!(output.status.code(), Some(0));
+    let rows = lines(&output);
+    let item = &rows[0]["source_mapping"]["items"]["a"];
+    assert_eq!(item["native_status"], "unavailable");
+    assert!(item.get("native_coverage").is_none());
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["native_source_mapping_unavailable"], 4);
+}
+
+#[test]
+fn incremental_native_locations_cover_structure_and_leave_unknown_paths_unmapped() {
+    let mut input = batch();
+    input["mode"] = json!("adapted");
+    input["preset"] = json!("structures");
+    input["preset_sources"] = json!({"structures":"version=1\nname='structures'\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\nblocking=false\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\nblocking=false\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=false\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=false\n"});
+    let source = json!({"schema":"aexeo.content-adapter/v1", "text":"Body",
+        "headings":["Long heading","Another heading"],"heading_levels":[1,4],
+        "link_destinations":["https://example.org","http://example.org"],
+        "lists":[{"item_count":3,"depth":1}],
+        "native_source_map":{"spans":[], "heading_paths":[["data","content",0],null],
+        "link_paths":[null,["data","content",2]],"list_paths":[["data","content",3]]}})
+    .to_string();
+    let digest = "333a490b116f50778caeb6af60f34a8d6e55e2726ff2de4f60c1b150ed811798";
+    let media = aexeo_core::content_adapter::MEDIA_TYPE;
+    let update = |item: &mut Value| {
+        item["media_type"] = json!(media);
+        item["source"] = json!(source);
+        item["sha256"] = json!(digest);
+    };
+    update(&mut input["snapshot"]["items"][0]);
+    for proposal in input["proposals"].as_array_mut().unwrap() {
+        update(&mut proposal["after"][0]);
+        proposal["change"]["entries"][0]["media_type"] = json!(media);
+        proposal["change"]["entries"][0]["after"] = json!({"inline":source,"sha256":digest});
+    }
+    let output = run(&input, &["--source-locations"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows = lines(&output);
+    let coverage = &rows[0]["source_mapping"]["items"]["a"]["native_coverage"];
+    assert_eq!(
+        (
+            coverage["eligible"].as_u64(),
+            coverage["mapped"].as_u64(),
+            coverage["unmapped"].as_u64()
+        ),
+        (Some(5), Some(3), Some(2))
+    );
+    let locations = coverage["locations"].as_array().unwrap();
+    for (gate, index) in [("heading", 0), ("links", 2), ("lists", 3)] {
+        assert!(locations.iter().any(|location| location["gate_id"] == gate
+            && location["path"] == json!(["data", "content", index])
+            && location["utf16_offset"] == 0));
+    }
+}
+
+#[test]
 fn incremental_source_locations_cover_structural_and_link_findings() {
     for (media, source, digest, expected_lines) in [
         (

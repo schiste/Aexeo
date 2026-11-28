@@ -222,21 +222,7 @@ pub fn map_incremental_report(
     use crate::html_content_adapter as html;
     use crate::markdown_adapter as markdown;
     use anyhow::{Context, bail};
-    use sha2::{Digest, Sha256};
-    if format!("{:x}", Sha256::digest(item.source.as_bytes())) != item.sha256 {
-        bail!("source digest differs from candidate item");
-    }
-    if report.input_id != item.entity_id
-        || report.preset != preset.name
-        || report.gates.len() != preset.gates.len()
-        || preset
-            .gates
-            .iter()
-            .zip(&report.gates)
-            .any(|(gate, result)| gate.id() != result.gate_id)
-    {
-        bail!("report does not match the item or resolved preset");
-    }
+    validate_incremental_mapping_input(preset, item, report)?;
     let eligible = eligible_findings(preset, report);
     let mut output = IncrementalSourceMapping {
         source_sha256: item.sha256.clone(),
@@ -391,4 +377,112 @@ pub fn map_incremental_report(
     output.mapped = output.locations.len();
     output.unmapped = eligible.saturating_sub(output.mapped);
     Ok(output)
+}
+
+fn validate_incremental_mapping_input(
+    preset: &crate::content_gate::ContentPreset,
+    item: &crate::content_candidate::CandidateItem,
+    report: &crate::content_gate::ContentReport,
+) -> anyhow::Result<()> {
+    use anyhow::bail;
+    use sha2::{Digest, Sha256};
+    if format!("{:x}", Sha256::digest(item.source.as_bytes())) != item.sha256 {
+        bail!("source digest differs from candidate item");
+    }
+    if report.input_id != item.entity_id
+        || report.preset != preset.name
+        || report.gates.len() != preset.gates.len()
+        || preset
+            .gates
+            .iter()
+            .zip(&report.gates)
+            .any(|(gate, result)| gate.id() != result.gate_id)
+    {
+        bail!("report does not match the item or resolved preset");
+    }
+    Ok(())
+}
+
+/// A host-asserted native path, distinct from source-file line and column.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IncrementalNativeLocation {
+    pub gate_id: String,
+    pub finding_index: usize,
+    pub source: &'static str,
+    pub path: Vec<serde_json::Value>,
+    pub utf16_offset: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IncrementalNativeMapping {
+    pub source_sha256: String,
+    pub eligible: usize,
+    pub mapped: usize,
+    pub unmapped: usize,
+    pub locations: Vec<IncrementalNativeLocation>,
+}
+
+/// Map an unchanged adapter snapshot to the native paths asserted by its host.
+/// Digest and report identity do not authenticate the snapshot or its paths.
+pub fn map_incremental_native_report(
+    preset: &crate::content_gate::ContentPreset,
+    item: &crate::content_candidate::CandidateItem,
+    report: &crate::content_gate::ContentReport,
+    observations: Option<&crate::content_gate_verdict::LinkObservationSnapshot>,
+) -> anyhow::Result<IncrementalNativeMapping> {
+    use crate::content_adapter::{self, NativeStructureObservations};
+    use anyhow::{Context, bail};
+    validate_incremental_mapping_input(preset, item, report)?;
+    if item.media_type != content_adapter::MEDIA_TYPE {
+        bail!("native paths require a host adapter projection");
+    }
+    let adapted = content_adapter::parse(item.entity_id.clone(), &item.source)?;
+    let map = adapted
+        .native_source_map
+        .as_ref()
+        .context("native source map unavailable")?;
+    let links = observations.and_then(|snapshot| {
+        (snapshot.version == 1
+            && snapshot.source_sha256 == item.sha256
+            && adapted.destinations.as_ref() == Some(&snapshot.destinations)
+            && snapshot.destinations.len() == snapshot.observations.len())
+        .then_some(snapshot.observations.as_slice())
+    });
+    let observed = NativeStructureObservations {
+        headings: adapted.input.headings.as_deref(),
+        levels: adapted.headings.as_deref(),
+        destinations: adapted.destinations.as_deref(),
+        links,
+        lists: adapted.lists.as_deref(),
+    };
+    let text = adapted.input.text.as_deref();
+    let index = text.map(crate::text_index::LineIndex::new);
+    let mut locations = Vec::new();
+    for (gate, result) in preset.gates.iter().zip(&report.gates) {
+        for (finding_index, path, utf16_offset) in content_adapter::native_gate_positions(
+            map,
+            gate,
+            result,
+            &observed,
+            text,
+            index.as_ref(),
+        ) {
+            locations.push(IncrementalNativeLocation {
+                gate_id: result.gate_id.clone(),
+                finding_index,
+                source: "host_supplied_native_path",
+                path: path.to_vec(),
+                utf16_offset,
+            });
+        }
+    }
+    let eligible = eligible_findings(preset, report);
+    let mapped = locations.len();
+    Ok(IncrementalNativeMapping {
+        source_sha256: item.sha256.clone(),
+        eligible,
+        mapped,
+        unmapped: eligible.saturating_sub(mapped),
+        locations,
+    })
 }
