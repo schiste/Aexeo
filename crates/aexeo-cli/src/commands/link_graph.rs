@@ -230,6 +230,7 @@ pub(super) fn emit_link_graph_telemetry(
         anchor_with_label: usize,
         anchor_empty: usize,
         source_locations: usize,
+        rel_unobserved: usize,
     }
     let counts = report
         .links
@@ -242,6 +243,7 @@ pub(super) fn emit_link_graph_telemetry(
         .chain(&report.links.indeterminate)
         .fold(Counts::default(), |mut counts, link| {
             counts.source_locations += usize::from(link.line.is_some() && link.column.is_some());
+            counts.rel_unobserved += usize::from(link.rel_observed != Some(true));
             counts.conditional += usize::from(link.conditional_markup == Some(true));
             counts.unclassified += usize::from(link.conditional_markup.is_none());
             counts.hidden += usize::from(link.hidden_attribute == Some(true));
@@ -269,6 +271,7 @@ pub(super) fn emit_link_graph_telemetry(
         "source_locations_requested": source_locations_requested,
         "source_location_unmapped_link_count": source_locations_requested
             .then_some(observed - counts.source_locations),
+        "rel_unobserved_link_count": counts.rel_unobserved,
         "conditional_link_count": counts.conditional,
         "unclassified_markup_link_count": counts.unclassified,
         "hidden_attribute_link_count": counts.hidden,
