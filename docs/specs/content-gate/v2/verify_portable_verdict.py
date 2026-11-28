@@ -124,7 +124,7 @@ def validate_count_gate(gate):
         raise VerificationError('invalid counting gate bounds')
     if kind == 'character_count' and type(gate['ignore_whitespace']) is not bool:
         raise VerificationError('invalid counting gate whitespace option')
-    if kind == 'metadata_length' and (not isinstance(gate['field'], str) or not gate['field'].strip()):
+    if kind == 'metadata_length' and (not isinstance(gate['field'], str) or _rust_blank(gate['field'])):
         raise VerificationError('invalid counting gate metadata field')
 
 
