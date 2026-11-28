@@ -29,6 +29,30 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(metrics["examples"], 2)
         self.assertEqual(metrics["false_approvals"], 1)
 
+    def test_unlabeled_batch_needs_explicit_opt_in(self):
+        examples = [{key: value for key, value in example.items() if key != "label"} for example in self.examples]
+        calls = []
+        def fake(claim, source, model, reliability, threshold, key):
+            calls.append(claim)
+            response = {"model": model, "answers": {"support": {"type": "choice", "choice": "supported", "probabilities": {"supported": 0.95}}}}
+            return review.review_from_response(claim, source, reliability, threshold, response)
+        with self.assertRaises(ValueError):
+            batch.run_cases(examples, "jev-version", 0.9, 2, "key", fake)
+        self.assertEqual(calls, [])
+        records = batch.run_cases(examples, "jev-version", 0.9, 2, "key", fake, require_labels=False)
+        self.assertEqual(len(records), 2)
+        self.assertTrue(all(item["review"]["reliability"] == "uncertain" for item in records))
+        with self.assertRaises((ValueError, KeyError)):
+            evaluate.evaluate(examples, records)
+        with self.assertRaises(ValueError):
+            batch.run_cases(examples, "other", 0.9, 2, "key", fake, existing=records, require_labels=False)
+        with self.assertRaises(ValueError):
+            batch.run_cases(examples, "jev-version", 0.9, 2, "key", fake, existing=records, require_labels=False, provider="clef")
+        changed = [dict(item) for item in examples]
+        changed[0]["source_text"] = "changed"
+        with self.assertRaises(ValueError):
+            batch.run_cases(changed, "jev-version", 0.9, 2, "key", fake, existing=records, require_labels=False)
+
     def test_invalid_or_oversized_batch_sends_nothing(self):
         calls = []
         def fake(*args):
