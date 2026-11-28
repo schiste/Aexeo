@@ -1,5 +1,5 @@
 {
-  "preset": "version=1\nname='workflow'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\nblocking=false\n",
+  "preset": "version=1\nname='workflow'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\ndelimiters='.!?。！？؟'\nblocking=false\n",
   "cases": [
     {
       "name": "uppercase",
@@ -43,6 +43,106 @@
               {
                 "_type": "span",
                 "text": "test/a.b?x=1. Done."
+              }
+            ]
+          }
+        ]
+      },
+      "expected_sentences": 2,
+      "expected_findings": 1
+    },
+    {
+      "name": "ideographic full stop",
+      "markdown": "Read https://example.test/a.b。下一句.",
+      "html": "<p>Read https://example.test/a.b。下一句.</p>",
+      "document": {
+        "route": "/urls",
+        "title": "URLs",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Read https://example."
+              },
+              {
+                "_type": "span",
+                "text": "test/a.b。下一句."
+              }
+            ]
+          }
+        ]
+      },
+      "expected_sentences": 2,
+      "expected_findings": 1
+    },
+    {
+      "name": "fullwidth exclamation",
+      "markdown": "Read https://example.test/a.b！下一句.",
+      "html": "<p>Read https://example.test/a.b！下一句.</p>",
+      "document": {
+        "route": "/urls",
+        "title": "URLs",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Read https://example."
+              },
+              {
+                "_type": "span",
+                "text": "test/a.b！下一句."
+              }
+            ]
+          }
+        ]
+      },
+      "expected_sentences": 2,
+      "expected_findings": 1
+    },
+    {
+      "name": "fullwidth question mark",
+      "markdown": "Read https://example.test/a.b？下一句.",
+      "html": "<p>Read https://example.test/a.b？下一句.</p>",
+      "document": {
+        "route": "/urls",
+        "title": "URLs",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Read https://example."
+              },
+              {
+                "_type": "span",
+                "text": "test/a.b？下一句."
+              }
+            ]
+          }
+        ]
+      },
+      "expected_sentences": 2,
+      "expected_findings": 1
+    },
+    {
+      "name": "Arabic question mark",
+      "markdown": "Read https://example.test/a.b؟التالي.",
+      "html": "<p>Read https://example.test/a.b؟التالي.</p>",
+      "document": {
+        "route": "/urls",
+        "title": "URLs",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Read https://example."
+              },
+              {
+                "_type": "span",
+                "text": "test/a.b؟التالي."
               }
             ]
           }
