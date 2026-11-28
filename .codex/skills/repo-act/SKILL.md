@@ -158,7 +158,12 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For EmDash WASM import or bundling changes, test the built configured plugin
   with real WASM in workerd as well as Node; a sidecar-only Workers test
   does not exercise the host bundle. When reproducing a regression, verify
-  the test also fails with the previous import and passes with the fix.
+  the test also fails with the previous import and passes with the fix. For a
+  generic deployed audit error, reproduce with an existing revision and a
+  known-unconfigured field, then inspect narrowly filtered host logs if access
+  is authorized. Record only the exception stage and worker version, not log
+  contents. Compare the deployed bundle with the candidate; a workerd test of
+  one bundle does not establish that an Astro host deployed the same bytes.
 
 ## Validation Checklist
 
