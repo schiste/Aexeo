@@ -1,0 +1,30 @@
+version = 1
+name = "External linguistic review starter"
+
+# These names identify host-supplied observers, not built-in language models.
+# Override the entire gate with the locale and register used by your project.
+[[gates]]
+id = "linguistic.register"
+kind = "custom"
+extension = "linguistic.register"
+blocking = false
+[gates.parameters]
+locale = "und"
+register = "unspecified"
+
+[[gates]]
+id = "linguistic.idiom"
+kind = "custom"
+extension = "linguistic.idiom"
+blocking = false
+[gates.parameters]
+locale = "und"
+
+[[gates]]
+id = "linguistic.reference_fidelity"
+kind = "custom"
+extension = "linguistic.reference_fidelity"
+blocking = false
+[gates.parameters]
+locale = "und"
+reference = "original"
