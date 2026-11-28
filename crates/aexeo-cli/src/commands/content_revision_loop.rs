@@ -187,6 +187,14 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
         Some("blocking") => ReviewScope::Blocking,
         _ => ReviewScope::All,
     };
+    let selected_gates: Option<Vec<String>> = args
+        .get_many::<String>("gate")
+        .map(|values| values.cloned().collect());
+    if selected_gates.is_some()
+        && args.value_source("scope") == Some(clap::parser::ValueSource::CommandLine)
+    {
+        user_bail!("--gate cannot be combined with --scope");
+    }
     let budget = *args
         .get_one::<u32>("max-revisions")
         .user_context("missing revision budget")?;
@@ -203,10 +211,11 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     let mut patch_proposals = 0usize;
     let mut proposals_with_extensions = 0usize;
     let mut evaluation_ms = 0.0;
-    let outcome = content_revision_loop::revise(
+    let outcome = content_revision_loop::revise_with_selection(
         &initial,
         budget as usize,
         scope,
+        selected_gates.as_deref(),
         |candidate| {
             let evaluation_started = started.map(|_| std::time::Instant::now());
             let (report, typed) = evaluate(
@@ -251,7 +260,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
             let candidate_sha256 = super::feedback::text_hash(candidate.as_bytes());
             serde_json::to_writer(
                 &mut stdout,
-                &json!({"event":"proposal_requested", "version":1, "proposal":proposal_number, "candidate_sha256":candidate_sha256, "report":current_report.borrow().as_ref()}),
+                &json!({"event":"proposal_requested", "version":1, "proposal":proposal_number, "candidate_sha256":candidate_sha256, "selected_gates":selected_gates, "report":current_report.borrow().as_ref()}),
             )?;
             writeln!(stdout)?;
             stdout.flush()?;
@@ -326,14 +335,14 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     };
     serde_json::to_writer(
         &mut stdout,
-        &json!({"event":"complete", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "candidate_sha256":super::feedback::text_hash(outcome.candidate.as_bytes()), "report":current_report.borrow().as_ref()}),
+        &json!({"event":"complete", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "candidate_sha256":super::feedback::text_hash(outcome.candidate.as_bytes()), "selected_gates":selected_gates, "report":current_report.borrow().as_ref()}),
     )?;
     writeln!(stdout)?;
     stdout.flush()?;
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "patch_proposals":patch_proposals, "evidence_source_count":args.get_many::<String>("evidence-source").map_or(0, |sources| sources.len()), "initial_extension_results":args.contains_id("extension-results"), "proposals_with_extension_results":proposals_with_extensions, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
+            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "patch_proposals":patch_proposals, "selected_gate_count":selected_gates.as_ref().map_or(0, Vec::len), "evidence_source_count":args.get_many::<String>("evidence-source").map_or(0, |sources| sources.len()), "initial_extension_results":args.contains_id("extension-results"), "proposals_with_extension_results":proposals_with_extensions, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
         );
     }
     Ok(match outcome.stop {

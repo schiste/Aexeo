@@ -9,6 +9,8 @@ use crate::content_gate::{ContentReport, GateStatus};
 /// Hard limits are independent of a caller's chosen revision budget.
 pub const MAX_REVISIONS: usize = 32;
 pub const MAX_DRAFT_BYTES: usize = 16 * 1024 * 1024;
+/// Bound the number of explicitly selected gates.
+pub const MAX_SELECTED_GATES: usize = 1000;
 
 /// Which gates participate in the stopping decision. Other gates remain in the report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,25 @@ pub fn revise<E, R>(
     initial: &str,
     max_revisions: usize,
     scope: ReviewScope,
+    evaluate: E,
+    propose: R,
+) -> Result<RevisionOutcome>
+where
+    E: FnMut(&str) -> Result<ContentReport>,
+    R: FnMut(&str, &ContentReport) -> Result<Option<String>>,
+{
+    revise_with_selection(initial, max_revisions, scope, None, evaluate, propose)
+}
+
+/// Revise against explicit gate IDs while retaining the complete report.
+/// Explicit selection overrides scope; a satisfied outcome applies only to the
+/// selected gates and is not publication approval.
+/// Missing, duplicate, or empty IDs are rejected; an unavailable selected gate stays incomplete.
+pub fn revise_with_selection<E, R>(
+    initial: &str,
+    max_revisions: usize,
+    scope: ReviewScope,
+    selected_ids: Option<&[String]>,
     mut evaluate: E,
     mut propose: R,
 ) -> Result<RevisionOutcome>
@@ -61,6 +82,18 @@ where
     E: FnMut(&str) -> Result<ContentReport>,
     R: FnMut(&str, &ContentReport) -> Result<Option<String>>,
 {
+    let selected_ids = selected_ids
+        .map(|ids| {
+            if ids.is_empty() || ids.len() > MAX_SELECTED_GATES {
+                bail!("invalid selected gate IDs");
+            }
+            let unique: HashSet<&str> = ids.iter().map(String::as_str).collect();
+            if unique.len() != ids.len() || ids.iter().any(|id| id.trim().is_empty()) {
+                bail!("invalid selected gate IDs");
+            }
+            Ok(unique)
+        })
+        .transpose()?;
     if max_revisions > MAX_REVISIONS {
         bail!("revision budget exceeds {MAX_REVISIONS}");
     }
@@ -99,7 +132,7 @@ where
         if report
             .gates
             .iter()
-            .any(|gate| gate.gate_id.trim().is_empty() || !ids.insert(&gate.gate_id))
+            .any(|gate| gate.gate_id.trim().is_empty() || !ids.insert(gate.gate_id.as_str()))
         {
             bail!("evaluation contains empty or duplicate gate identifiers");
         }
@@ -110,10 +143,18 @@ where
         } else {
             signature = Some(current);
         }
-        let selected = report
-            .gates
-            .iter()
-            .filter(|gate| scope == ReviewScope::All || gate.blocking);
+        if let Some(selected) = &selected_ids {
+            if selected.iter().any(|id| !ids.contains(id)) {
+                bail!("selected gate is absent from the evaluation");
+            }
+        }
+        let selected = report.gates.iter().filter(|gate| {
+            selected_ids
+                .as_ref()
+                .map_or(scope == ReviewScope::All || gate.blocking, |ids| {
+                    ids.contains(gate.gate_id.as_str())
+                })
+        });
         let mut failed = false;
         let mut incomplete = false;
         let mut selected_count = 0;

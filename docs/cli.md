@@ -51,6 +51,9 @@ Options:
           [default: all]
           [possible values: all, blocking]
 
+      --gate <gate>
+          Select exact gate IDs for the stopping decision; repeatable, incompatible with --scope
+
       --telemetry
           Emit aggregate counts to stderr
 

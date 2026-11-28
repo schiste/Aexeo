@@ -39,6 +39,13 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Agent revision loops from CMS content — 2026-11-23
 
+The revision loop supports an explicit set of gate IDs for targeted editorial
+repairs while retaining the full report. A selected unavailable gate remains
+incomplete; a satisfied outcome covers only the selected gates and is not
+publication approval. Local tests cover a French preset with unselected
+unavailable checks, invalid selections, mixed availability and aggregate-only
+telemetry. Deployment and representative human evaluation remain separate.
+
 The CLI accepts a complete host-supplied adapter JSON projection for
 `content-revise` ([#881](https://github.com/schiste/Aexeo/pull/881)). Its
 report and final digest bind the exact projected bytes; unavailable selected

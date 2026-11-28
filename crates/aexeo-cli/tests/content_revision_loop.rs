@@ -764,3 +764,183 @@ fn revision_binds_named_evidence_to_each_evaluation() {
         "Draft without the claim."
     );
 }
+
+#[test]
+fn selected_gates_allow_targeted_revision_without_hiding_other_coverage() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft");
+    let policy = dir.path().join("policy");
+    fs::write(&draft, "one").unwrap();
+    fs::write(
+        &policy,
+        format!(
+            "{}\n[[gates]]\nid='headings'\nkind='required_headings'\nheadings=['Intro']\n",
+            preset(3)
+        ),
+    )
+    .unwrap();
+    let source = format!("test={}", policy.display());
+    let mut session = start(
+        draft.to_str().unwrap(),
+        &source,
+        "text",
+        &["--gate", "words"],
+    );
+    let request = session.read();
+    assert_eq!(request["event"], "proposal_requested");
+    assert_eq!(request["selected_gates"], json!(["words"]));
+    assert_eq!(request["report"]["gates"][1]["status"], "not_checked");
+    session.send(json!({"action":"submit", "candidate":"one two three"}));
+    let done = session.read();
+    assert_eq!(done["stop"], "satisfied");
+    assert_eq!(done["selected_gates"], json!(["words"]));
+    assert_eq!(done["report"]["gates"][1]["status"], "not_checked");
+    assert_eq!(session.finish(), 0);
+    assert_eq!(fs::read_to_string(draft).unwrap(), "one");
+}
+
+#[test]
+fn selected_gates_reject_invalid_selection_and_keep_selected_unavailable_incomplete() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft");
+    let policy = dir.path().join("policy");
+    fs::write(&draft, "one").unwrap();
+    fs::write(
+        &policy,
+        format!(
+            "{}\n[[gates]]\nid='headings'\nkind='required_headings'\nheadings=['Intro']\n",
+            preset(3)
+        ),
+    )
+    .unwrap();
+    let source = format!("test={}", policy.display());
+    let mut session = start(
+        draft.to_str().unwrap(),
+        &source,
+        "text",
+        &["--gate", "headings"],
+    );
+    let done = session.read();
+    assert_eq!(done["stop"], "incomplete");
+    assert_eq!(done["selected_gates"], json!(["headings"]));
+    assert_eq!(session.finish(), 2);
+    let mut mixed = start(
+        draft.to_str().unwrap(),
+        &source,
+        "text",
+        &["--gate", "words", "--gate", "headings"],
+    );
+    let done = mixed.read();
+    assert_eq!(done["stop"], "incomplete");
+    assert_eq!(done["selected_gates"], json!(["words", "headings"]));
+    assert_eq!(mixed.finish(), 2);
+    for extra in [
+        vec!["--gate", "missing"],
+        vec!["--gate", "words", "--gate", "words"],
+        vec!["--gate", "words", "--scope", "all"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content-revise",
+                "--input",
+                draft.to_str().unwrap(),
+                "--preset",
+                "test",
+                "--preset-source",
+                &source,
+                "--input-format",
+                "text",
+            ])
+            .args(extra)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn french_preset_can_revise_a_framing_finding_with_other_unavailable_gates() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft.md");
+    let original =
+        "Ils connaissent les petites équipes.\n\nLeur ambition est simple : protéger les données.";
+    fs::write(&draft, original).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content-revise",
+            "--input",
+            draft.to_str().unwrap(),
+            "--preset",
+            "writing-review-fr",
+            "--gate",
+            "editorial.framing_colon",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut session = Session {
+        input: child.stdin.take().unwrap(),
+        output: BufReader::new(child.stdout.take().unwrap()),
+        child,
+    };
+    let request = session.read();
+    assert_eq!(request["event"], "proposal_requested");
+    assert!(
+        request["report"]["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|gate| gate["status"] == "not_checked")
+    );
+    session.send(json!({"action":"submit", "candidate":"Ils connaissent les petites équipes.\n\nIls protègent les données."}));
+    let done = session.read();
+    assert_eq!(done["stop"], "satisfied");
+    assert_eq!(done["selected_gates"], json!(["editorial.framing_colon"]));
+    assert!(
+        done["report"]["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|gate| gate["status"] == "not_checked")
+    );
+    assert_eq!(session.finish(), 0);
+    assert_eq!(fs::read_to_string(draft).unwrap(), original);
+}
+
+#[test]
+fn selected_gate_telemetry_contains_only_the_aggregate_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft");
+    let policy = dir.path().join("policy");
+    fs::write(&draft, "one two three").unwrap();
+    fs::write(&policy, preset(3)).unwrap();
+    let source = format!("test={}", policy.display());
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content-revise",
+            "--input",
+            draft.to_str().unwrap(),
+            "--preset",
+            "test",
+            "--preset-source",
+            &source,
+            "--input-format",
+            "text",
+            "--gate",
+            "words",
+            "--telemetry",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["selected_gate_count"], 1);
+    let serialized = String::from_utf8(output.stderr).unwrap();
+    assert!(!serialized.contains("words"));
+    assert!(!serialized.contains("one two three"));
+}
