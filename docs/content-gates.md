@@ -907,6 +907,24 @@ report, validate external observations, establish their freshness, or verify
 all inputs to the evaluation. Older records without this field remain supported;
 when it is present, inconsistent binding and scope values are rejected.
 
+When a content evaluation used named `--evidence-source` references, pass the
+same names and exact UTF-8 texts as a JSON object with `capture --evidence-sources
+references.json`. Capture compares the reference fingerprint in the report and
+stores only the digest in the note. The corpus must contain the same map in its
+`evidence_sources` field. Changed references are rejected; older reviews that
+lack a reference digest are retained but excluded from bound-review metrics when
+references are present. Blind event logs without a required reference digest are
+rejected because the reviewer cannot be shown to have received those references. A legacy evaluation report without that digest cannot
+establish the run's reference binding. The existing `text_and_metadata` scope
+still describes its original comparison; a reference digest is a separate field,
+not proof that every input or observation was bound.
+
+Blind review packets include the reference texts so the reviewer can inspect
+them. They are private artifacts: protect them like the original corpus. On
+binding or combining opinions, Aexeo checks the packet against the current
+references and keeps only the digest in review records and aggregate logs. These
+checks establish byte equality, not source authenticity or freshness.
+
 For versions 2 and 3, review metrics add `reviewed_examples` and `disagreed_examples`
 for the selected split. An example counts as disagreed only when both pass and
 fail were reported. Version 3 also reports `uncertain_reviews` and
