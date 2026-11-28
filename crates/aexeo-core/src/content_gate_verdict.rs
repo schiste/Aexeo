@@ -3302,6 +3302,9 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
         if item_preset.gates.is_empty() {
             continue;
         }
+        let native_source_digest = (native_capture.is_some()
+            && entry.media_type == crate::content_adapter::MEDIA_TYPE)
+            .then(|| format!("{:x}", Sha256::digest(text.as_bytes())));
         let mut literal_projection = None;
         let mut native_source_map = None;
         let mut heading_levels = None;
@@ -3586,7 +3589,7 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                 let index = capture.coverage.len();
                 capture.coverage.push(ChangeNativeCoverage {
                     entity_id: entry.entity_id.clone(),
-                    source_sha256: format!("{:x}", Sha256::digest(text.as_bytes())),
+                    source_sha256: native_source_digest.expect("native capture has a digest"),
                     source_map_available: native_source_map.is_some(),
                     findings: 0,
                     mapped: 0,
