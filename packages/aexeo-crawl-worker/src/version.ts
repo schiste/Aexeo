@@ -1,1 +1,1 @@
-export const WORKER_VERSION = "0.9.8";
+export const WORKER_VERSION = "0.9.9";
