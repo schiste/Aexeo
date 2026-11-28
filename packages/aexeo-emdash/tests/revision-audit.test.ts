@@ -13,6 +13,22 @@ function host() {
 const report = { preset: "article", input_id: "/revision/one", gates: [], applied_fixes: [] };
 
 describe("revision audits", () => {
+  it("distinguishes missing audits from storage read failures without leaking details", async () => {
+    const { ctx } = host();
+    expect(await getRevisionAudit(ctx as never, "missing")).toEqual({ status: "not_checked", reason: "audit_unavailable" });
+    ctx.kv.get = vi.fn(async () => { throw new Error("private storage details"); });
+    const plugin = createPlugin({ revisionAudits: true }) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    const log = { info: vi.fn() };
+    const result = await plugin.routes["get-revision-audit"]!.handler({ ...ctx, log, input: { audit_id: "e3ebc416-7899-47a4-a116-29b5f40da9e1" } });
+    expect(result).toEqual({ status: "not_checked", reason: "revision_audit_read_failed" });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(ctx.content.get).not.toHaveBeenCalled();
+    expect(log.info).toHaveBeenCalledWith("aexeo.revision_audit_read", { status: "not_checked", duration_ms: expect.any(Number) });
+    expect(JSON.stringify(log.info.mock.calls)).not.toContain("e3ebc416");
+    log.info.mockImplementation(() => { throw new Error("telemetry unavailable"); });
+    expect(await plugin.routes["get-revision-audit"]!.handler({ ...ctx, log, input: { audit_id: "e3ebc416-7899-47a4-a116-29b5f40da9e1" } })).toEqual(result);
+  });
+
   it("returns bounded diagnostics when projection or cryptographic services fail", async () => {
     const request = { collection: "posts", id: "one", revision: "rev1" };
     const projected = host();

@@ -4,6 +4,10 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- Return a sanitized `not_checked` result if reading a stored revision audit fails, distinct from a missing audit.
+
 ## [0.9.8]
 
 - Allow an explicitly configured, candidate-bound link observer for unsaved fragment audits. Invalid or unavailable observations remain unchecked; an audit never authorizes publication.

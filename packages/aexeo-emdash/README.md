@@ -266,6 +266,11 @@ stores a report in plugin KV; the second retrieves it and checks whether the
 revision is still the current draft or publication. Evaluation and report-storage
 failures return `not_checked` with `revision_evaluation_failed` or
 `revision_audit_storage_failed` respectively, without exposing exception details.
+Retrieval distinguishes an absent report (`audit_unavailable`) from a failed
+storage read (`revision_audit_read_failed`); neither returns an audit result or
+includes the underlying storage error.
+The configured route logs only retrieval status and duration, without audit
+identifiers or content; a logging failure does not change the response.
 Projection and audit-ID failures similarly report `revision_projection_failed` or
 `revision_audit_id_unavailable`; a candidate digest failure reports
 `candidate_digest_unavailable`. These identify a stage, not its root cause.
