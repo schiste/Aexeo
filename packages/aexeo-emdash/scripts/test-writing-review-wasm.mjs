@@ -1,6 +1,6 @@
 // Verify shipped presets through the public EmDash API and actual WASM bridge.
 import assert from "node:assert/strict";
-import { evaluateContent } from "../dist/content.js";
+import { evaluateContent, projectContentInput } from "../dist/content.js";
 
 const paragraph = (text) => ({ _type: "block", children: [{ _type: "span", text }] });
 const document = {
@@ -31,4 +31,22 @@ assert.equal(mediumGate?.blocking, false);
 assert.equal(mediumGate?.measurements?.range_pairs, 1);
 const missingMedium = await evaluateContent({ route: "/medium-missing", title: "Example" }, "medium-sentence-pairs-review");
 assert.equal(missingMedium.gates.find((gate) => gate.gate_id === "editorial.medium_sentence_pairs")?.status, "not_checked");
+const linguistic = await evaluateContent(document, "linguistic-observations");
+assert.deepEqual(linguistic.gates.map((gate) => gate.gate_id), [
+  "linguistic.register", "linguistic.idiom", "linguistic.reference_fidelity",
+]);
+assert.ok(linguistic.gates.every((gate) => gate.status === "not_checked" && gate.blocking === false));
+const projected = await projectContentInput(document);
+const linguisticResults = [{
+  extension: "linguistic.register",
+  parameters: { locale: "und", register: "unspecified" },
+  input: projected,
+  diagnostics: [{ message: "Review the register", line: 1, column: 1 }],
+}];
+const reviewed = await evaluateContent(document, "linguistic-observations", undefined, undefined, undefined, linguisticResults);
+assert.equal(reviewed.gates[0].status, "failed");
+assert.ok(reviewed.gates.slice(1).every((gate) => gate.status === "not_checked"));
+assert.equal(reviewed.source_locations[0].gate_id, "linguistic.register");
+const stale = await evaluateContent({ ...document, title: "Autre titre" }, "linguistic-observations", undefined, undefined, undefined, linguisticResults);
+assert.ok(stale.gates.every((gate) => gate.status === "not_checked"));
 console.log("WASM composed writing review presets passed");
