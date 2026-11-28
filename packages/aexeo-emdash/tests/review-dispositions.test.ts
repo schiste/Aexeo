@@ -108,4 +108,18 @@ describe("review route and MCP contract", () => {
     expect(info).toHaveBeenCalledWith("aexeo.revision_audit", { status: "not_checked", reason: "revision_access_unavailable", scope: "content", duration_ms: expect.any(Number), gates: 0 });
     expect(JSON.stringify(info.mock.calls)).not.toContain("private");
   });
+  it("logs only aggregate read outcomes and ignores logging failures", async () => {
+    const { createPlugin } = await import("../src/configured.js");
+    const plugin = createPlugin({}) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    const kv = store();
+    const info = vi.fn();
+    expect(await plugin.routes["get-revision-review"]!.handler({ kv, input: request, log: { info } })).toEqual({ status: "not_recorded" });
+    expect(await plugin.routes["get-revision-review-history"]!.handler({ kv, input: request, log: { info } })).toMatchObject({ status: "available" });
+    expect(info).toHaveBeenCalledWith("aexeo.review_read", { status: "not_recorded", duration_ms: expect.any(Number) });
+    expect(info).toHaveBeenCalledWith("aexeo.review_history_read", { status: "available", duration_ms: expect.any(Number) });
+    expect(JSON.stringify(info.mock.calls)).not.toContain(request.explanation.trim());
+    expect(JSON.stringify(info.mock.calls)).not.toContain(request.gate_id);
+    info.mockImplementation(() => { throw new Error("telemetry unavailable"); });
+    expect(await plugin.routes["get-revision-review"]!.handler({ kv, input: request, log: { info } })).toEqual({ status: "not_recorded" });
+  });
 });

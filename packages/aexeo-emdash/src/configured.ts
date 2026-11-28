@@ -355,13 +355,23 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         permission: "plugins:read",
         request: { body: "json" },
         input: reviewKeySchema,
-        handler: (ctx: SandboxCtx & { input: Pick<ReviewRequest, "audit_id" | "gate_id" | "finding_index"> }) => getReviewDisposition(ctx.kv, ctx.input),
+        handler: async (ctx: SandboxCtx & { input: Pick<ReviewRequest, "audit_id" | "gate_id" | "finding_index"> }) => {
+          const startedAt = Date.now();
+          const result = await getReviewDisposition(ctx.kv, ctx.input);
+          try { ctx.log?.info("aexeo.review_read", { status: result.status, duration_ms: Date.now() - startedAt }); } catch { /* telemetry is advisory */ }
+          return result;
+        },
       },
       "get-revision-review-history": {
         permission: "plugins:read",
         request: { body: "json" },
         input: reviewKeySchema,
-        handler: (ctx: SandboxCtx & { input: Pick<ReviewRequest, "audit_id" | "gate_id" | "finding_index"> }) => getReviewHistory(ctx.kv, ctx.input),
+        handler: async (ctx: SandboxCtx & { input: Pick<ReviewRequest, "audit_id" | "gate_id" | "finding_index"> }) => {
+          const startedAt = Date.now();
+          const result = await getReviewHistory(ctx.kv, ctx.input);
+          try { ctx.log?.info("aexeo.review_history_read", { status: result.status, duration_ms: Date.now() - startedAt }); } catch { /* telemetry is advisory */ }
+          return result;
+        },
       },
       // The Refresh sweep (handleAdminRoute → handleRefresh) is the
       // one consumer of `collections`. Bind the resolved list here so

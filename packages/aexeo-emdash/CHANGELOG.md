@@ -6,6 +6,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Return sanitized read errors and explicit unconfirmed outcomes for failed editorial review writes, with an event ID for reconciliation. Log aggregate review-read status and duration.
 - Return a sanitized `not_checked` result if reading a stored revision audit fails, distinct from a missing audit.
 
 ## [0.9.8]

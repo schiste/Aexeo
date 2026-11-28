@@ -388,6 +388,8 @@ deciding whether to retry. History is not guaranteed complete, and concurrent
 writers can change the current review. Storage read failures return an explicit
 `not_available` or `not_recorded` reason rather than a missing-review result;
 storage error details are not returned.
+Configured review-read telemetry contains only status and duration; logging
+errors do not change the response.
 
 ### Composable writing review
 
