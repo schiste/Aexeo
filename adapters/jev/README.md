@@ -83,6 +83,27 @@ records must match the exact claim, source, model and threshold. Input and outpu
 contain private content, and the remote provider receives each full claim and
 source. Apply the same transmission and privacy requirements as other batches.
 
+### Evaluate an explicit claim inventory with Aexeo
+
+After producing `article-reviews.json`, run the existing evidence gates over
+the article and the supplied claim/source inventory:
+
+```sh
+python3 adapters/jev/audit_batch.py article.md article-claims.json article-reviews.json \
+  --cli /path/to/aexeo-cli --input-format markdown > article-audit.json
+```
+
+The adapter creates an advisory evidence-review gate per supplied case and runs
+the CLI locally against private temporary files. Each gate has its own status:
+missing reviews remain `not_checked`. The output maps case IDs to gate IDs,
+includes the Aexeo report and aggregate local timing, and always reports article
+claim coverage as `not_established`: the supplied inventory may be incomplete.
+It does not extract claims, verify source reliability, authenticate the reviewer,
+or authorize publication. A failed gate remains advisory. A successful wrapper
+exit means a report was produced, not that all claims passed; inspect each gate.
+The input and report can contain private source text. Set `TMPDIR` to a private
+location when required by your environment.
+
 ## Import SciFact annotations
 
 The offline importer accepts the official [SciFact corpus and data schema](https://github.com/allenai/scifact/blob/master/doc/data.md), supplied locally as JSONL:
