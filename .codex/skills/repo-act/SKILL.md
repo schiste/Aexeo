@@ -482,6 +482,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `not_checked` and must not produce a passing blocking gate. Also test JSON
   encoded inside string parameters separately: validating the outer object
   cannot detect duplicate keys or non-finite values in the embedded document.
+  For remote evidence adapters, also test nested ambiguous provider responses
+  and confirm invalid batches and checkpoints cause no provider requests.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
 - For EmDash gate report tests, an empty `measurements` map may be omitted
