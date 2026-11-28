@@ -334,7 +334,12 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         permission: "plugins:read",
         request: { body: "json" },
         input: z.strictObject({ audit_id: z.uuid() }),
-        handler: (ctx: SandboxCtx & { input: { audit_id: string } }) => getRevisionAudit(ctx as never, ctx.input.audit_id),
+        handler: async (ctx: SandboxCtx & { input: { audit_id: string } }) => {
+          const startedAt = Date.now();
+          const result = await getRevisionAudit(ctx as never, ctx.input.audit_id);
+          try { ctx.log?.info("aexeo.revision_audit_read", { status: "revision_status" in result ? "retrieved" : "not_checked", duration_ms: Date.now() - startedAt }); } catch { /* telemetry is advisory */ }
+          return result;
+        },
       },
       "set-revision-review": {
         permission: "plugins:manage",
