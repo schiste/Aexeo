@@ -56,6 +56,33 @@ python3 adapters/jev/evaluate.py labels.json reviews.json
 
 The required `--max-cases` bounds the number of requests. The complete input is checked before the first request; labels and IDs are not sent to the provider. Claims and sources are sent and requests may be billed. Reviews are written only after the whole batch completes; if a request fails, earlier calls may already have incurred charges, and the command produces no usable partial result. The adapter makes no automatic retries. Batch reviews default to uncertain source reliability and are intended for support-evaluation measurements.
 
+## Review a list of article claims without benchmark labels
+
+For editorial review, provide a JSON array of explicit claim/source pairs
+instead of inventing accuracy labels:
+
+```json
+[{"id":"claim-1","claim":"The study included 14 participants.","source_text":"The study enrolled 14 participants."}]
+```
+
+Use `--unlabeled` with the bounded batch command, for either provider:
+
+```sh
+python3 adapters/jev/clef.py --cases article-claims.json --unlabeled \
+  --max-cases 10 --minimum-probability 0.9 > article-reviews.json
+python3 adapters/jev/batch.py article-claims.json --unlabeled --model jev-1.13.0 \
+  --max-cases 10 --minimum-probability 0.9 > article-reviews.json
+```
+
+The threshold is illustrative and must be calibrated. Only explicitly supplied
+claims and passages are reviewed; this does not extract claims or establish
+article-wide coverage. The records retain uncertain source reliability and do
+not authorize publication. Labels are still required by `evaluate.py` for
+accuracy metrics. The CLEF checkpoint may be used with unlabeled cases: resumed
+records must match the exact claim, source, model and threshold. Input and output
+contain private content, and the remote provider receives each full claim and
+source. Apply the same transmission and privacy requirements as other batches.
+
 ## Import SciFact annotations
 
 The offline importer accepts the official [SciFact corpus and data schema](https://github.com/allenai/scifact/blob/master/doc/data.md), supplied locally as JSONL:

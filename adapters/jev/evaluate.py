@@ -9,6 +9,48 @@ from pathlib import Path
 LABELS = {"supported", "contradicted", "uncertain"}
 
 
+def validate_review(example, review):
+    """Check a bound review without requiring or inventing an accuracy label."""
+    if review["claim"] != example["claim"] or review["source_text"] != example["source_text"]:
+        raise ValueError("review does not match example")
+    reviewer = review["reviewer"]
+    provenance = review["provenance"]
+    protocol = provenance["protocol"]
+    prefixes = {"aexeo-jev-support-v1": "jev:", "aexeo-clef-support-v1": "clef:"}
+    prefix = prefixes.get(protocol)
+    if not prefix or not isinstance(reviewer, str) or not reviewer.startswith(prefix) or not reviewer[len(prefix):].strip():
+        raise ValueError("unsupported reviewer or protocol")
+    choice = provenance["model_choice"]
+    if not isinstance(provenance["model_probability"], str) or not isinstance(provenance["threshold"], str):
+        raise ValueError("probability and threshold must be strings")
+    probability = float(provenance["model_probability"])
+    threshold = float(provenance["threshold"])
+    if choice not in LABELS or not math.isfinite(probability) or not 0 <= probability <= 1 or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("invalid model decision or probability")
+    expected_output = choice if probability >= threshold else "uncertain"
+    if review["support"] != expected_output:
+        raise ValueError("review does not match model decision and threshold")
+    return reviewer, threshold, protocol, choice, probability
+
+
+def validate_saved(examples, reviews):
+    """Validate saved reviews against input snapshots without assigning labels."""
+    by_id = {example["id"]: example for example in examples}
+    seen = set()
+    identity = None
+    for item in reviews:
+        key = item["id"]
+        if key in seen or key not in by_id:
+            raise ValueError("duplicate or unknown review id")
+        seen.add(key)
+        reviewer, threshold, protocol, _, _ = validate_review(by_id[key], item["review"])
+        current = (reviewer, threshold, protocol)
+        if identity is not None and current != identity:
+            raise ValueError("reviews must use one model version and threshold")
+        identity = current
+    return identity
+
+
 def evaluate(examples, reviews):
     if not isinstance(examples, list) or not examples or not isinstance(reviews, list):
         raise ValueError("examples and reviews must be nonempty arrays")
@@ -33,29 +75,11 @@ def evaluate(examples, reviews):
             raise ValueError("duplicate, missing, or invalid example")
         matched.add(key)
         review = by_id[key]["review"]
-        if review["claim"] != example["claim"] or review["source_text"] != example["source_text"]:
-            raise ValueError("review does not match labeled example")
-        reviewer = review["reviewer"]
-        provenance = review["provenance"]
-        protocol = provenance["protocol"]
-        prefixes = {"aexeo-jev-support-v1": "jev:", "aexeo-clef-support-v1": "clef:"}
-        prefix = prefixes.get(protocol)
-        if not prefix or not isinstance(reviewer, str) or not reviewer.startswith(prefix) or not reviewer[len(prefix):].strip():
-            raise ValueError("unsupported reviewer or protocol")
-        choice = provenance["model_choice"]
-        if not isinstance(provenance["model_probability"], str) or not isinstance(provenance["threshold"], str):
-            raise ValueError("probability and threshold must be strings")
-        probability = float(provenance["model_probability"])
-        threshold = float(provenance["threshold"])
-        if choice not in LABELS or not math.isfinite(probability) or not 0 <= probability <= 1 or not math.isfinite(threshold) or not 0 <= threshold <= 1:
-            raise ValueError("invalid model decision or probability")
+        reviewer, threshold, protocol, choice, probability = validate_review(example, review)
         if evaluation_model is None:
             evaluation_model, evaluation_threshold, evaluation_protocol = reviewer, threshold, protocol
         elif reviewer != evaluation_model or threshold != evaluation_threshold or protocol != evaluation_protocol:
             raise ValueError("reviews must use one model version and threshold")
-        expected_output = choice if probability >= threshold else "uncertain"
-        if review["support"] != expected_output:
-            raise ValueError("review does not match model decision and threshold")
         label = example["label"]
         is_correct = choice == label
         label_counts[label] += 1
