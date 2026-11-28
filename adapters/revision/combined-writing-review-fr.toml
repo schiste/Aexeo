@@ -1,0 +1,46 @@
+version = 1
+name = "French composable writing and revision review example"
+extends = ["writing-review-fr"]
+
+# All checks are advisory; external observations must be supplied explicitly.
+
+[[gates]]
+id = "editorial.literal_revision_pairs"
+kind = "custom"
+extension = "revision.literal_pairs"
+severity = "warning"
+blocking = false
+[gates.parameters]
+source = "prior"
+pairs = '[{"before":"difficultés","after":"manquent de temps"},{"before":"prendre soin de sa sécurité","after":"protéger leur activité"}]'
+minimum = "2"
+
+[[gates]]
+id = "editorial.opening_pos"
+kind = "custom"
+extension = "syntax.opening_pos"
+severity = "warning"
+blocking = false
+[gates.parameters]
+analysis = "opening_pos"
+model = "fr_core_news_sm"
+model_version = "3.8.0"
+language = "fr"
+min_sentences = "2"
+max_tokens = "80"
+
+[[gates]]
+id = "editorial.clause_alternation"
+kind = "custom"
+extension = "syntax.clause_alternation"
+severity = "warning"
+blocking = false
+[gates.parameters]
+analysis = "clause_alternation"
+model = "fr_core_news_sm"
+model_version = "3.8.0"
+language = "fr"
+min_sentences = "2"
+max_tokens = "80"
+subordinate_labels = "advcl,acl:relcl,ccomp"
+short_max_words = "11"
