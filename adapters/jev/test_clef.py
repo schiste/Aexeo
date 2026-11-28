@@ -119,7 +119,7 @@ class ClefTests(unittest.TestCase):
                 resumed.append(args[0])
                 return valid(*args)
             result = batch.run_cases(cases, clef.MODEL, 0.8, 2, "", fetch=retry, existing=saved,
-                                     on_review=lambda items: clef.write_checkpoint(checkpoint, items))
+                                     on_review=lambda items: clef.write_checkpoint(checkpoint, items), provider="clef")
             self.assertEqual(resumed, ["claim1"])
             self.assertEqual(len(result), 2)
             self.assertEqual(len(clef.read_checkpoint(checkpoint, cases, 0.8)), 2)
@@ -130,7 +130,7 @@ class ClefTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 clef.read_checkpoint(checkpoint, changed, 0.8)
             with self.assertRaises(ValueError):
-                batch.run_cases(changed, clef.MODEL, 0.8, 2, "", fetch=retry, existing=saved)
+                batch.run_cases(changed, clef.MODEL, 0.8, 2, "", fetch=retry, existing=saved, provider="clef")
 
     def test_cli_rejects_checkpoint_as_input_before_network(self):
         with tempfile.TemporaryDirectory() as folder:

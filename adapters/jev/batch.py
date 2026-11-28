@@ -13,10 +13,10 @@ from evaluate import LABELS, validate_saved
 from review import fetch_review
 
 
-def run_cases(examples, model, threshold, maximum, key, fetch=fetch_review, existing=None, on_review=None, require_labels=True):
+def run_cases(examples, model, threshold, maximum, key, fetch=fetch_review, existing=None, on_review=None, require_labels=True, provider="jev"):
     if not isinstance(examples, list) or not examples or len(examples) > maximum:
         raise ValueError("case count is empty or exceeds --max-cases")
-    if maximum < 1 or not math.isfinite(threshold) or not 0 <= threshold <= 1 or not model.strip():
+    if maximum < 1 or not math.isfinite(threshold) or not 0 <= threshold <= 1 or not model.strip() or provider not in {"jev", "clef"}:
         raise ValueError("invalid model, threshold, or maximum")
     ids = set()
     for example in examples:
@@ -31,7 +31,7 @@ def run_cases(examples, model, threshold, maximum, key, fetch=fetch_review, exis
     saved = existing or []
     if saved:
         reviewer, saved_threshold, _ = validate_saved(examples, saved)
-        if (reviewer.split(":", 1)[1] != model or saved_threshold != threshold
+        if (reviewer != f"{provider}:{model}" or saved_threshold != threshold
                 or any(item["review"]["reliability"] != "uncertain" for item in saved)):
             raise ValueError("saved reviews have a different model, threshold or source assessment")
     completed = {item["id"]: item for item in saved}

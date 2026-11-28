@@ -46,6 +46,8 @@ class BatchTests(unittest.TestCase):
             evaluate.evaluate(examples, records)
         with self.assertRaises(ValueError):
             batch.run_cases(examples, "other", 0.9, 2, "key", fake, existing=records, require_labels=False)
+        with self.assertRaises(ValueError):
+            batch.run_cases(examples, "jev-version", 0.9, 2, "key", fake, existing=records, require_labels=False, provider="clef")
         changed = [dict(item) for item in examples]
         changed[0]["source_text"] = "changed"
         with self.assertRaises(ValueError):

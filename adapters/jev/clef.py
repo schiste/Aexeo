@@ -90,7 +90,7 @@ def main():
             saved = read_checkpoint(args.checkpoint, cases, args.minimum_probability) if args.checkpoint else []
             save = (lambda reviews: write_checkpoint(args.checkpoint, reviews)) if args.checkpoint else None
             result = run_cases(cases, MODEL, args.minimum_probability, args.max_cases, "", fetch=fetch_review,
-                               existing=saved, on_review=save, require_labels=not args.unlabeled)
+                               existing=saved, on_review=save, require_labels=not args.unlabeled, provider="clef")
         else:
             with args.source.open(encoding="utf-8", newline="") as source:
                 result = fetch_review(args.claim, source.read(), MODEL, args.source_reliability, args.minimum_probability, "")
