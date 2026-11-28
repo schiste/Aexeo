@@ -20,6 +20,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("extension-results").long("extension-results").help("Input-bound external gate results for the initial draft"))
                 .arg(Arg::new("max-revisions").long("max-revisions").default_value("3").value_parser(value_parser!(u32).range(0..=32)))
                 .arg(Arg::new("scope").long("scope").default_value("all").value_parser(["all", "blocking"]))
+                .arg(Arg::new("gate").long("gate").action(ArgAction::Append).help("Select exact gate IDs for the stopping decision; repeatable, incompatible with --scope"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate counts to stderr")),
         )
         .subcommand(

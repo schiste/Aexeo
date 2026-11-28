@@ -191,7 +191,15 @@ sources were supplied. Otherwise it hashes sorted UTF-8 source names and content
 each prefixed by its eight-byte big-endian byte length. The digest can reveal
 information about predictable content and should be handled as sensitive.
 `--scope blocking` selects only blocking gates; advisory findings remain in
-the report. `--max-revisions` accepts 0–32. Selected unavailable gates stop
+the report. To revise specific failures even when other gates are unavailable,
+repeat `--gate GATE_ID` to select exact gate IDs instead of `--scope`. Every
+requested ID must exist and be unique. Proposal and completion events include
+`selected_gates`; a `satisfied` stop and exit 0 apply **only to those selected
+gates**, while the complete report retains every other gate and its status.
+A selected unavailable gate still stops as `incomplete`. This does not grant
+publication approval or establish the status of unselected checks. Without
+`--gate`, `selected_gates` is null and the existing scope behavior applies.
+`--max-revisions` accepts 0–32. Selected unavailable gates stop
 as `incomplete`; a repeated draft stops as `cycle`. Exit 0 means selected checks
 passed, 1 means another stop with a selected failure, and 2 means unavailable or
 invalid input. Inspect the event and individual checks, not the exit code alone.
@@ -220,8 +228,8 @@ model costs. `--telemetry` emits aggregate counts and durations to stderr; total
 time includes waiting for the agent and evaluation time includes child startup.
 Telemetry records the aggregate number of accepted patch proposals, whether the
 initial link snapshot and external results were supplied, how many proposals
-supplied each, and the number of named evidence sources, without content, paths
-or destinations.
+supplied each, and the number of selected gates and named evidence sources,
+without gate IDs, content, paths or destinations.
 No claim is made about semantic preservation, factual accuracy or publication
 readiness.
 
