@@ -2,6 +2,7 @@
 """Convert locally supplied SciFact claims and corpus to labeled review cases."""
 import argparse
 import json
+from json_input import loads as strict_json
 from pathlib import Path
 import sys
 
@@ -14,8 +15,8 @@ def read_jsonl(path):
             if not line.strip():
                 continue
             try:
-                yield json.loads(line)
-            except json.JSONDecodeError as error:
+                yield strict_json(line)
+            except ValueError as error:
                 raise ValueError(f"invalid JSON at {path}:{line_number}") from error
 
 

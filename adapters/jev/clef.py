@@ -2,6 +2,7 @@
 """Create optional evidence reviews with Wikimedia Lift Wing CLEF-Flash."""
 import argparse
 import json
+from json_input import loads as strict_json
 import math
 import os
 from pathlib import Path
@@ -27,7 +28,7 @@ def fetch_review(claim, source, model, reliability, threshold, _key):
     request = urllib.request.Request(ENDPOINT, data=data, headers={
         "Content-Type": "application/json", "User-Agent": USER_AGENT}, method="POST")
     with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
-        result = json.load(response)
+        result = strict_json(response.read())
     if result["model"] != MODEL:
         raise ValueError("unexpected model")
     return review_from_response(claim, source, reliability, threshold, result, provider="clef")
@@ -36,7 +37,7 @@ def fetch_review(claim, source, model, reliability, threshold, _key):
 def read_checkpoint(path, cases, threshold):
     if not path.exists():
         return []
-    saved = json.loads(path.read_text(encoding="utf-8"))
+    saved = strict_json(path.read_text(encoding="utf-8"))
     if not isinstance(saved, list):
         raise ValueError("invalid checkpoint")
     if not saved:
@@ -86,7 +87,7 @@ def main():
         parser.error("provide --claim and --source, or --cases and --max-cases")
     try:
         if args.cases:
-            cases = json.loads(args.cases.read_text(encoding="utf-8"))
+            cases = strict_json(args.cases.read_text(encoding="utf-8"))
             saved = read_checkpoint(args.checkpoint, cases, args.minimum_probability) if args.checkpoint else []
             save = (lambda reviews: write_checkpoint(args.checkpoint, reviews)) if args.checkpoint else None
             result = run_cases(cases, MODEL, args.minimum_probability, args.max_cases, "", fetch=fetch_review,

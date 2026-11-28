@@ -2,6 +2,7 @@
 """Explicitly send bounded labeled cases for review; labels are never sent."""
 import argparse
 import json
+from json_input import loads as strict_json
 import math
 import os
 from pathlib import Path
@@ -57,7 +58,7 @@ def main():
     if not key:
         parser.error("TYPESAFE_API_KEY is required")
     try:
-        examples = json.loads(args.examples.read_text(encoding="utf-8"))
+        examples = strict_json(args.examples.read_text(encoding="utf-8"))
         result = run_cases(examples, args.model, args.minimum_probability, args.max_cases, key)
         print(json.dumps(result, ensure_ascii=False))
     except (OSError, KeyError, TypeError, ValueError, urllib.error.URLError) as error:

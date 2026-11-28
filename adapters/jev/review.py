@@ -2,6 +2,7 @@
 """Create an Aexeo evidence review using an explicitly invoked Jev request."""
 import argparse
 import json
+from json_input import loads as strict_json
 import math
 import os
 from pathlib import Path
@@ -61,7 +62,7 @@ def fetch_review(claim, source, model, reliability, threshold, key):
     request = urllib.request.Request(ENDPOINT, data=payload,
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
     with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
-        result = json.load(response)
+        result = strict_json(response.read())
     if result["model"] != model:
         raise ValueError("unexpected model")
     return review_from_response(claim, source, reliability, threshold, result)
