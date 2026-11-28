@@ -780,9 +780,11 @@ registry before considering the release delivered.
   the portable binding must match that artifact. This is an opt-in consistency
   check, not authenticated execution, dependency closure or publication authority.
   The experimental Python comparator independently recomputes checked
-  `repeated_punctuation` outcomes for plain-text paragraphs and limits comparison
-  work. This does not validate rich-text outcomes, authenticate inputs, or imply
-  that the native Aethyme runner performs this comparison.
+  `repeated_punctuation` and `duplicate_paragraphs` outcomes for plain-text
+  paragraphs and limits comparison work. Case-insensitive duplicate checks
+  reject non-ASCII normalized paragraphs because runtime Unicode tables can
+  differ. This does not validate rich-text outcomes, authenticate inputs, or
+  imply that the native Aethyme runner performs this comparison.
   The Rust candidate verifier checks link-snapshot structure, change and source
   identities, and re-extracts ordered Markdown or scoped HTML destinations for
   supplied observations. Missing snapshots remain unobserved; this does not
