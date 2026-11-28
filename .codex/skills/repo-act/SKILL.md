@@ -323,6 +323,12 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   explicitly unchecked. For CMS collection metadata, test unavailable compared
   values and grouping keys independently through Rust and WASM; preserve known
   duplicate findings while incomplete coverage remains `not_checked`.
+- For an opaque CMS revision-audit error, compare authorized requests for an
+  unavailable revision, an unconfigured field and a synthetic candidate; these
+  can narrow the failing stage without exporting private content. Reproduce
+  locally with the published package and synthetic records. A source dependency
+  pin does not establish the deployed version, and stage isolation does not
+  identify the underlying cause. Respect the access boundary for real snapshots.
 - For EmDash revision-currentness checks, test each draft and published pointer
   separately when omitted, null, malformed, matching or different. Check both
   the initial audit and later retrieval: a missing pointer cannot prove that
