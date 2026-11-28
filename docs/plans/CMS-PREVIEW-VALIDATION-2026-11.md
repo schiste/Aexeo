@@ -275,3 +275,21 @@ record. Verify the registry artifact, update the host through its normal
 workflow, and rerun a connected audit against a known revision before treating
 the Preview integration as working. An audit remains advisory and does not
 verify factual accuracy or authorize publication.
+
+## Packaged 0.9.11 compatibility check, 28 November 2026
+
+Website repository `main` at `ebc9ad9590128230b8174654c379a93c03e0c1e8`
+declares EmDash 1.6.0 for the CMS. The deployed version was not established.
+The 0.9.11 release archive (SHA-256
+`4bfe7cc8d4483ab352950537014e830a19c092dd75c5b04b867cb06e6f745202`)
+was installed alongside EmDash 1.6.0 in a fresh local consumer. Revision and
+candidate fragment audits, revision and candidate link observations, and
+revision and candidate external-gate binding passed against the installed
+archive and its real WASM. `npm audit --omit=dev --audit-level=high` reported
+zero vulnerabilities in this fresh test installation; it does not describe the
+website's lockfile or deployed dependency graph.
+
+These tests do not establish compatibility with the complete Preview host,
+its permissions or deployment. At the time of this check npm did not expose
+0.9.11. Publication, artifact verification, host upgrade and a connected
+revision-audit retest remain outstanding.
