@@ -624,6 +624,9 @@ pub enum ContentGate {
         blocking: bool,
         opening_words: usize,
         max_consecutive: usize,
+        /// Opt in to whitespace-token counting for recognized Arabic script characters.
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_arabic_word_boundaries: bool,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3964,6 +3967,7 @@ impl ContentPreset {
                 ContentGate::RepeatedSentenceOpenings {
                     opening_words,
                     max_consecutive,
+                    allow_arabic_word_boundaries,
                     delimiters,
                     abbreviations,
                     ..
@@ -3998,6 +4002,15 @@ impl ContentPreset {
                                     if segment.trim().is_empty() {
                                         return;
                                     }
+                                    if !has_supported_word_boundaries(
+                                        segment,
+                                        *allow_arabic_word_boundaries,
+                                    ) {
+                                        skipped += 1;
+                                        previous = None;
+                                        consecutive = 0;
+                                        return;
+                                    }
                                     let mut bytes = 0usize;
                                     let mut words = Vec::with_capacity(*opening_words);
                                     for word in segment.split_whitespace().take(*opening_words) {
@@ -4012,7 +4025,6 @@ impl ContentPreset {
                                     if bytes <= MAX_PARAGRAPH_OPENING_BYTES
                                         && words.len() < *opening_words
                                         && !words.is_empty()
-                                        && is_simple_latin_sentence(segment)
                                         && words.iter().all(|word| !word.is_empty())
                                     {
                                         too_short += 1;
@@ -7725,6 +7737,74 @@ terms = ["bad"]
         ]);
         assert_eq!(different.gates[0].status, GateStatus::Passed);
         assert_eq!(different.gates[1].status, GateStatus::Passed);
+    }
+
+    #[test]
+    fn consecutive_openings_require_supported_word_boundaries() {
+        let source = "version=1\nname='t'\n[[gates]]\nid='opening'\nkind='repeated_sentence_openings'\nopening_words=2\nmax_consecutive=1\ndelimiters='.!?؟'\n";
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let evaluate = |source: &str, text: &str| {
+            let context = ContentContext {
+                paragraphs: Some(vec![ContentParagraph {
+                    text: text.into(),
+                    line: 1,
+                    column: 1,
+                }]),
+                ..Default::default()
+            };
+            ContentPreset::from_toml(source)
+                .unwrap()
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let arabic = "هذا مثال أول؟ هذا مثال آخر؟ نعم؟";
+        let unsupported = evaluate(source, arabic);
+        assert_eq!(unsupported.status, GateStatus::NotChecked);
+        assert_eq!(unsupported.measurements["sentences_skipped"], 3);
+        let opted_in = format!("{source}allow_arabic_word_boundaries=true\n");
+        let supported = evaluate(&opted_in, arabic);
+        assert_eq!(supported.status, GateStatus::Failed);
+        assert_eq!(supported.measurements["sentences_too_short"], 1);
+        assert_eq!(supported.measurements["sentences_skipped"], 0);
+        let mixed = evaluate(
+            &opted_in,
+            "هذا مثال أول؟ هذا مثال آخر؟ これは 文です。 التالي مثال؟",
+        );
+        assert_eq!(mixed.status, GateStatus::NotChecked);
+        assert_eq!(mixed.findings.len(), 1);
+        assert_eq!(mixed.measurements["sentences_skipped"], 1);
+        let built_in = crate::content_presets::resolve_content_preset(
+            "arabic-rhythm-review",
+            &crate::content_presets::builtin_content_presets(),
+        )
+        .unwrap();
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "هذا مثال أول؟ هذا مثال آخر؟ هذا مثال ثالث؟ نعم؟".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = built_in
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        let opening = report
+            .gates
+            .iter()
+            .find(|gate| gate.gate_id == "editorial.sentence_openings")
+            .unwrap();
+        assert_eq!(opening.status, GateStatus::Failed);
+        assert_eq!(opening.measurements["sentences_too_short"], 1);
+        assert_eq!(opening.measurements["sentences_skipped"], 0);
+        let unsupported_spaced = evaluate(source, "Это пример. Это пример.");
+        assert_eq!(unsupported_spaced.status, GateStatus::NotChecked);
+        assert!(unsupported_spaced.findings.is_empty());
     }
 
     #[test]
