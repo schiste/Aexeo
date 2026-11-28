@@ -224,6 +224,45 @@ class TestSyntaxAdapter(unittest.TestCase):
         with self.assertRaises(ValueError):
             review.parameters({**params, "max_distance": "0.2"})
 
+    def test_opening_pos_sequence_is_configurable_and_requires_full_coverage(self):
+        params = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80", "opening_tokens": "2"}
+        first, second, third = Sentence(0, 6, 0), Sentence(7, 14, 3), Sentence(15, 21, 6)
+        for sentence in (first, second, third):
+            sentence[0].pos_ = "DET"
+            sentence[1].pos_ = "NOUN"
+        third[1].pos_ = "VERB"
+        model = Model([first, second, third])
+        data = {"text": "First. Second. Third."}
+        result = review.evaluate(data, params, model)[0]
+        self.assertEqual(result["parameters"], params)
+        self.assertEqual(len(result["diagnostics"]), 1)
+        self.assertIn("DET + NOUN", result["diagnostics"][0]["message"])
+        self.assertEqual(result["diagnostics"][0]["column"], 8)
+        fake = type("Fake", (), {"load": staticmethod(lambda name: model)})()
+        session = review.SyntaxReviewSession(lambda: fake, telemetry=True)
+        self.assertEqual(session.observe(data, params, text_complete=True)["status"], "processed")
+        self.assertEqual(session.telemetry["results"], 1)
+        self.assertNotIn(data["text"], json.dumps(session.telemetry))
+        # The legacy configuration still compares only the first label.
+        legacy = dict(params)
+        del legacy["opening_tokens"]
+        self.assertEqual(len(review.evaluate(data, legacy, model)[0]["diagnostics"]), 2)
+        punct = Token(2, "PUNCT", "punct")
+        punct.head = first[0]
+        first[0].children.append(punct)
+        first.insert(0, punct)
+        self.assertEqual(len(review.evaluate(data, params, model)[0]["diagnostics"]), 1)
+        second[1].pos_ = "PUNCT"
+        with self.assertRaises(review.Unavailable):
+            review.evaluate(data, params, model)
+        for invalid in ("0", "9", "-1", "two"):
+            with self.subTest(value=invalid), self.assertRaises(ValueError):
+                review.parameters({**params, "opening_tokens": invalid})
+        with self.assertRaises(ValueError):
+            review.parameters({**params, "opening_tokens": "2", "max_tokens": "1"})
+        with self.assertRaises(ValueError):
+            review.parameters({**PARAMS, "opening_tokens": "2"})
+
     def test_sentence_spans_cannot_hide_paragraph_boundaries(self):
         text = "A.\n\nB."
         opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}

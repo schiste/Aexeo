@@ -72,6 +72,31 @@ with tempfile.TemporaryDirectory() as directory:
             if stream and not stream.closed:
                 stream.close()
 
+# Bind a two-label opening pattern to an explicitly composed custom preset.
+with tempfile.TemporaryDirectory() as directory:
+    folder = Path(directory)
+    multi_preset = folder / "multi.toml"
+    multi_preset.write_text(preset.read_text() + '\nopening_tokens = "2"\n')
+    params["opening_tokens"] = "2"
+    extension_file = folder / "opening.json"
+    extension_file.write_text(json.dumps(observe("First. Second.")))
+    evaluated = subprocess.run([cli, "content", "-", "--input-format", "text",
+        "--preset", "test", "--preset-source", f"test={multi_preset}",
+        "--extension-results", str(extension_file), "--format", "json"],
+        input="First. Second.", text=True, capture_output=True, timeout=30)
+    report = json.loads(evaluated.stdout)
+    assert report["gates"][0]["status"] == "failed", report
+    assert "VERB + NOUN" in report["gates"][0]["findings"][0]["message"], report
+    # A result for different parameters cannot satisfy the composed preset.
+    del params["opening_tokens"]
+    extension_file.write_text(json.dumps(observe("First. Second.")))
+    mismatched = subprocess.run([cli, "content", "-", "--input-format", "text",
+        "--preset", "test", "--preset-source", f"test={multi_preset}",
+        "--extension-results", str(extension_file), "--format", "json"],
+        input="First. Second.", text=True, capture_output=True, timeout=30)
+    report = json.loads(mismatched.stdout)
+    assert report["gates"][0]["status"] == "not_checked", report
+
 # Exercise the shipped literal prior-draft adapter through the same revision loop.
 # Literal pair matches are observations, not proof of meaning preservation.
 revision = root / "adapters/revision"

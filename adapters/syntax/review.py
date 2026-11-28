@@ -40,6 +40,8 @@ def parameters(raw):
         required.add("analysis")
     if mode == "coordinated_nouns" and "marker_labels" in raw:
         required.add("marker_labels")
+    if mode == "opening_pos" and "opening_tokens" in raw:
+        required.add("opening_tokens")
     if set(raw) != required or not all(isinstance(v, str) and v for v in raw.values()):
         raise ValueError("parameters must contain exactly the documented nonempty string fields")
     try:
@@ -48,10 +50,13 @@ def parameters(raw):
         max_tokens = int(raw["max_tokens"])
         short_max_words = int(raw["short_max_words"]) if mode == "clause_alternation" else None
         min_items = int(raw["min_items"]) if mode == "coordinated_nouns" else None
+        opening_tokens = int(raw.get("opening_tokens", "1")) if mode == "opening_pos" else None
     except ValueError as exc:
         raise ValueError("invalid numeric parameters") from exc
     if (threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 1)) or not (1 if mode == "coordinated_nouns" else 2) <= minimum <= MAX_SENTENCES or not 1 <= max_tokens <= 100:
         raise ValueError("numeric parameters are out of range")
+    if opening_tokens is not None and not 1 <= opening_tokens <= min(8, max_tokens):
+        raise ValueError("opening token count is out of range")
     if mode == "clause_alternation":
         labels = raw["subordinate_labels"].split(",")
         if not 1 <= short_max_words <= 100 or len(labels) > 32 or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:.-]{0,63}", label) for label in labels) or len(set(labels)) != len(labels):
@@ -231,11 +236,12 @@ def evaluate(input_data, raw_parameters, nlp):
                  "input": input_data, "diagnostics": findings}]
     opening_pos = []
     if mode == "opening_pos":
+        count = int(raw_parameters.get("opening_tokens", "1"))
         for sentence in sentences:
-            opening = next((token for token in sentence if token.pos_ not in {"PUNCT", "SPACE"}), None)
-            if opening is None or not opening.pos_:
-                raise Unavailable("sentence opening has no part-of-speech annotation")
-            opening_pos.append(opening.pos_)
+            opening = [token.pos_ for token in sentence if token.pos_ not in {"PUNCT", "SPACE"}][:count]
+            if len(opening) != count or any(not label for label in opening):
+                raise Unavailable("sentence opening lacks the requested part-of-speech sequence")
+            opening_pos.append(tuple(opening))
     clause_shapes = []
     if mode == "clause_alternation":
         labels = set(raw_parameters["subordinate_labels"].split(","))
@@ -256,7 +262,11 @@ def evaluate(input_data, raw_parameters, nlp):
         if mode == "opening_pos":
             if opening_pos[i - 1] != opening_pos[i]:
                 continue
-            message = f"Adjacent sentences start with the same part-of-speech label ({opening_pos[i]}); review the opening in context."
+            if len(opening_pos[i]) == 1:
+                message = f"Adjacent sentences start with the same part-of-speech label ({opening_pos[i][0]}); review the opening in context."
+            else:
+                pattern = " + ".join(opening_pos[i])
+                message = f"Adjacent sentences start with the same part-of-speech sequence ({pattern}); review the opening in context."
         elif mode == "clause_alternation":
             left, right = clause_shapes[i - 1], clause_shapes[i]
             limit = int(raw_parameters["short_max_words"])
