@@ -68,3 +68,14 @@ prove grammatical parallelism, or identify every list. Model errors and mixed
 parts of speech can affect coverage. A matching group may be deliberate; the
 adapter never rewrites or removes content. Missing parser annotations, source
 coverage or model compatibility yield `not_checked`, not a clean pass.
+
+## Batch several observations
+
+The parameters JSON may also contain an array of 1–16 distinct parameter maps.
+Each map must match a configured gate exactly. Adjacent entries using the same
+model share its load and parse; changing the model reloads it. Results remain
+individually bound to their parameters and input. A failed observation is omitted
+while other observations may still be returned, so inspect every gate's status.
+Invalid or duplicate configurations reject the batch before any model is run.
+The existing single-object form and coverage attestation remain unchanged. See
+`../revision/README.md` for a composed French workflow.

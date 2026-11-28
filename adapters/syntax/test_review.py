@@ -269,6 +269,49 @@ class TestSyntaxAdapter(unittest.TestCase):
                 self.assertIn("not checked", err.getvalue())
                 self.assertNotIn("omitted", err.getvalue())
 
+    def test_batch_reuses_model_and_parse_and_preserves_individual_results(self):
+        opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        clauses = {"analysis": "clause_alternation", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80", "subordinate_labels": "advcl,ccomp", "short_max_words": "11"}
+        data = {"text": "First. Second."}
+        class CountingModel(Model):
+            calls = 0
+            def __call__(self, text):
+                self.calls += 1
+                return super().__call__(text)
+        model = CountingModel([Sentence(0, 6, 0), Sentence(7, 14, 2)])
+        loads = []
+        fake = type("Fake", (), {"load": staticmethod(lambda name: (loads.append(name), model)[1])})()
+        configs = [opening, {**opening, "model_version": "wrong"}, clauses]
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            results = review.evaluate_batch(data, review.parameter_batch(configs), fake)
+        self.assertEqual(loads, ["en_core_web_sm"])
+        self.assertEqual(model.calls, 1)
+        self.assertEqual([result["extension"] for result in results], ["syntax.opening_pos", "syntax.clause_alternation"])
+        self.assertEqual([result["parameters"] for result in results], [opening, clauses])
+        self.assertIn("not checked", err.getvalue())
+        self.assertEqual(results[0], review.evaluate(data, opening, model)[0])
+        self.assertEqual(results[1], review.evaluate(data, clauses, model)[0])
+        for invalid in ([], [opening] * 2, [opening] * (review.MAX_BATCH + 1), [opening, {}]):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                review.parameter_batch(invalid)
+
+    def test_batch_cli_without_attestation_never_loads_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "input.json").write_text('{"text":"First. Second."}')
+            (root / "params.json").write_text(json.dumps([PARAMS, {**PARAMS, "max_distance": "0.3"}]))
+            fake = type("Fake", (), {"load": staticmethod(lambda name: self.fail("unexpected model load"))})()
+            arguments = ["review.py", str(root / "input.json"), str(root / "params.json")]
+            with patch.object(sys, "argv", arguments), patch.dict(sys.modules, {"spacy": fake}), contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(review.main(), 0)
+                self.assertEqual(json.loads(out.getvalue()), [])
+            model = Model([Sentence(0, 6, 0), Sentence(7, 14, 2)])
+            fake = type("Fake", (), {"load": staticmethod(lambda name: model)})()
+            with patch.object(sys, "argv", arguments + ["--text-complete"]), patch.dict(sys.modules, {"spacy": fake}), contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(review.main(), 0)
+                results = json.loads(out.getvalue())
+                self.assertEqual([item["parameters"]["max_distance"] for item in results], ["0.2", "0.3"])
+
     def test_json_files_are_bounded_before_decoding(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "oversized.json"

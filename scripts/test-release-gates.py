@@ -155,6 +155,7 @@ class SyntaxReleaseTests(unittest.TestCase):
             "revision.literal_pairs": root / "example-fr-parameters.json",
             "syntax.opening_pos": root.parent / "syntax/opening-pos-parameters-fr.json",
             "syntax.clause_alternation": root.parent / "syntax/clause-alternation-parameters-fr.json",
+            "syntax.coordinated_nouns": root.parent / "syntax/coordinated-nouns-parameters-fr.json",
         }
         self.assertEqual({gate["extension"] for gate in preset["gates"]}, set(expected))
         for gate in preset["gates"]:
