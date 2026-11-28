@@ -831,3 +831,5 @@ For a crawled page, a root-relative link follows the document’s observed
 does not treat the link as a local target, and discovery does not enqueue its
 path on the crawl origin. Static files without an observed URL retain legacy
 behavior.
+
+Source page counts use parsed URL identity (for example, hostname case and the default port are normalized); the original source URL remains in each evidence record. Query strings and trailing slashes remain distinct. Duplicate crawl URLs are reported even when their spellings normalize to the same URL; counts from an incomplete or duplicate crawl are observations, not proof of inventory completeness.

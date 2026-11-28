@@ -55,15 +55,15 @@ struct Accumulator {
     evidence: Vec<LinkEvidence>,
 }
 
-/// Count exactly observed source URLs. Query variants remain distinct and
+/// Count URL-parser-equivalent source URLs once. Query variants remain distinct and
 /// redirects, canonical aliases and locale fallbacks are never inferred here.
 /// Absence from this report is not evidence that a page is an orphan.
 pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
     let mut destinations = BTreeMap::<String, Accumulator>::new();
     // Each observed source can occur in many destinations and count sets.
     // Share its allocation while retaining the original evidence unchanged.
-    let mut source_pool = BTreeSet::<Rc<str>>::new();
-    let mut last_source: Option<Rc<str>> = None;
+    let mut source_pool = BTreeMap::<String, Rc<str>>::new();
+    let mut last_source: Option<(String, Rc<str>)> = None;
     let mut same_document = Vec::new();
     let mut external = Vec::new();
     let mut unsupported = Vec::new();
@@ -71,21 +71,19 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
     for link in evidence {
         match &link.resolution {
             LinkResolution::Internal { url } => {
-                let source = if let Some(source) = last_source
-                    .as_ref()
-                    .filter(|source| source.as_ref() == link.source.as_str())
+                let source = if let Some((_, source)) =
+                    last_source.as_ref().filter(|(raw, _)| raw == &link.source)
                 {
                     Rc::clone(source)
                 } else {
-                    let source = match source_pool.get(link.source.as_str()) {
-                        Some(source) => Rc::clone(source),
-                        None => {
-                            let source: Rc<str> = Rc::from(link.source.as_str());
-                            source_pool.insert(Rc::clone(&source));
-                            source
-                        }
-                    };
-                    last_source = Some(Rc::clone(&source));
+                    let source =
+                        Rc::clone(source_pool.entry(link.source.clone()).or_insert_with(|| {
+                            let normalized = url::Url::parse(&link.source)
+                                .map(String::from)
+                                .unwrap_or_else(|_| link.source.clone());
+                            Rc::from(normalized)
+                        }));
+                    last_source = Some((link.source.clone(), Rc::clone(&source)));
                     source
                 };
                 let destination = destinations.entry(url.clone()).or_default();
@@ -306,6 +304,47 @@ mod tests {
             json["destinations"][0]["source_pages_by_context"]["body"],
             2
         );
+    }
+
+    #[test]
+    fn equivalent_url_spellings_count_as_one_source_without_losing_evidence() {
+        let mut links = extract_links(
+            "<main><a href='/target' rel='nofollow'>first</a></main>",
+            "https://EXAMPLE.org:443/source",
+            "https://example.org",
+            None,
+        );
+        links.extend(extract_links(
+            "<main><a href='/target' rel='nofollow'>second</a></main>",
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        ));
+        let result = count_links(links);
+        let target = &result.destinations[0];
+        assert_eq!(target.distinct_source_pages, 1);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Body], 1);
+        assert_eq!(target.source_pages_by_rel["nofollow"], 1);
+        assert_eq!(target.evidence.len(), 2);
+        assert_ne!(target.evidence[0].source, target.evidence[1].source);
+    }
+
+    #[test]
+    fn source_queries_and_trailing_slashes_remain_distinct() {
+        let mut links = Vec::new();
+        for source in [
+            "https://example.org/source",
+            "https://example.org/source/",
+            "https://example.org/source?q=1",
+        ] {
+            links.extend(extract_links(
+                "<main><a href='/target'>link</a></main>",
+                source,
+                "https://example.org",
+                None,
+            ));
+        }
+        assert_eq!(count_links(links).destinations[0].distinct_source_pages, 3);
     }
 
     #[test]
