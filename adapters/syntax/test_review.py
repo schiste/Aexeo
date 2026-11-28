@@ -353,6 +353,28 @@ class TestSyntaxAdapter(unittest.TestCase):
                 review.load_json(path, 9)
             self.assertEqual(review.load_json(path, 10), 1234567890)
 
+    def test_cli_rejects_ambiguous_or_non_json_inputs_without_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_file, params_file = root / "input.json", root / "params.json"
+            valid_input = '{"text":"First. Second.","metadata":{"title":"A"}}'
+            valid_params = json.dumps(PARAMS)
+            cases = [
+                ('{"text":"First.","text":"Second."}', valid_params),
+                ('{"text":"First. Second.","metadata":{"title":"A","title":"B"}}', valid_params),
+                ('{"text":"First. Second.","extra":NaN}', valid_params),
+                ('{"text":"First. Second.","extra":1e999}', valid_params),
+                (valid_input, valid_params[:-1] + ',"model":"other"}'),
+                (valid_input, '[%s,{"value":Infinity}]' % valid_params),
+            ]
+            for input_data, parameters in cases:
+                input_file.write_text(input_data, encoding="utf-8")
+                params_file.write_text(parameters, encoding="utf-8")
+                result = subprocess.run([sys.executable, "-S", str(Path(review.__file__)), str(input_file), str(params_file), "--text-complete"], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("First.", result.stderr)
+
     def test_actual_cli_without_spacy_produces_no_extension_result(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
