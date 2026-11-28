@@ -657,6 +657,10 @@ registry before considering the release delivered.
   retained alongside link observations and never applied to unsaved candidates.
   Provider execution and its outcome are distinct from trust, freshness and
   publication authorization; the host still owns those guarantees.
+  Unsaved fragment audits also support a separately installed candidate custom
+  gate provider: it must echo the candidate JSON digest, and its results must
+  match the projected input. This does not bind publication state or authenticate
+  the provider; failures leave the corresponding gate unchecked.
   Incremental item and composed collection checks also accept complete,
   source-bound observation inventories for each candidate; changed observations
   force reevaluation even for unchanged content ([PR #797](https://github.com/schiste/Aexeo/pull/797)).

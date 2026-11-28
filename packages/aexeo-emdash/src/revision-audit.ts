@@ -43,6 +43,13 @@ export type RevisionExternalGateProvider = (request: {
   locale: string | undefined; preset: string; input: ExtensionInput;
 }) => Promise<ExternalGateResult[]>;
 
+/** A separately installed provider for an unsaved candidate. The host must
+ * echo the candidate digest and return results bound to the projected input. */
+export type CandidateExternalGateProvider = (request: {
+  collection: string; id: string; revision: string; field: string;
+  candidate_sha256_json: string; locale: string | undefined; preset: string; input: ExtensionInput;
+}) => Promise<{ candidate_sha256_json: string; results: ExternalGateResult[] }>;
+
 /** Trusted host projection for the locale of the exact requested revision.
  * The host must establish that the value belongs to that revision. */
 export type RevisionLocaleProvider = (request: {
@@ -67,6 +74,7 @@ export interface RevisionAuditOptions {
   projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>;
   revisionLinkObservations?: RevisionLinkObservationProvider | undefined;
   revisionExternalGates?: RevisionExternalGateProvider | undefined;
+  candidateExternalGates?: CandidateExternalGateProvider | undefined;
   projectContent?: ((document: EmdashDocument, evidence?: Record<string, string>) => Promise<ExtensionInput>) | undefined;
   onExternalGateTelemetry?: ((event: ExternalGateTelemetry) => void) | undefined;
   candidateLinkObservations?: CandidateLinkObservationProvider | undefined;
@@ -189,15 +197,23 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
   }
   let externalResults: ExternalGateResult[] | undefined;
   let externalInvoked = false;
-  if (candidate === undefined && options.revisionExternalGates && report.gates.some((gate) => gate.required_capability === "extension")) {
+  const externalProviderAvailable = candidate === undefined ? options.revisionExternalGates !== undefined : options.candidateExternalGates !== undefined;
+  if (externalProviderAvailable && report.gates.some((gate) => gate.required_capability === "extension")) {
     const started = options.onExternalGateTelemetry ? performance.now() : 0;
     let status: ExternalGateTelemetry["status"] = "error";
     try {
       if (!options.projectContent) throw new Error("content projection unavailable");
       const projected = await options.projectContent(adapted.document, evidence);
       externalInvoked = true;
-      const results = await options.revisionExternalGates({ collection, id, revision,
-        ...(field === undefined ? {} : { field }), locale: localeAtAudit ?? undefined, preset: selected.name, input: projected });
+      const common = { collection, id, revision, locale: localeAtAudit ?? undefined, preset: selected.name, input: projected };
+      let results: ExternalGateResult[];
+      if (candidate === undefined) {
+        results = await options.revisionExternalGates!({ ...common, ...(field === undefined ? {} : { field }) });
+      } else {
+        const response = await options.candidateExternalGates!({ ...common, field: field!, candidate_sha256_json: candidate.digest });
+        if (!response || response.candidate_sha256_json !== candidate.digest) throw new Error("candidate extension mismatch");
+        results = response.results;
+      }
       if (!Array.isArray(results)) throw new Error("invalid extension results");
       const evaluated = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence,
         options.onContentEvaluationTelemetry, results);
@@ -269,7 +285,7 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
   }[runtimeProviders];
   const localeLimitation = localeProviderInvoked ? "the preset locale is supplied by the host for the requested revision" : "the preset locale is taken from the current record";
   const finalProviderLimitation = externalInvoked
-    ? "The revision extension provider was invoked; the report records whether revision locale and link providers were invoked. Other runtime providers were not invoked."
+    ? `The ${candidate === undefined ? "revision" : "candidate"} extension provider was invoked; the report records whether revision locale and link providers were invoked. Other runtime providers were not invoked.`
     : providerLimitation;
   const limitation = `${candidate === undefined ? "" : "This is an unsaved proposed fragment, not the contents of the base revision; revision-specific link observations and list-structure attestations were not used. "}${finalProviderLimitation} Rendered page metadata and source freshness are not verified; ${localeLimitation}; passing does not establish factual accuracy or currentness and does not authorize publication.`;
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
@@ -280,7 +296,7 @@ async function auditRevisionInternal(ctx: RevisionContext, input: RevisionAuditR
       publication_authorization: "not_granted" as const,
       rendered_page: "not_checked" as const,
       source_freshness: "not_checked" as const,
-      runtime_providers: externalInvoked ? runtimeProviders === "not_invoked" ? "revision_external_gates_invoked" : `${runtimeProviders}_and_revision_external_gates` : runtimeProviders,
+      runtime_providers: externalInvoked ? runtimeProviders === "not_invoked" ? `${candidate === undefined ? "revision" : "candidate"}_external_gates_invoked` : `${runtimeProviders}_and_${candidate === undefined ? "revision" : "candidate"}_external_gates` : runtimeProviders,
       locale_source: localeProviderInvoked ? "revision_provider" as const : "current_record" as const,
     },
     input_coverage: {

@@ -147,3 +147,37 @@ const mismatchedPlugin = createPlugin({ revisionAudits: true, contentPreset: {
 const mismatched = await mismatchedPlugin.routes["audit-revision"].handler({ ...ctx, input });
 assert.equal(mismatched.report.gates[0].status, "not_checked");
 console.log("WASM historical extension audit test passed");
+
+const candidateExtensionCalls = [];
+const candidateExtensionEvents = [];
+const candidateExtensionPlugin = createPlugin({ revisionAudits: true, contentPreset: {
+  name: "revision-extension", sources: { "revision-extension": extensionPolicy },
+  fragmentFieldsByCollection: { posts: { intro: "revision-extension" } },
+} }, {
+  revisionExternalGates: async () => { throw new Error("revision provider must not run"); },
+  candidateExternalGates: async request => {
+    candidateExtensionCalls.push(request);
+    return { candidate_sha256_json: request.candidate_sha256_json, results: [{ extension: "example.rule", parameters: {}, input: request.input, diagnostics: [] }] };
+  }, onExternalGateTelemetry: event => candidateExtensionEvents.push(event),
+});
+const candidateExtensionAudit = await candidateExtensionPlugin.routes["audit-candidate"].handler({ ...ctx, input: { ...input, candidate: "Proposed candidate." } });
+assert.equal(candidateExtensionAudit.status, "evaluated");
+assert.equal(candidateExtensionAudit.report.gates[0].status, "passed");
+assert.equal(candidateExtensionCalls[0].input.text, "Proposed candidate.");
+assert.equal(candidateExtensionCalls[0].candidate_sha256_json, candidateExtensionAudit.candidate.sha256_json);
+assert.equal(candidateExtensionAudit.assurance.runtime_providers, "candidate_external_gates_invoked");
+assert.equal(candidateExtensionAudit.assurance.publication_authorization, "not_granted");
+assert.equal(candidateExtensionEvents[0].status, "success");
+assert.ok(!JSON.stringify(candidateExtensionEvents).includes("Proposed"));
+for (const invalid of ["digest", "input"]) {
+  const invalidPlugin = createPlugin({ revisionAudits: true, contentPreset: {
+    name: "revision-extension", sources: { "revision-extension": extensionPolicy },
+    fragmentFieldsByCollection: { posts: { intro: "revision-extension" } },
+  } }, { candidateExternalGates: async request => ({
+    candidate_sha256_json: invalid === "digest" ? "wrong" : request.candidate_sha256_json,
+    results: [{ extension: "example.rule", parameters: {}, input: invalid === "input" ? { ...request.input, text: "different" } : request.input, diagnostics: [] }],
+  }) });
+  const invalidAudit = await invalidPlugin.routes["audit-candidate"].handler({ ...ctx, input: { ...input, candidate: "Proposed candidate." } });
+  assert.equal(invalidAudit.report.gates[0].status, "not_checked");
+}
+console.log("WASM candidate extension audit binding test passed");
