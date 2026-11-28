@@ -1102,7 +1102,7 @@ fn redirect_credit(
     let mut conditional = std::collections::BTreeSet::new();
     let mut nonconditional = std::collections::BTreeSet::new();
     let mut contexts =
-        std::collections::BTreeMap::<LinkContext, std::collections::BTreeSet<&str>>::new();
+        std::collections::BTreeMap::<LinkContext, std::collections::BTreeSet<String>>::new();
     for link in chain_urls
         .iter()
         .filter_map(|url| by_destination.get(url.as_str()))
@@ -1112,16 +1112,14 @@ fn redirect_credit(
             source.as_deref().unwrap_or(&link.source) != own.as_deref().unwrap_or(&page.url)
         })
     {
-        sources.insert(link.source.as_str());
+        let source = normalized_url(&link.source).unwrap_or_else(|| link.source.clone());
+        sources.insert(source.clone());
         if link.is_nonconditional() {
-            nonconditional.insert(link.source.as_str());
+            nonconditional.insert(source.clone());
         } else {
-            conditional.insert(link.source.as_str());
+            conditional.insert(source.clone());
         }
-        contexts
-            .entry(link.context)
-            .or_default()
-            .insert(link.source.as_str());
+        contexts.entry(link.context).or_default().insert(source);
     }
     (!sources.is_empty()).then(|| RedirectCredit {
         distinct_source_pages: sources.len(),
@@ -1371,7 +1369,7 @@ fn build_link_report_with(
         Some(_) => {}
     }
     for page in &input.pages {
-        if !seen.insert(&page.url) {
+        if !seen.insert(normalized_url(&page.url).unwrap_or_else(|| page.url.clone())) {
             issues.push("duplicate_crawl_url".to_string());
         }
         let valid = Url::parse(&page.url)
@@ -2135,6 +2133,20 @@ mod tests {
         assert!(baseline.evaluate(&duplicate).is_err());
         assert!(
             build_link_report(&duplicate)
+                .unwrap()
+                .issues
+                .contains(&"duplicate_crawl_url".to_string())
+        );
+    }
+
+    #[test]
+    fn duplicate_crawl_url_detects_parser_equivalent_spelling() {
+        let mut input = incremental_fixture();
+        let mut duplicate = input.pages[0].clone();
+        duplicate.url = duplicate.url.replace("example.org", "EXAMPLE.org:443");
+        input.pages.push(duplicate);
+        assert!(
+            build_link_report(&input)
                 .unwrap()
                 .issues
                 .contains(&"duplicate_crawl_url".to_string())
@@ -3304,6 +3316,40 @@ mod tests {
             url: url.into(),
             status_code,
         }
+    }
+
+    #[test]
+    fn redirect_credit_normalizes_equivalent_source_urls() {
+        let mut evidence = crate::link_evidence::extract_links(
+            "<main><a href='/old'>a</a></main>",
+            "https://EXAMPLE.org:443/source",
+            "https://example.org",
+            None,
+        );
+        evidence.extend(crate::link_evidence::extract_links(
+            "<main><a href='/old'>b</a></main>",
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        ));
+        let counts = count_links(evidence);
+        let by_destination = counts
+            .destinations
+            .iter()
+            .map(|entry| (entry.destination.as_str(), entry))
+            .collect();
+        let page = RenderedPage {
+            url: "https://example.org/new".into(),
+            html: String::new(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: Some("https://example.org/old".into()),
+            redirect_chain: vec![hop("https://example.org/old", 301)],
+            redirected_arrivals: Vec::new(),
+        };
+        let credit = redirect_credit(&page, &by_destination).unwrap();
+        assert_eq!(credit.distinct_source_pages, 1);
+        assert_eq!(credit.source_pages_by_context[&LinkContext::Body], 1);
     }
 
     #[test]
