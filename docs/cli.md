@@ -35,6 +35,9 @@ Options:
       --metadata <metadata>
           JSON object of metadata string values
 
+      --evidence-source <evidence-source>
+          Named UTF-8 reference snapshot as NAME=PATH; repeatable and fixed across revisions
+
       --link-observations <link-observations>
           Source-bound link observation snapshot for the initial draft
 

@@ -180,7 +180,16 @@ full submission.
 The default is Markdown, all configured gates and three proposals. Set
 `--input-format` to `text`, `paragraph-text`, `markdown` or `html`, use
 `--html-scope main` for a scoped HTML review, and use the same repeatable
-`--preset-source NAME=PATH` and `--metadata PATH` inputs as `content`.
+`--preset-source NAME=PATH`, `--metadata PATH` and repeatable
+`--evidence-source NAME=PATH` inputs as `content`. Named reference snapshots are
+read for each evaluation and bound by a digest of the complete name-to-content
+map. A changed snapshot stops the session; a missing required snapshot remains
+`not_checked`. These checks compare observed snapshots, not source authenticity,
+freshness, semantic preservation or changes made after evaluation.
+The `evidence_sources_sha256` field in JSON input fingerprints is null when no
+sources were supplied. Otherwise it hashes sorted UTF-8 source names and contents,
+each prefixed by its eight-byte big-endian byte length. The digest can reveal
+information about predictable content and should be handled as sensitive.
 `--scope blocking` selects only blocking gates; advisory findings remain in
 the report. `--max-revisions` accepts 0–32. Selected unavailable gates stop
 as `incomplete`; a repeated draft stops as `cycle`. Exit 0 means selected checks
@@ -189,15 +198,16 @@ invalid input. Inspect the event and individual checks, not the exit code alone.
 
 Every evaluation invokes the installed CLI as a child process. It compares the
 child's exit with its gate report, binds the report to the candidate bytes and
-checks that the resolved policy and metadata fingerprints do not change between
-evaluations. This detects these changes, not a malicious evaluator or future
+checks that the resolved policy, metadata and evidence-source fingerprints do
+not change between evaluations. This detects these changes, not a malicious evaluator or future
 publication races. The optional source-bound link observations described below are
 supported alongside explicitly supplied external gate results. Use
 `--extension-results PATH` for the initial draft and include
 `"extension_results":"PATH"` in each submit or patch proposal to supply a new
 result file. Omitting it clears the previous results. Generate each result against
 the exact candidate projection using `content - --export-adapter-input` with
-the same input format, HTML scope and metadata; the content evaluator validates
+the same input format, HTML scope, metadata and named evidence sources; the
+content evaluator validates
 the complete projection and parameters. For `adapter-json`, the host must obtain
 the corresponding `ContentInput` projection itself; that format does not support
 `--export-adapter-input`. Stale or missing results remain `not_checked`. The
@@ -209,8 +219,9 @@ child report also have byte limits. The caller must manage idle timeouts and
 model costs. `--telemetry` emits aggregate counts and durations to stderr; total
 time includes waiting for the agent and evaluation time includes child startup.
 Telemetry records the aggregate number of accepted patch proposals, whether the
-initial link snapshot and external results were supplied and how many proposals
-supplied each, without content, paths or destinations.
+initial link snapshot and external results were supplied, how many proposals
+supplied each, and the number of named evidence sources, without content, paths
+or destinations.
 No claim is made about semantic preservation, factual accuracy or publication
 readiness.
 

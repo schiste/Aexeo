@@ -24,6 +24,11 @@ Verification: variance and opening rules passed their individual full CI and Aet
 - [x] Supply a French opening-category example and smoke-test it end to end with spaCy 3.8.11 and `fr_core_news_sm` 3.8.0. A two-paragraph example with no comparable in-paragraph pair is `not_checked`; a synthetic single-paragraph example produces one advisory finding. Sentence spans containing paragraph-boundary whitespace are handled without comparing across blocks. These cases do not establish model accuracy.
 - [ ] Evaluate representative human-reviewed content in each supported language and calibrate defaults.
 - [x] Provide an optional comparison of configured literal phrase pairs against an explicit prior snapshot, bound to both drafts and the configuration. Test missing coverage and a changed prior snapshot end to end. This observes strings only; it cannot establish that one phrase replaced another.
+  The bounded CLI revision loop accepts named prior snapshots and rechecks their
+  name-and-content fingerprint between candidates; a changed snapshot aborts.
+  An integration test exercises the shipped literal comparison adapter on two
+  revisions. This detects changed observed bytes, not source authenticity,
+  semantic equivalence or changes occurring after the last evaluation.
 - [ ] Design and evaluate language-specific idiom/register and semantic-equivalence review. A configured literal match cannot establish correct translation, concrete truth or an improvement in style. Until an appropriate assessment is supplied, do not claim that these requirements were checked.
 - [ ] Review CI, validate the current merge candidate, and publish through the repository's normal release process.
 

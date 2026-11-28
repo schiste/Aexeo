@@ -79,6 +79,11 @@ fn evaluate(
             command.arg("--preset-source").arg(source);
         }
     }
+    if let Some(sources) = args.get_many::<String>("evidence-source") {
+        for source in sources {
+            command.arg("--evidence-source").arg(source);
+        }
+    }
     if let Some(scope) = args.get_one::<String>("html-scope") {
         command.arg("--html-scope").arg(scope);
     }
@@ -185,7 +190,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     let budget = *args
         .get_one::<u32>("max-revisions")
         .user_context("missing revision budget")?;
-    let binding = RefCell::new(None::<(Value, Value, Value)>);
+    let binding = RefCell::new(None::<(Value, Value, Value, Value)>);
     let current_report = RefCell::new(None::<Value>);
     let observations = RefCell::new(args.get_one::<String>("link-observations").cloned());
     let extensions = RefCell::new(args.get_one::<String>("extension-results").cloned());
@@ -226,10 +231,16 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
                 .pointer("/input_fingerprint/metadata_coverage_sha256")
                 .user_context("evaluator omitted metadata coverage fingerprint")?
                 .clone();
-            let now = (policy, metadata, metadata_coverage);
+            let evidence_sources = report
+                .pointer("/input_fingerprint/evidence_sources_sha256")
+                .user_context("evaluator omitted evidence sources fingerprint")?
+                .clone();
+            let now = (policy, metadata, metadata_coverage, evidence_sources);
             let mut binding = binding.borrow_mut();
             if binding.as_ref().is_some_and(|expected| *expected != now) {
-                user_bail!("policy, metadata or metadata coverage changed during revision");
+                user_bail!(
+                    "policy, metadata, metadata coverage or evidence sources changed during revision"
+                );
             }
             *binding = Some(now);
             *current_report.borrow_mut() = Some(report);
@@ -322,7 +333,7 @@ pub fn command_content_revise(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "patch_proposals":patch_proposals, "initial_extension_results":args.contains_id("extension-results"), "proposals_with_extension_results":proposals_with_extensions, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
+            json!({"event":"content_revision_loop", "version":1, "stop":stop, "evaluations":outcome.evaluations, "proposals":outcome.proposals, "initial_link_observations":args.contains_id("link-observations"), "proposals_with_link_observations":proposals_with_observations, "patch_proposals":patch_proposals, "evidence_source_count":args.get_many::<String>("evidence-source").map_or(0, |sources| sources.len()), "initial_extension_results":args.contains_id("extension-results"), "proposals_with_extension_results":proposals_with_extensions, "evaluation_ms":evaluation_ms, "elapsed_ms":started.map(|time| time.elapsed().as_secs_f64() * 1000.0)})
         );
     }
     Ok(match outcome.stop {

@@ -15,6 +15,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("input-format").long("input-format").default_value("markdown").value_parser(["text", "paragraph-text", "markdown", "html", "adapter-json"]))
                 .arg(Arg::new("html-scope").long("html-scope").value_parser(["document", "main"]).help("HTML scope; requires HTML input"))
                 .arg(Arg::new("metadata").long("metadata").help("JSON object of metadata string values"))
+                .arg(Arg::new("evidence-source").long("evidence-source").action(ArgAction::Append).help("Named UTF-8 reference snapshot as NAME=PATH; repeatable and fixed across revisions"))
                 .arg(Arg::new("link-observations").long("link-observations").help("Source-bound link observation snapshot for the initial draft"))
                 .arg(Arg::new("extension-results").long("extension-results").help("Input-bound external gate results for the initial draft"))
                 .arg(Arg::new("max-revisions").long("max-revisions").default_value("3").value_parser(value_parser!(u32).range(0..=32)))

@@ -71,3 +71,41 @@ with tempfile.TemporaryDirectory() as directory:
         for stream in (child.stdin, child.stdout, child.stderr):
             if stream and not stream.closed:
                 stream.close()
+
+# Exercise the shipped literal prior-draft adapter through the same revision loop.
+# Literal pair matches are observations, not proof of meaning preservation.
+revision = root / "adapters/revision"
+with tempfile.TemporaryDirectory() as directory:
+    folder = Path(directory)
+    draft, prior, initial, revised = (folder / name for name in ("draft", "prior", "initial.json", "revised.json"))
+    draft.write_text("The difficulties require assistance.")
+    prior.write_text(draft.read_text())
+    evidence_arg = f"prior={prior}"
+    def revision_results(text, result):
+        projected = subprocess.run([cli, "content", "-", "--input-format", "text", "--evidence-source", evidence_arg, "--export-adapter-input"], input=text, text=True, capture_output=True, check=True, timeout=30)
+        projected_path = folder / "projection.json"
+        projected_path.write_text(projected.stdout)
+        observed = subprocess.run([sys.executable, str(revision / "review.py"), str(projected_path), str(revision / "example-parameters.json"), "--drafts-complete"], capture_output=True, text=True, check=True, timeout=30)
+        result.write_text(observed.stdout)
+    revision_results(draft.read_text(), initial)
+    candidate = "The limited time requires help."
+    revision_results(candidate, revised)
+    child = subprocess.Popen([cli, "content-revise", "--input", str(draft), "--input-format", "text", "--preset", "test", "--preset-source", f"test={revision / 'example.toml'}", "--evidence-source", evidence_arg, "--extension-results", str(initial)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    try:
+        requested = event(child)
+        assert requested["event"] == "proposal_requested" and requested["report"]["gates"][0]["status"] == "failed"
+        child.stdin.write(json.dumps({"action": "submit", "candidate": candidate, "extension_results": str(revised)}) + "\n")
+        child.stdin.flush()
+        complete = event(child)
+        assert complete["stop"] == "satisfied" and complete["report"]["gates"][0]["status"] == "passed"
+        assert complete["report"]["input_fingerprint"]["evidence_sources_sha256"] == requested["report"]["input_fingerprint"]["evidence_sources_sha256"]
+        child.stdin.close()
+        assert child.wait(timeout=30) == 0
+        assert draft.read_text() == prior.read_text()
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=30)
+        for stream in (child.stdin, child.stdout, child.stderr):
+            if stream and not stream.closed:
+                stream.close()
