@@ -200,3 +200,27 @@ Preview deployment or reproduces its permissions, runtime or KV implementation.
 The test narrows the investigation but does not identify the connected error or
 prove that 0.9.7 fixes it. Re-run the connected audit after the package is
 published and installed, and inspect its sanitized reason or host logs if needed.
+
+
+## Connected retest and release preparation, 28 November 2026
+
+The connected MCP still exposes the revision-audit and audit-retrieval tools.
+A request for a nonexistent revision returned `revision_unavailable`, an
+unconfigured fragment on an existing revision returned
+`fragment_preset_not_configured`, and a nonexistent audit returned
+`audit_unavailable`. Whole-content audit requests for two existing English blog
+revisions, including the mixed-component evidence-room record, returned a generic
+internal error; requesting its `content` fragment also returned that error.
+No CMS content was edited or published. These observations do not identify the
+failing component, deployed package version, or configured preset.
+
+The npm registry returned 0.9.6 as the latest published package. An 0.9.9
+archive was built from Aexeo commit `0d0048bc6637f5c3dd34a64739fc5ce3d5357a58`
+with pinned dependencies and wasm-bindgen 0.2.118. Its SHA-256 was
+`65dc08743723f089826764ff95b01514ad077c420465e630c9e84f3dbb781e7c`.
+The plugin suite passed 440 tests, the real WASM suite passed, and editorial
+preset and revision-audit tests passed against the extracted archive. A
+configured revision-audit smoke test also passed in workerd using that extracted
+bundle and WASM. These local checks do not reproduce Preview's runtime and do not establish that an
+upgrade will resolve its error. Publication, installation and a connected
+retest remain separate steps.
