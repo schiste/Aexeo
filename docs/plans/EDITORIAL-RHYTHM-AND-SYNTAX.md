@@ -19,6 +19,10 @@ Verification: variance and opening rules passed their individual full CI and Aet
 - [x] Add an opt-in adjacent-length percentage comparison with exact integer arithmetic, configurable threshold, explicit insufficient-input status, and an advisory starter.
 - [x] Add configured colon-framing review and long-list starters for French and English; make phrases, conjunctions, separators and thresholds composable for other locales. Preserve the text and identify these as surface heuristics.
 - [x] Add an optional local model-backed part-of-speech opening review with bounded input and unavailable results when observations are missing. Update the writing skill.
+  The same opt-in adapter can compare a configured prefix of up to eight POS
+  labels, including two-token patterns such as `DET + NOUN`; missing labels
+  leave the observation unavailable. These are model-supplied tags, not
+  validated grammatical categories or proof that parallelism is undesirable.
 - [x] Exercise the supplied French sample, the core library suite, and offline syntax-adapter cases. These checks do not validate detection claims or grammar-model accuracy.
 - [x] Run the opening-category adapter with a real compatible English model and the full Aexeo extension workflow; absence of a complete-coverage attestation produces `not_checked`. The smoke test used spaCy 3.8.11 and `en_core_web_sm` 3.8.0 with the previously built CLI from the same base, not a claim of model accuracy.
 - [x] Supply a French opening-category example and smoke-test it end to end with spaCy 3.8.11 and `fr_core_news_sm` 3.8.0. A two-paragraph example with no comparable in-paragraph pair is `not_checked`; a synthetic single-paragraph example produces one advisory finding. Sentence spans containing paragraph-boundary whitespace are handled without comparing across blocks. These cases do not establish model accuracy.

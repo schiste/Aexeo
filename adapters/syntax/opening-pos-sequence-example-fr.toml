@@ -1,0 +1,17 @@
+version = 1
+name = "Revue des séquences grammaticales en français"
+
+[[gates]]
+id = "editorial.opening_pos"
+kind = "custom"
+extension = "syntax.opening_pos"
+severity = "warning"
+blocking = false
+[gates.parameters]
+analysis = "opening_pos"
+model = "fr_core_news_sm"
+model_version = "3.8.0"
+language = "fr"
+min_sentences = "2"
+max_tokens = "80"
+opening_tokens = "2"
