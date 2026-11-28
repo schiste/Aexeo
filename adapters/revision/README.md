@@ -1,6 +1,21 @@
 # Optional literal draft comparison
 
-This local adapter compares explicitly configured, case-sensitive UTF-8 phrase pairs across two supplied snapshots. A pair counts once when its `before` string appears in the named prior snapshot, no longer appears anywhere in the current text, and its `after` string appears somewhere in the current text. These are literal substring observations: they do not establish that one phrase replaced the other, that a noun is abstract, or that the new wording is concrete, accurate, idiomatic or semantically equivalent. A missing observation is not proof of a defect. Review all findings and preserve facts; the adapter never changes content.
+This local adapter compares explicitly configured UTF-8 phrase pairs across two supplied snapshots. A pair counts once when its `before` string appears in the named prior snapshot, no longer appears anywhere in the current text, and its `after` string appears somewhere in the current text. These are literal substring observations: they do not establish that one phrase replaced the other, that a noun is abstract, or that the new wording is concrete, accurate, idiomatic or semantically equivalent. A missing observation is not proof of a defect. Review all findings and preserve facts; the adapter never changes content.
+
+Matching is exact by default. To opt into Unicode caseless matching with canonical
+NFC normalization, add `matching = "unicode_caseless"` and a pinned
+`unicode_version` to both the gate's string parameters and the parameters JSON.
+Find the locally available version with `python3 -c 'import unicodedata; print(unicodedata.unidata_version)'`.
+If the pinned version differs from the runtime's Unicode tables, the adapter
+returns no result and the gate remains `not_checked`. Both
+snapshots and configured phrases are normalized only for comparison; the bound
+input and the content are unchanged. Pairs that become identical or duplicate
+within either side under this mode are rejected. To bound pathological Unicode
+normalization costs, a draft with more than 256 consecutive non-starter combining
+characters is `not_checked` in this mode. Unicode case folding is not
+locale-specific (for example, it does not apply Turkish casing rules) and does
+not infer word boundaries, inflections, synonyms or meaning. Select it only when
+its behavior suits the locale and task; `matching = "exact"` retains the default.
 
 Use a dedicated project preset, choose its locale-specific pairs and minimum, and independently establish both snapshots are complete and correspond to the intended revisions. The English and French example pairs are illustrations, not linguistic rules; they require the matching parameter JSON file. Pass exactly the same string parameters in the preset and parameter JSON. The result binds the supplied input and parameters, but does not authenticate snapshot identity, completeness, source or freshness. The exported input and result contain both full drafts; keep these files private.
 
