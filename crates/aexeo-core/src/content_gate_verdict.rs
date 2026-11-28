@@ -1477,12 +1477,22 @@ fn verify_host_candidate_projection(
         if object.keys().any(|key| {
             !matches!(
                 key.as_str(),
-                "schema" | "text" | "block_ends" | "headings" | "heading_levels" | "paragraphs"
+                "schema"
+                    | "text"
+                    | "block_ends"
+                    | "headings"
+                    | "heading_levels"
+                    | "paragraphs"
+                    | "metadata"
+                    | "observed_metadata_fields"
             )
         }) || object.get("schema").and_then(|v| v.as_str()) != Some("aexeo.content-adapter/v1")
         {
             bail!("unsupported portable host projection");
         }
+        // Validate host metadata and its declared coverage even though this
+        // deliberately narrow profile does not verify metadata gates.
+        crate::content_adapter::parse(item.entity_id.clone(), &item.source)?;
         let text = object
             .get("text")
             .and_then(|v| v.as_str())
@@ -9520,6 +9530,45 @@ mod tests {
             verify_host_candidate_projection(&verdict, &policy, std::slice::from_ref(&item))
                 .unwrap()
         );
+        for (metadata, observed, valid) in [
+            (
+                serde_json::json!({"description":"value"}),
+                serde_json::json!(["description"]),
+                true,
+            ),
+            (serde_json::json!({}), serde_json::json!([]), true),
+            (
+                serde_json::json!({"description":"value"}),
+                serde_json::json!([]),
+                false,
+            ),
+            (
+                serde_json::json!({}),
+                serde_json::json!(["description", "description"]),
+                false,
+            ),
+            (
+                serde_json::json!({"description":3}),
+                serde_json::Value::Null,
+                false,
+            ),
+            (
+                serde_json::Value::Null,
+                serde_json::json!(["description"]),
+                false,
+            ),
+        ] {
+            let mut candidate = item.clone();
+            candidate.source = serde_json::json!({
+                "schema":"aexeo.content-adapter/v1", "text":"one two",
+                "metadata":metadata, "observed_metadata_fields":observed,
+            })
+            .to_string();
+            assert_eq!(
+                verify_host_candidate_projection(&verdict, &policy, &[candidate]).is_ok(),
+                valid
+            );
+        }
         let mut forged = verdict.clone();
         forged.checks[0].status = CheckStatus::Failed;
         assert!(

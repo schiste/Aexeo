@@ -491,11 +491,28 @@ def verify_host_candidate_projection(policy, verdict, after):
     needs_paragraph_chars = any(gate['kind'] == 'paragraph_character_length' for gate in policy['gates'])
     for item in host:
         projection = parse(item['source'].encode('utf-8'))
-        if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings', 'heading_levels', 'paragraphs'}
+        if (not isinstance(projection, dict) or not {'schema', 'text'} <= set(projection) or not set(projection) <= {'schema', 'text', 'block_ends', 'headings', 'heading_levels', 'paragraphs', 'metadata', 'observed_metadata_fields'}
                 or projection['schema'] != 'aexeo.content-adapter/v1'
                 or not isinstance(projection['text'], str)):
             raise VerificationError('unsupported portable host projection')
         text(projection['text'])
+        metadata = projection.get('metadata')
+        if metadata is not None:
+            if (not isinstance(metadata, dict) or len(metadata) > 100_000
+                    or any(not isinstance(key, str) or not isinstance(value, str)
+                           for key, value in metadata.items())):
+                raise VerificationError('invalid host metadata')
+            for key, value in metadata.items():
+                text(key)
+                text(value)
+        observed = projection.get('observed_metadata_fields')
+        if observed is not None:
+            if (metadata is None or not isinstance(observed, list) or len(observed) > 100_000
+                    or any(not isinstance(field, str) or _rust_blank(field) for field in observed)
+                    or len(set(observed)) != len(observed) or not set(metadata) <= set(observed)):
+                raise VerificationError('invalid host metadata coverage')
+            for field in observed:
+                text(field)
         paragraphs = projection.get('paragraphs')
         longest_words = longest_chars = 0
         if 'paragraphs' in projection:
