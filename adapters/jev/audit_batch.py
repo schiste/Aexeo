@@ -34,9 +34,12 @@ def prepare(cases, reviews):
         identifier, claim, source = case.get("id"), case.get("claim"), case.get("source_text")
         if (not isinstance(identifier, str) or not identifier.strip() or identifier in seen
                 or not isinstance(claim, str) or not claim.strip()
-                or not isinstance(source, str) or not source.strip()):
+                or (source is not None and (not isinstance(source, str) or not source.strip()))):
             raise ValueError("invalid or duplicate claim case")
         seen.add(identifier)
+    missing_sources = {case["id"] for case in cases if case.get("source_text") is None}
+    if any(isinstance(item, dict) and item.get("id") in missing_sources for item in reviews):
+        raise ValueError("review supplied without a source")
     validate_saved(cases, reviews)
     return {item["id"]: item["review"] for item in reviews}
 
@@ -53,9 +56,11 @@ def audit(article, cases, reviews, cli, input_format):
         for index, case in enumerate(cases):
             gate = f"claim_{index:04d}"
             source_name, review_name = f"source_{index:04d}", f"review_{index:04d}"
-            source_path = root / f"{source_name}.txt"
-            source_path.write_bytes(case["source_text"].encode("utf-8"))
-            evidence += ["--evidence-source", f"{source_name}={source_path}"]
+            source = case.get("source_text")
+            if source is not None:
+                source_path = root / f"{source_name}.txt"
+                source_path.write_bytes(source.encode("utf-8"))
+                evidence += ["--evidence-source", f"{source_name}={source_path}"]
             record = records.get(case["id"])
             if record is not None:
                 review_path = root / f"{review_name}.json"
@@ -65,7 +70,8 @@ def audit(article, cases, reviews, cli, input_format):
                       f'source = "{source_name}"', f'review = "{review_name}"',
                       "claim = " + json.dumps(case["claim"], ensure_ascii=False),
                       'severity = "warning"', "blocking = false"]
-            mapping.append({"id": case["id"], "gate_id": gate, "review_supplied": record is not None})
+            mapping.append({"id": case["id"], "gate_id": gate,
+                            "source_supplied": source is not None, "review_supplied": record is not None})
         preset.write_text("\n".join(lines) + "\n", encoding="utf-8")
         command = [cli, "content", str(article), "--input-format", input_format,
                    "--preset", "claims", "--preset-source", f"claims={preset}",
@@ -82,7 +88,8 @@ def audit(article, cases, reviews, cli, input_format):
             raise ValueError("Aexeo report does not match claim inventory")
     return {"coverage": {"article_claim_inventory": "not_established",
                          "supplied_claims": len(cases), "reviews_supplied": len(records),
-                         "claims_without_review": len(cases) - len(records)},
+                         "claims_without_review": len(cases) - len(records),
+                         "claims_without_source": sum(not item["source_supplied"] for item in mapping)},
             "claims": mapping, "report": report,
             "telemetry": {"elapsed_ms": round((time.monotonic() - started) * 1000)}}
 

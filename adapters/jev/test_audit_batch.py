@@ -24,8 +24,11 @@ class BatchAuditTests(unittest.TestCase):
     def test_invalid_inventory_is_rejected_before_running_cli(self):
         bad_cases = self.cases + [self.cases[0]]
         changed = [{"id": "a", "review": {**self.record, "source_text": "different"}}]
+        unsourced = [{"id": "a", "claim": "Count is 14."}]
+        empty_source = [{"id": "a", "claim": "Count is 14.", "source_text": ""}]
         for cases, records in ((bad_cases, self.reviews), (self.cases, changed),
-                               (self.cases, self.reviews + self.reviews)):
+                               (self.cases, self.reviews + self.reviews),
+                               (unsourced, self.reviews), (empty_source, [])):
             with self.subTest(cases=cases, records=records), patch("audit_batch.subprocess.run") as runner:
                 with self.assertRaises(ValueError):
                     audit_batch.audit("article", cases, records, "cli", "text")
@@ -43,18 +46,23 @@ class BatchAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             article = Path(folder) / "article.txt"
             article.write_text("Count is 14. Count is 15.", encoding="utf-8")
-            result = audit_batch.audit(article, self.cases, self.reviews,
+            cases = self.cases + [{"id": "c", "claim": "An unsourced claim."},
+                                  {"id": "d", "claim": "Another claim.", "source_text": None}]
+            result = audit_batch.audit(article, cases, self.reviews,
                                        os.environ["AEXEO_TEST_CLI"], "text")
             self.assertEqual(result["coverage"]["article_claim_inventory"], "not_established")
-            self.assertEqual(result["coverage"]["claims_without_review"], 1)
+            self.assertEqual(result["coverage"]["claims_without_review"], 3)
+            self.assertEqual(result["coverage"]["claims_without_source"], 2)
+            self.assertEqual([item["source_supplied"] for item in result["claims"]],
+                             [True, True, False, False])
             gates = result["report"]["gates"]
-            self.assertEqual([gate["status"] for gate in gates], ["passed", "not_checked"])
+            self.assertEqual([gate["status"] for gate in gates], ["passed", "not_checked", "not_checked", "not_checked"])
             self.record["support"] = "contradicted"
             self.record["provenance"]["model_choice"] = "contradicted"
-            result = audit_batch.audit(article, self.cases, self.reviews,
+            result = audit_batch.audit(article, cases, self.reviews,
                                        os.environ["AEXEO_TEST_CLI"], "text")
             self.assertEqual([gate["status"] for gate in result["report"]["gates"]],
-                             ["failed", "not_checked"])
+                             ["failed", "not_checked", "not_checked", "not_checked"])
 
 
 if __name__ == "__main__":

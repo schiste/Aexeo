@@ -95,7 +95,12 @@ python3 adapters/jev/audit_batch.py article.md article-claims.json article-revie
 
 The adapter creates an advisory evidence-review gate per supplied case and runs
 the CLI locally against private temporary files. Each gate has its own status:
-missing reviews remain `not_checked`. The output maps case IDs to gate IDs,
+missing reviews or source texts remain `not_checked`. An inventory entry may omit
+`source_text` or set it to `null` when no source is available; empty strings are
+invalid, and a review cannot be supplied for an unsourced claim. Only pass
+sourced entries to the provider batch. The output records source and review
+availability per claim and counts claims without each; supplied source text is
+not proof of its reliability or freshness. The output maps case IDs to gate IDs,
 includes the Aexeo report and aggregate local timing, and always reports article
 claim coverage as `not_established`: the supplied inventory may be incomplete.
 It does not extract claims, verify source reliability, authenticate the reviewer,
