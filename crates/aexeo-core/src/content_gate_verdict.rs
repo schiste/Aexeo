@@ -3583,21 +3583,21 @@ fn evaluate_change_internal<P: ConfinedContentFiles>(
                 });
         let plain_index = needs_plain_index
             .then(|| crate::text_index::LineIndex::new(input.text.as_deref().unwrap_or_default()));
-        let native_coverage_index =
-            if native_capture.is_some() && entry.media_type == crate::content_adapter::MEDIA_TYPE {
-                let capture = native_capture.as_deref_mut().unwrap();
-                let index = capture.coverage.len();
-                capture.coverage.push(ChangeNativeCoverage {
-                    entity_id: entry.entity_id.clone(),
-                    source_sha256: native_source_digest.expect("native capture has a digest"),
-                    source_map_available: native_source_map.is_some(),
-                    findings: 0,
-                    mapped: 0,
-                });
-                Some(index)
-            } else {
-                None
-            };
+        let native_coverage_index = if let (Some(capture), Some(source_sha256)) =
+            (native_capture.as_deref_mut(), native_source_digest)
+        {
+            let index = capture.coverage.len();
+            capture.coverage.push(ChangeNativeCoverage {
+                entity_id: entry.entity_id.clone(),
+                source_sha256,
+                source_map_available: native_source_map.is_some(),
+                findings: 0,
+                mapped: 0,
+            });
+            Some(index)
+        } else {
+            None
+        };
         let native_index = native_source_map
             .as_ref()
             .and(input.text.as_deref())
