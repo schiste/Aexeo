@@ -484,6 +484,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   cannot detect duplicate keys or non-finite values in the embedded document.
   For remote evidence adapters, also test nested ambiguous provider responses
   and confirm invalid batches and checkpoints cause no provider requests.
+  For unlabeled editorial batches, test that benchmark metrics still require
+  labels and that resumption binds claims, sources, provider, model and threshold.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
 - For EmDash gate report tests, an empty `measurements` map may be omitted
