@@ -81,6 +81,27 @@ class ReviewTests(unittest.TestCase):
             observed = subprocess.run(command + ["--drafts-complete"], capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(observed.stdout)[0]["diagnostics"], [])
 
+    def test_cli_unicode_mode_binds_parameters_and_withholds_excessive_text(self):
+        config = {"source": "prior", "pairs": json.dumps([{"before": "difficultés", "after": "équipe"}]), "minimum": "1", "matching": "unicode_caseless"}
+        data = {"text": "Une E\u0301QUIPE agit.", "evidence_sources": {"prior": "Des DIFFICULTÉS persistent."}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_file, params_file = root / "input.json", root / "params.json"
+            input_file.write_text(json.dumps(data), encoding="utf-8")
+            params_file.write_text(json.dumps(config), encoding="utf-8")
+            command = [sys.executable, str(Path(review.__file__)), str(input_file), str(params_file), "--drafts-complete"]
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            observed = json.loads(result.stdout)[0]
+            self.assertEqual(observed["parameters"], config)
+            self.assertEqual(observed["input"], data)
+            self.assertEqual(observed["diagnostics"], [])
+            data["text"] = "a" + "\u0315" * (review.MAX_COMBINING_SEQUENCE + 1)
+            input_file.write_text(json.dumps(data), encoding="utf-8")
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout), [])
+            self.assertIn("not checked", result.stderr)
+            self.assertNotIn(data["text"], result.stderr)
+
     def test_cli_rejects_ambiguous_json_at_every_level(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
