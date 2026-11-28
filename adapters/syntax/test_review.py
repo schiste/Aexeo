@@ -345,6 +345,89 @@ class TestSyntaxAdapter(unittest.TestCase):
                 results = json.loads(out.getvalue())
                 self.assertEqual([item["parameters"]["max_distance"] for item in results], ["0.2", "0.3"])
 
+    def test_stream_reuses_model_but_reparses_each_request(self):
+        opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        class CountingModel(Model):
+            calls = 0
+            def __call__(self, text):
+                self.calls += 1
+                return super().__call__(text)
+        model = CountingModel([Sentence(0, 6, 0), Sentence(7, 14, 2)])
+        loads = []
+        fake = type("Fake", (), {"load": staticmethod(lambda name: (loads.append(name), model)[1])})()
+        request = {"input": {"text": "First. Second."}, "parameters": opening, "text_complete": True}
+        missing = {**request, "text_complete": False}
+        changed = {**request, "input": {"text": "Third. Fourth."}}
+        encoded = b"\n".join(json.dumps(item).encode() for item in (request, missing, changed)) + b"\n"
+        out = io.StringIO()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(review.serve(io.BytesIO(encoded), out, lambda: fake), 0)
+        responses = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual([r["status"] for r in responses], ["processed", "not_checked", "processed"])
+        self.assertEqual(responses[1]["results"], [])
+        self.assertNotEqual(responses[0]["results"], responses[2]["results"])
+        self.assertEqual(responses[2]["results"][0]["input"], changed["input"])
+        self.assertEqual(responses[0]["results"][0]["input"], request["input"])
+        self.assertEqual(loads, ["en_core_web_sm"])
+        self.assertEqual(model.calls, 2)
+
+    def test_stream_rejects_ambiguous_requests_without_leaking_or_loading(self):
+        lines = [b'{"input":{"text":"secret","text":"other"},"parameters":{},"text_complete":true}',
+                 b'{"input":{},"parameters":{},"text_complete":"yes"}',
+                 b'{"input":{},"parameters":{},"text_complete":false,"extra":0}']
+        out = io.StringIO()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(review.serve(io.BytesIO(b"\n".join(lines) + b"\n"), out, lambda: self.fail("unexpected model load")), 0)
+        responses = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual([r["status"] for r in responses], ["invalid"] * 3)
+        self.assertNotIn("secret", out.getvalue() + err.getvalue())
+
+    def test_output_size_is_bounded_while_serializing(self):
+        value = [{"text": "é" * 20}] * 20
+        with self.assertRaises(review.OutputTooLarge):
+            review.bounded_json(value, 100)
+        self.assertEqual(json.loads(review.bounded_json(value, 2000)), value)
+
+    def test_stream_is_bounded(self):
+        out = io.StringIO()
+        with patch.object(review, "MAX_JSON_BYTES", 8):
+            self.assertEqual(review.serve(io.BytesIO(b"0123456789\n{}\n"), out, lambda: None), 2)
+        self.assertEqual(json.loads(out.getvalue())["status"], "invalid")
+        out = io.StringIO()
+        with patch.object(review, "MAX_REQUESTS", 2):
+            self.assertEqual(review.serve(io.BytesIO(b"{}\n{}\n{}\n"), out, lambda: None), 0)
+        self.assertEqual(len(out.getvalue().splitlines()), 2)
+
+    def test_stream_does_not_reuse_model_after_failed_switch(self):
+        opening = {"analysis": "opening_pos", "model": "en_core_web_sm", "model_version": "3.8.0", "language": "en", "min_sentences": "2", "max_tokens": "80"}
+        model = Model([Sentence(0, 6, 0), Sentence(7, 14, 2)])
+        loads = []
+        def load(name):
+            loads.append(name)
+            if name == "missing":
+                raise RuntimeError("private error")
+            return model
+        fake = type("Fake", (), {"load": staticmethod(load)})()
+        base = {"input": {"text": "First. Second."}, "parameters": opening, "text_complete": True}
+        request_bad = {**base, "parameters": {**opening, "model": "missing"}}
+        lines = b"\n".join(json.dumps(r).encode() for r in (base, request_bad, base)) + b"\n"
+        output = io.StringIO()
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(review.serve(io.BytesIO(lines), output, lambda: fake), 0)
+        responses = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([len(r["results"]) for r in responses], [1, 0, 1])
+        self.assertEqual(loads, ["en_core_web_sm", "missing", "en_core_web_sm"])
+        self.assertNotIn("private error", err.getvalue())
+
+    def test_actual_stream_cli_handles_unavailable_spacy_and_multiple_lines(self):
+        request = {"input": {"text": "private"}, "parameters": PARAMS, "text_complete": False}
+        missing = {**request, "text_complete": True}
+        data = "\n".join(json.dumps(item) for item in (request, missing)) + "\n"
+        result = subprocess.run([sys.executable, "-S", str(Path(review.__file__)), "--serve"], input=data, capture_output=True, text=True, check=True, timeout=10)
+        responses = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([r["status"] for r in responses], ["not_checked", "not_checked"])
+        self.assertNotIn("private", result.stdout + result.stderr)
+
     def test_json_files_are_bounded_before_decoding(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "oversized.json"

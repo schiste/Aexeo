@@ -15,6 +15,7 @@ MAX_SENTENCES = 1_000
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_PARAMETERS_BYTES = 16 * 1024
 MAX_BATCH = 16
+MAX_REQUESTS = 100
 
 
 class Unavailable(Exception):
@@ -284,6 +285,27 @@ class CachedModel:
             self._text = text
         return self._doc
 
+    def clear_document(self):
+        self._text = self._doc = None
+
+
+class ModelCache:
+    """Keep at most one model; never retain a parsed document across requests."""
+    def __init__(self):
+        self.name = None
+        self.model = None
+
+    def get(self, name, spacy):
+        if self.name != name:
+            self.name, self.model = None, None
+            self.model = CachedModel(spacy.load(name))
+            self.name = name
+        return self.model
+
+    def clear_document(self):
+        if self.model is not None:
+            self.model.clear_document()
+
 
 def parameter_batch(raw):
     """Accept the legacy single configuration or a bounded list of them."""
@@ -300,23 +322,20 @@ def parameter_batch(raw):
     return configs
 
 
-def evaluate_batch(data, configs, spacy):
-    """Return only individually available observations, caching adjacent models."""
+def evaluate_batch(data, configs, spacy, cache=None):
+    """Return individually available observations, reusing at most one model."""
     results = []
-    cached_name = None
-    cached_model = None
-    for config in configs:
-        try:
-            name = config["model"]
-            if cached_name != name:
-                # Clear first: a failed load must not reuse the previous model.
-                cached_name, cached_model = None, None
-                cached_model = CachedModel(spacy.load(name))
-                cached_name = name
-            results.extend(evaluate(data, config, cached_model))
-        except Exception as exc:  # Do not expose private input in diagnostics.
-            print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
-    return results
+    cache = cache if cache is not None else ModelCache()
+    try:
+        for config in configs:
+            try:
+                model = cache.get(config["model"], spacy)
+                results.extend(evaluate(data, config, model))
+            except Exception as exc:  # Do not expose private input in diagnostics.
+                print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
+        return results
+    finally:
+        cache.clear_document()
 
 
 def strict_json(data):
@@ -351,12 +370,81 @@ def load_json(path, limit):
     return strict_json(data)
 
 
+class OutputTooLarge(Exception):
+    """A serialized result exceeds the output limit."""
+
+
+def bounded_json(value, limit):
+    """Stop serializing before retaining an oversized multi-result response."""
+    parts = []
+    size = 0
+    for part in json.JSONEncoder(ensure_ascii=False, allow_nan=False).iterencode(value):
+        size += len(part.encode("utf-8"))
+        if size > limit:
+            raise OutputTooLarge()
+        parts.append(part)
+    return "".join(parts)
+
+
+def serve(source, destination, load_spacy):
+    """Process a bounded sequence of private JSON lines on local stdio."""
+    cache = ModelCache()
+    spacy = None
+    for _ in range(MAX_REQUESTS):
+        line = source.readline(MAX_JSON_BYTES + 1)
+        if not line:
+            return 0
+        if len(line) > MAX_JSON_BYTES:
+            print(json.dumps({"status": "invalid", "results": []}), file=destination, flush=True)
+            return 2  # Do not treat the remainder of an oversized line as a request.
+        try:
+            request = strict_json(line)
+            if (not isinstance(request, dict) or set(request) != {"input", "parameters", "text_complete"}
+                    or not isinstance(request["input"], dict) or type(request["text_complete"]) is not bool):
+                raise ValueError("invalid request envelope")
+            if len(json.dumps(request["parameters"], ensure_ascii=False).encode("utf-8")) > MAX_PARAMETERS_BYTES:
+                raise ValueError("parameters exceed size limit")
+            configs = parameter_batch(request["parameters"])
+            if not request["text_complete"]:
+                response = {"status": "not_checked", "results": []}
+            else:
+                try:
+                    if spacy is None:
+                        spacy = load_spacy()
+                    response = {"status": "processed", "results": evaluate_batch(request["input"], configs, spacy, cache)}
+                except Exception as exc:  # Do not expose request text.
+                    print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
+                    response = {"status": "not_checked", "results": []}
+            try:
+                encoded = bounded_json(response, MAX_JSON_BYTES)
+            except OutputTooLarge:
+                encoded = json.dumps({"status": "not_checked", "results": []})
+        except (ValueError, TypeError, RecursionError):
+            encoded = json.dumps({"status": "invalid", "results": []})
+        print(encoded, file=destination, flush=True)
+        # Do not retain the last request or response while waiting for input.
+        line = request = response = configs = encoded = None
+    return 0
+
+
+def import_spacy():
+    import spacy
+    return spacy
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", help="private JSON produced by --export-adapter-input")
-    parser.add_argument("parameters", help="JSON string map or array of maps matching the preset's gate parameters")
+    parser.add_argument("input", nargs="?", help="private JSON produced by --export-adapter-input")
+    parser.add_argument("parameters", nargs="?", help="JSON string map or array of maps matching the preset's gate parameters")
     parser.add_argument("--text-complete", action="store_true", help="attest that the projected text covers the whole intended content")
+    parser.add_argument("--serve", action="store_true", help="process bounded JSON lines on stdin and stdout")
     args = parser.parse_args()
+    if args.serve:
+        if args.input is not None or args.parameters is not None or args.text_complete:
+            parser.error("--serve cannot be combined with file arguments or --text-complete")
+        return serve(sys.stdin.buffer, sys.stdout, import_spacy)
+    if args.input is None or args.parameters is None:
+        parser.error("input and parameters files are required")
     try:
         data = load_json(args.input, MAX_JSON_BYTES)
         configs = parameter_batch(load_json(args.parameters, MAX_PARAMETERS_BYTES))
@@ -368,8 +456,9 @@ def main():
         except Exception as exc:  # Untrusted parser failures are never a clean pass.
             print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
             result = []
-        output = json.dumps(result, ensure_ascii=False)
-        if len(output.encode("utf-8")) > MAX_JSON_BYTES:
+        try:
+            output = bounded_json(result, MAX_JSON_BYTES)
+        except OutputTooLarge:
             print("syntax gate not checked: output exceeds size limit", file=sys.stderr)
             output = "[]"
         print(output)

@@ -98,3 +98,36 @@ The existing single-object form and coverage attestation remain unchanged. See
 `../revision/README.md` for a composed French workflow.
 
 Input and parameter JSON reject duplicate object keys at every nesting level and non-finite numbers. Invalid files exit nonzero without emitting a result; they do not establish a passing gate.
+
+## Reuse a model across revisions
+
+`python3 adapters/syntax/review.py --serve` reads a sequence of UTF-8 JSON
+requests, one per line, and writes one JSON response per request in the same
+order. It is a local, opt-in stdio process; it does not listen on a network
+port. Each request has exactly these keys:
+
+```json
+{"input":{"id":"example","text":"First sentence. Second sentence."},"parameters":{"analysis":"opening_pos","model":"en_core_web_sm","model_version":"3.8.0","language":"en","min_sentences":"2","max_tokens":"80"},"text_complete":true}
+```
+
+Use the exact complete JSON exported by `aexeo-cli content ...
+--export-adapter-input` as `input`, and the exact preset parameter object or
+array as `parameters`. Set `text_complete` only after establishing coverage for
+that particular request. A response has `status` and `results`: `processed`
+means the request was processed, not that any gate passed; individual failed
+or unavailable observations may be omitted. `not_checked` means no observation
+was produced, and `invalid` means the request was rejected. Feed `results` to
+Aexeo as the extension results array and inspect each gate status. Results
+include the supplied input and can contain the entire private draft.
+
+The process retains at most one model and clears its cached parsed document
+after each request; it reparses the next request, even if the text is identical.
+It handles at most 100 requests and then exits; clients must start a new process
+and detect EOF or a missing response. A line is bounded to 32 MiB including its
+newline, and parameters to 16 KiB; an oversized line yields `invalid` and exit
+code 2 without processing subsequent lines. Duplicate keys, non-finite numbers,
+invalid envelopes and invalid parameters are rejected. An invalid request does
+not prevent a later valid request unless its line is oversized. A model error
+never reuses a different model. Keep pipes private, drain stdout and stderr, and
+close stdin or terminate the process when the session ends. No result establishes
+model provenance, semantic accuracy or coverage of omitted content.
