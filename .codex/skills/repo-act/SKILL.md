@@ -394,6 +394,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   origin in the surface identity. A missing origin makes otherwise valid
   relative links indeterminate; assert the extracted destination before
   interpreting an inbound count.
+- For link graph source identity changes, test direct counts, redirect credit
+  and requested-URL counts separately. Include equivalent URL spellings of
+  another page and of the target itself, and ensure self links are excluded
+  from redirect counts while original evidence remains unchanged.
 - For link graph locale coverage, test inventory and rendered language as
   matching, conflicting, missing, malformed and differently specific values.
   Include a seeded HTTP crawl and assert both the reconciliation reason and
