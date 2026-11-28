@@ -314,14 +314,27 @@ fn http_url_end(
         return None;
     }
     let mut end = start;
+    let authority_start = if tail
+        .get(..8)
+        .is_some_and(|s| s.eq_ignore_ascii_case("https://"))
+    {
+        start + 8
+    } else {
+        start + 7
+    };
+    let mut after_authority = false;
     for (relative, ch) in tail.char_indices() {
         let offset = start + relative;
-        // Non-ASCII sentence stops may be adjacent to the next sentence,
-        // especially in scripts that do not use spaces between sentences.
-        // Treat them as boundaries only when this gate configured them.
+        if offset >= authority_start && matches!(ch, '/' | '?' | '#') {
+            after_authority = true;
+        }
+        // An ideographic stop can also be an IDNA domain separator. Do not
+        // split the authority; only treat configured stops after it as prose.
         if block_end.is_some_and(|boundary| offset >= boundary)
             || ch.is_whitespace()
-            || (matches!(ch, '。' | '！' | '？' | '؟') && delimiters.contains(ch))
+            || (after_authority
+                && matches!(ch, '。' | '！' | '？' | '؟')
+                && delimiters.contains(ch))
         {
             break;
         }
@@ -5742,6 +5755,11 @@ mod tests {
         assert_eq!(
             http_url_end(literal, 0, None, false, ".!?"),
             Some(literal.len())
+        );
+        let international = "https://例子。测试/路径";
+        assert_eq!(
+            http_url_end(international, 0, None, false, ".!?。"),
+            Some(international.len())
         );
         let encoded = "https://example.org/%E3%80%82suffix";
         assert_eq!(
