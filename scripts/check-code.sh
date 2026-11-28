@@ -16,6 +16,8 @@ aexeo_run_timed "${prefix}cargo-test-workspace" "cache-sensitive" cargo test --w
 aexeo_run_timed "${prefix}content-corpus-cli" "cache-sensitive" cargo build -p aexeo-cli
 aexeo_run_timed "${prefix}review-evidence-integration" "cache-light" \
     python3 scripts/test-review-evidence-integration.py "${CARGO_TARGET_DIR:-target}/debug/aexeo-cli"
+aexeo_run_timed "${prefix}syntax-revision-integration" "cache-light" \
+    python3 scripts/test-syntax-revision-workflow.py "${CARGO_TARGET_DIR:-target}/debug/aexeo-cli"
 # The markdown-* fixtures run through --input-format markdown.
 for fixture in duplicate-headings heading-length link-destinations required-metadata \
     markdown-duplicate-headings markdown-evidence-anchors markdown-forbidden-terms \

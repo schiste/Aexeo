@@ -24,9 +24,19 @@ Run `python3 -m unittest discover -s adapters/syntax -v` for offline contract te
 Use `opening-pos-example.toml` and `opening-pos-parameters.json`, or the French
 `opening-pos-example-fr.toml` and `opening-pos-parameters-fr.json`, with the same
 three-command workflow to review consecutive sentences whose first non-punctuation
-tokens have the same model-supplied universal part-of-speech label. Change the
-model, version and language together for your content. This is not a comparison
-of full grammatical openings or a guarantee that the model's tags are correct.
+tokens have the same model-supplied universal part-of-speech label. The optional
+string parameter `opening_tokens = "2"` compares the first two non-punctuation,
+non-space labels instead, for example `DET + NOUN`; values from 1 to 8 are
+accepted, up to `max_tokens`. Omit it for the original one-label behavior.
+Add the identical parameter to both the preset's `[gates.parameters]` and the
+adapter's parameters JSON. Ready-to-configure two-label English and French
+examples are shipped as `opening-pos-sequence-example.toml` and
+`opening-pos-sequence-example-fr.toml`, with matching
+`opening-pos-sequence-parameters.json` and `opening-pos-sequence-parameters-fr.json`.
+If any sentence lacks the requested number of tagged
+tokens, the observation is unavailable rather than a pass. Change the model,
+version and language together for your content. This is a prefix of token tags,
+not a full grammatical analysis or a guarantee that the model's tags are correct.
 Parallelism can be intentional. Only sentences in the same observed paragraph
 are compared. Blank-line separators remain paragraph boundaries even if the
 parser includes surrounding whitespace in a sentence span; a sentence spanning
