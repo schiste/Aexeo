@@ -17,6 +17,9 @@ for (const preset of ["writing-review", "writing-review-en", "writing-review-fr"
   assert.ok(report.gates.every((gate) => gate.blocking === false), preset);
 }
 const report = await evaluateContent(document, "writing-review-fr");
+const rhythm = report.gates.find((entry) => entry.gate_id === "editorial.sentence_rhythm");
+assert.equal(rhythm?.status, "not_checked");
+assert.equal(rhythm?.measurements?.windows_assessed, 0);
 for (const id of ["editorial.framing_colon", "editorial.fr_long_enumeration_review"]) {
   const gate = report.gates.find((entry) => entry.gate_id === id);
   assert.equal(gate?.status, "failed", id);

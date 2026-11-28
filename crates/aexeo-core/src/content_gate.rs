@@ -3773,13 +3773,13 @@ impl ContentPreset {
                         if range_min_words.is_some() {
                             measurements.insert("range_pairs".into(), flagged);
                         }
+                        measurements.insert("windows_assessed".into(), pairs_assessed);
                         if min_difference_percent.is_some() || range_min_words.is_some() {
                             measurements.insert("pairs_assessed".into(), pairs_assessed);
-                            if pairs_assessed == 0 && reason.is_none() {
-                                reason = Some(
-                                    "not enough eligible adjacent sentences to compare".into(),
-                                );
-                            }
+                        }
+                        if pairs_assessed == 0 && reason.is_none() {
+                            reason =
+                                Some("not enough eligible adjacent sentences to compare".into());
                         }
                         if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
                             reason = Some("too many paragraphs to assess completely".into());
@@ -8720,6 +8720,47 @@ terms = ["bad"]
             preset.evaluate(&input).unwrap().gates[0].status,
             GateStatus::NotChecked
         );
+    }
+
+    #[test]
+    fn similar_sentence_lengths_requires_an_observed_window() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='rhythm'\nkind='similar_sentence_lengths'\nrun_length=3\ntolerance_words=1\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let paragraph = |text: &str| ContentParagraph {
+            text: text.into(),
+            line: 1,
+            column: 1,
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![
+                paragraph("One sentence."),
+                paragraph("Another sentence."),
+            ]),
+            ..Default::default()
+        };
+        let gate = &preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap()
+            .gates[0];
+        assert_eq!(gate.status, GateStatus::NotChecked);
+        assert_eq!(gate.measurements["windows_assessed"], 0);
+        context.paragraphs = Some(vec![paragraph("One. Two words. Three words here.")]);
+        let gate = &preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap()
+            .gates[0];
+        assert_eq!(gate.status, GateStatus::Passed);
+        assert_eq!(gate.measurements["windows_assessed"], 1);
+        context.paragraphs = Some(vec![paragraph("One word. Two words. More words.")]);
+        let gate = &preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap()
+            .gates[0];
+        assert_eq!(gate.status, GateStatus::Failed);
+        assert_eq!(gate.measurements["windows_assessed"], 1);
     }
 
     #[test]
