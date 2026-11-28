@@ -47,6 +47,13 @@ class ReviewTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             review.parameters({**self.config, "matching": "language_guess"})
 
+    def test_caseless_draft_with_excessive_combining_sequence_is_unavailable(self):
+        data = {"text": "a" + "\u0315" * (review.MAX_COMBINING_SEQUENCE + 1), "evidence_sources": {"prior": "difficulties assistance"}}
+        with self.assertRaises(review.Unavailable):
+            review.evaluate(data, {**self.config, "matching": "unicode_caseless"})
+        # The legacy exact path remains available for the same input.
+        self.assertEqual(len(review.evaluate(data, self.config)[0]["diagnostics"]), 1)
+
     def test_missing_prior_and_oversized_inputs_are_unavailable(self):
         with self.assertRaises(review.Unavailable):
             review.evaluate({"text": "draft"}, self.config)

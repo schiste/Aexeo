@@ -7,7 +7,9 @@ NFC normalization, add `matching = "unicode_caseless"` to the gate's string
 parameters and `"matching": "unicode_caseless"` to the parameters JSON. Both
 snapshots and configured phrases are normalized only for comparison; the bound
 input and the content are unchanged. Pairs that become identical or duplicate
-within either side under this mode are rejected. Unicode case folding is not
+within either side under this mode are rejected. To bound pathological Unicode
+normalization costs, a draft with more than 256 consecutive non-starter combining
+characters is `not_checked` in this mode. Unicode case folding is not
 locale-specific (for example, it does not apply Turkish casing rules) and does
 not infer word boundaries, inflections, synonyms or meaning. Select it only when
 its behavior suits the locale and task; `matching = "exact"` retains the default.

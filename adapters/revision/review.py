@@ -10,6 +10,7 @@ EXTENSION = "revision.literal_pairs"
 MAX_INPUT_BYTES = 32 * 1024 * 1024
 MAX_PARAMETERS_BYTES = 16 * 1024
 MAX_TEXT_BYTES = 200_000
+MAX_COMBINING_SEQUENCE = 256
 
 
 class Unavailable(Exception):
@@ -17,7 +18,12 @@ class Unavailable(Exception):
 
 
 def normalize(text):
-    """Apply language-independent Unicode caseless matching and NFC."""
+    """Bound pathological canonical ordering, then apply Unicode caseless NFC."""
+    nonstarters = 0
+    for char in text:
+        nonstarters = nonstarters + 1 if unicodedata.combining(char) else 0
+        if nonstarters > MAX_COMBINING_SEQUENCE:
+            raise ValueError("combining sequence exceeds comparison limit")
     return unicodedata.normalize("NFC", unicodedata.normalize("NFC", text).casefold())
 
 
@@ -62,7 +68,10 @@ def evaluate(input_data, config):
     if any(len(text.encode("utf-8")) > MAX_TEXT_BYTES for text in (before, after)):
         raise Unavailable("draft exceeds comparison limit")
     if config.get("matching", "exact") == "unicode_caseless":
-        before, after = normalize(before), normalize(after)
+        try:
+            before, after = normalize(before), normalize(after)
+        except ValueError as exc:
+            raise Unavailable("draft exceeds Unicode comparison limit") from exc
         pairs = [{"before": normalize(pair["before"]), "after": normalize(pair["after"])} for pair in pairs]
     count = sum(pair["before"] in before and pair["before"] not in after and pair["after"] in after for pair in pairs)
     diagnostics = []
