@@ -3554,7 +3554,15 @@ mod tests {
                 .any(|finding| finding.rule_id == "CRW003")
         }));
         assert!(audit.crawl_stats.partial_artifacts_written >= 1);
-        assert!(audit.crawl_stats.average_fetch_ms > 0);
+        let stats = &audit.crawl_stats;
+        assert!(stats.visited_pages > 0);
+        assert_eq!(
+            stats.average_fetch_us,
+            stats.total_fetch_us / stats.visited_pages as u64
+        );
+        // Integer milliseconds can legitimately be zero for a fast local fetch.
+        assert_eq!(stats.average_fetch_ms, stats.average_fetch_us / 1_000);
+        assert_eq!(stats.total_fetch_ms, stats.total_fetch_us / 1_000);
         handle.join().unwrap();
     }
 
