@@ -13,6 +13,29 @@ function host() {
 const report = { preset: "article", input_id: "/revision/one", gates: [], applied_fixes: [] };
 
 describe("revision audits", () => {
+  it("returns bounded diagnostics when projection or cryptographic services fail", async () => {
+    const request = { collection: "posts", id: "one", revision: "rev1" };
+    const projected = host();
+    Object.defineProperty(projected.revision.data, "content", { enumerable: true, get() { throw new Error("private projection data"); } });
+    const evaluate = vi.fn(async () => report);
+    const failure = await auditRevision(projected.ctx as never, request, { preset: { name: "article" }, contentFieldsByCollection: { posts: ["content"] }, evaluate });
+    expect(failure).toEqual({ status: "not_checked", reason: "revision_projection_failed", revision: "rev1" });
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(JSON.stringify(failure)).not.toContain("private");
+
+    const uuid = vi.spyOn(crypto, "randomUUID").mockImplementation(() => { throw new Error("private random error"); });
+    try {
+      expect(await auditRevision(host().ctx as never, request, { preset: { name: "article" }, evaluate: async () => report }))
+        .toEqual({ status: "not_checked", reason: "revision_audit_id_unavailable", revision: "rev1" });
+    } finally { uuid.mockRestore(); }
+
+    const digest = vi.spyOn(crypto.subtle, "digest").mockRejectedValue(new Error("private digest error"));
+    try {
+      expect(await auditCandidate(host().ctx as never, { ...request, field: "content", candidate: "draft" }, { preset: { name: "article" }, evaluate: async () => report }))
+        .toEqual({ status: "not_checked", reason: "candidate_digest_unavailable" });
+    } finally { digest.mockRestore(); }
+  });
+
   it("reports evaluation and storage failures without exposing private diagnostics", async () => {
     const request = { collection: "posts", id: "one", revision: "rev1" };
     const { ctx } = host();
@@ -503,6 +526,16 @@ describe("revision audits", () => {
     await plugin.routes["audit-revision"]!.handler({ content: {}, kv: {}, log: { info }, input: { collection: "posts", id: "one", revision: "rev1", field: "private-field" } });
     expect(info).toHaveBeenCalledWith("aexeo.revision_audit", expect.objectContaining({ status: "not_checked", scope: "fragment", duration_ms: expect.any(Number), gates: 0 }));
     expect(JSON.stringify(info.mock.calls)).not.toContain("private-field");
+  });
+  it("logs projection failure without private host details", async () => {
+    const { ctx, revision } = host();
+    Object.defineProperty(revision.data, "content", { enumerable: true, get() { throw new Error("private projection detail"); } });
+    const info = vi.fn();
+    const plugin = createPlugin({ revisionAudits: true, contentPreset: { name: "article" }, contentFieldsByCollection: { posts: ["content"] } }) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    const result = await plugin.routes["audit-revision"]!.handler({ ...ctx, log: { info }, input: { collection: "posts", id: "one", revision: "rev1" } });
+    expect(result).toEqual({ status: "not_checked", reason: "revision_projection_failed", revision: "rev1" });
+    expect(info).toHaveBeenCalledWith("aexeo.revision_audit", expect.objectContaining({ status: "not_checked", reason: "revision_projection_failed", gates: 0 }));
+    expect(JSON.stringify(info.mock.calls)).not.toMatch(/private|rev1/);
   });
   it("logs an identity mismatch without the records or identifiers", async () => {
     const { ctx, current } = host();
