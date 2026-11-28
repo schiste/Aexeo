@@ -1725,8 +1725,13 @@ fn build_link_report_with(
                         destination
                             .evidence
                             .iter()
-                            .map(|link| link.source.as_str())
-                            .filter(|source| *source != page.url)
+                            .map(|link| {
+                                self::normalized_url(&link.source)
+                                    .unwrap_or_else(|| link.source.clone())
+                            })
+                            .filter(|source| {
+                                source != normalized_url.as_deref().unwrap_or(&page.url)
+                            })
                             .collect::<std::collections::BTreeSet<_>>()
                             .len()
                     }),
@@ -3316,6 +3321,47 @@ mod tests {
             url: url.into(),
             status_code,
         }
+    }
+
+    #[test]
+    fn redirected_source_count_normalizes_sources_and_excludes_own_page() {
+        let page = |url: &str| RenderedPage {
+            url: url.into(),
+            html: "<main><a href='/old'>link</a></main>".into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: None,
+            redirect_chain: Vec::new(),
+            redirected_arrivals: Vec::new(),
+        };
+        let mut target = page("https://example.org/new");
+        target.requested_url = Some("https://example.org/old".into());
+        target.redirect_chain = vec![hop("https://example.org/old", 301)];
+        let report = build_link_report(&LinkReportInput {
+            version: 1,
+            identity: Some(SurfaceIdentity {
+                origin: "https://example.org".into(),
+                release: "r1".into(),
+                surface: "public".into(),
+                snapshot: "s1".into(),
+            }),
+            snapshot_date: Some("2026-11-28".into()),
+            crawl_complete: true,
+            pages: vec![
+                page("https://EXAMPLE.org:443/source"),
+                page("https://example.org/source"),
+                page("https://EXAMPLE.org:443/new"),
+                target,
+            ],
+            inventory: None,
+        })
+        .unwrap();
+        let target = &report.pages[3];
+        assert_eq!(target.redirected_source_pages, 1);
+        assert_eq!(
+            target.via_redirect.as_ref().unwrap().distinct_source_pages,
+            1
+        );
     }
 
     #[test]
