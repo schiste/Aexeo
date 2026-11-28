@@ -16,6 +16,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run Aethyme Explore on the user task before broad manual search.
 - Verify answer candidates before concluding when trust_policy is not answer-safe.
 - Identify the nearest fast test or validation command before editing.
+- Run hyphenated Python test scripts directly, for example
+  `python3 scripts/test-content-review-note.py`: `unittest discover` can select
+  zero tests. Confirm the reported test count.
 - When changing CLI arguments or help, run `aexeo-cli docs check .` on the
   built candidate and regenerate the reference with `aexeo-cli docs generate .`
   if needed. Claim every generated path before writing and review the diff.

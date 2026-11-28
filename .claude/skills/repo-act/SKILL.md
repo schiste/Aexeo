@@ -16,6 +16,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run Aethyme Explore on the user task before broad manual search.
 - Verify answer candidates before concluding when trust_policy is not answer-safe.
 - Identify the nearest fast test or validation command before editing.
+- Run hyphenated Python test scripts directly, for example
+  `python3 scripts/test-content-review-note.py`: `unittest discover` can select
+  zero tests. Confirm the reported test count.
 - When `GIT_SEQUENCE_EDITOR` names a script in a path containing spaces,
   quote the executable inside the variable value: Git invokes it through a shell.
 - When an adapter is distributed as a standalone archive, run its tests from
