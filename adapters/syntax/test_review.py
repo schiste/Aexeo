@@ -66,11 +66,12 @@ class TestSyntaxAdapter(unittest.TestCase):
 
     def test_opening_example_parameters_match_their_policies(self):
         root = Path(review.__file__).parent
-        for suffix in ("", "-fr"):
-            config = tomllib.loads((root / f"opening-pos-example{suffix}.toml").read_text(encoding="utf-8"))
-            params = json.loads((root / f"opening-pos-parameters{suffix}.json").read_text(encoding="utf-8"))
-            self.assertEqual(config["gates"][0]["parameters"], params)
-            review.parameters(params)
+        for variant in ("", "-sequence"):
+            for suffix in ("", "-fr"):
+                config = tomllib.loads((root / f"opening-pos{variant}-example{suffix}.toml").read_text(encoding="utf-8"))
+                params = json.loads((root / f"opening-pos{variant}-parameters{suffix}.json").read_text(encoding="utf-8"))
+                self.assertEqual(config["gates"][0]["parameters"], params)
+                review.parameters(params)
 
     def test_clause_alternation_examples_and_results(self):
         root = Path(review.__file__).parent

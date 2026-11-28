@@ -29,7 +29,11 @@ string parameter `opening_tokens = "2"` compares the first two non-punctuation,
 non-space labels instead, for example `DET + NOUN`; values from 1 to 8 are
 accepted, up to `max_tokens`. Omit it for the original one-label behavior.
 Add the identical parameter to both the preset's `[gates.parameters]` and the
-adapter's parameters JSON. If any sentence lacks the requested number of tagged
+adapter's parameters JSON. Ready-to-configure two-label English and French
+examples are shipped as `opening-pos-sequence-example.toml` and
+`opening-pos-sequence-example-fr.toml`, with matching
+`opening-pos-sequence-parameters.json` and `opening-pos-sequence-parameters-fr.json`.
+If any sentence lacks the requested number of tagged
 tokens, the observation is unavailable rather than a pass. Change the model,
 version and language together for your content. This is a prefix of token tags,
 not a full grammatical analysis or a guarantee that the model's tags are correct.

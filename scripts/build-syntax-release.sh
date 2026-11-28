@@ -26,6 +26,8 @@ COPYFILE_DISABLE=1 tar -czf "$archive" -C "$root" LICENSE \
   adapters/syntax/example-parameters.json adapters/syntax/opening-pos-example.toml \
   adapters/syntax/opening-pos-parameters.json adapters/syntax/opening-pos-example-fr.toml \
   adapters/syntax/opening-pos-parameters-fr.json \
+  adapters/syntax/opening-pos-sequence-example.toml adapters/syntax/opening-pos-sequence-parameters.json \
+  adapters/syntax/opening-pos-sequence-example-fr.toml adapters/syntax/opening-pos-sequence-parameters-fr.json \
   adapters/syntax/clause-alternation-example.toml adapters/syntax/clause-alternation-parameters.json \
   adapters/syntax/clause-alternation-example-fr.toml adapters/syntax/clause-alternation-parameters-fr.json \
   adapters/syntax/coordinated-nouns-example.toml adapters/syntax/coordinated-nouns-parameters.json \

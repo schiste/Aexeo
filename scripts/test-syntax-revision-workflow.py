@@ -75,9 +75,8 @@ with tempfile.TemporaryDirectory() as directory:
 # Bind a two-label opening pattern to an explicitly composed custom preset.
 with tempfile.TemporaryDirectory() as directory:
     folder = Path(directory)
-    multi_preset = folder / "multi.toml"
-    multi_preset.write_text(preset.read_text() + '\nopening_tokens = "2"\n')
-    params["opening_tokens"] = "2"
+    multi_preset = root / "adapters/syntax/opening-pos-sequence-example.toml"
+    params.update(json.loads((root / "adapters/syntax/opening-pos-sequence-parameters.json").read_text()))
     extension_file = folder / "opening.json"
     extension_file.write_text(json.dumps(observe("First. Second.")))
     evaluated = subprocess.run([cli, "content", "-", "--input-format", "text",
