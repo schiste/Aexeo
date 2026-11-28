@@ -1,6 +1,6 @@
 # Optional literal draft comparison
 
-This local adapter compares explicitly configured, case-sensitive UTF-8 phrase pairs across two supplied snapshots. A pair counts once when its `before` string appears in the named prior snapshot, no longer appears anywhere in the current text, and its `after` string appears somewhere in the current text. These are literal substring observations: they do not establish that one phrase replaced the other, that a noun is abstract, or that the new wording is concrete, accurate, idiomatic or semantically equivalent. A missing observation is not proof of a defect. Review all findings and preserve facts; the adapter never changes content.
+This local adapter compares explicitly configured UTF-8 phrase pairs across two supplied snapshots. A pair counts once when its `before` string appears in the named prior snapshot, no longer appears anywhere in the current text, and its `after` string appears somewhere in the current text. These are literal substring observations: they do not establish that one phrase replaced the other, that a noun is abstract, or that the new wording is concrete, accurate, idiomatic or semantically equivalent. A missing observation is not proof of a defect. Review all findings and preserve facts; the adapter never changes content.
 
 Matching is exact by default. To opt into Unicode caseless matching with canonical
 NFC normalization, add `matching = "unicode_caseless"` to the gate's string
