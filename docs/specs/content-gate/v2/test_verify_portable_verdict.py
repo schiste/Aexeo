@@ -522,6 +522,10 @@ class PortableComparison(unittest.TestCase):
         policy['gates'] = [dict(base, kind='metadata_length', field='   ')]
         with self.assertRaises(VerificationError):
             require_policy_coverage(policy, change, False, verdict)
+        # Rust's trim does not consider the ASCII information separators blank.
+        for separator in ('\x1c', '\x1d', '\x1e', '\x1f'):
+            policy['gates'] = [dict(base, kind='metadata_length', field=separator)]
+            self.assertEqual(require_policy_coverage(policy, change, False, verdict), (1, 1))
         policy['gates'] = [dict(base, kind='character_count', ignore_whitespace=1)]
         with self.assertRaises(VerificationError):
             require_policy_coverage(policy, change, False, verdict)
