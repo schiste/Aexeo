@@ -2179,8 +2179,18 @@ inventory. If a host projection also embeds metadata, its values must exactly
 match that inventory. The projection's observed-field coverage remains in force:
 an unobserved field is not treated as absent. A mismatch is not checked.
 The v1 `content-change` evaluator also accepts this explicit media type and
-binds the whole JSON as content. It does not currently attach source positions
-for these findings. With metadata gates, embedded host values must exactly match
+binds the whole JSON as content. Its v1 verdict does not attach native positions.
+The opt-in Rust `evaluate_change_with_native_locations` API evaluates once and
+returns the unchanged v1 verdict alongside a native-location report. Each
+location has its verdict finding index, check ID, host path, UTF-16 offset and
+source digest; the companion also includes SHA-256 of `serde_json::to_vec` of
+the returned verdict. Coverage counts returned findings and mapped findings for
+each successfully parsed host projection evaluated with item gates, and makes
+missing maps explicit. Invalid projections, unsupported media, delete-only
+entries and items without applicable gates are not listed in that coverage;
+inspect the verdict checks as well. Host assertions do not authenticate paths,
+CMS revisions, freshness or publication readiness. The CLI and experimental
+portable verifier do not currently expose this companion. With metadata gates, embedded host values must exactly match
 the change entry's metadata; observed-field coverage remains in force. The host
 must independently verify the complete change inputs, including metadata, because
 the v1 verdict subject does not bind all decision inputs. The experimental v2 Rust verifier and independent Python comparator
