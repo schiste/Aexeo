@@ -2106,7 +2106,9 @@ word counts differ by no more than two words. Configure `run_length` (2–64),
 `tolerance_words`, sentence delimiters and abbreviations to fit the content.
 The check resets at paragraph boundaries. It is advisory and uses heuristic
 sentence boundaries; unsupported scripts, unavailable paragraphs and bounded
-input limits are reported as `not_checked`. Similar lengths may be intentional
+input limits are reported as `not_checked`. The report includes
+`windows_assessed`; when no paragraph contains a complete eligible run, the
+result is `not_checked` rather than a pass. Similar lengths may be intentional
 and are not evidence of AI authorship.
 
 ### Sentence length variance review

@@ -1728,3 +1728,50 @@ fn paragraph_scoped_variance_reports_partial_coverage_in_markdown_and_html() {
         assert_eq!(gate["findings"].as_array().unwrap().len(), 1, "{format}");
     }
 }
+
+#[test]
+fn french_writing_review_does_not_pass_unobserved_rhythm_windows() {
+    for (format, content) in [
+        (
+            "markdown",
+            "Ils connaissent les petites équipes.\n\nLeur ambition est simple : protéger les données.",
+        ),
+        (
+            "html",
+            "<p>Ils connaissent les petites équipes.</p><p>Leur ambition est simple : protéger les données.</p>",
+        ),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                "-",
+                "--input-format",
+                format,
+                "--preset",
+                "writing-review-fr",
+                "--format",
+                "json",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{format}");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let gate = report["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|gate| gate["gate_id"] == "editorial.sentence_rhythm")
+            .unwrap();
+        assert_eq!(gate["status"], "not_checked", "{format}");
+        assert_eq!(gate["measurements"]["windows_assessed"], 0, "{format}");
+    }
+}
