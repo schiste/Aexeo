@@ -13,9 +13,9 @@ use aexeo_core::{
     content_gate_verdict::{
         ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions, ChangeEvidenceInventory,
         ChangeLinkSnapshots, ScopedBindingKind, evaluate_change_with_collection_and_html_scope,
-        evaluate_change_with_evidence, verify_change_evidence_input_binding,
-        verify_change_evidence_verdict, verify_scoped_change_input_binding,
-        verify_scoped_change_verdict,
+        evaluate_change_with_evidence, evaluate_change_with_native_locations,
+        verify_change_evidence_input_binding, verify_change_evidence_verdict,
+        verify_scoped_change_input_binding, verify_scoped_change_verdict,
     },
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
@@ -620,7 +620,26 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         items: &snapshot.items,
         complete: snapshot.complete,
     });
-    let result = if let Some(inventory) = &evidence {
+    let mut native_report = None;
+    let result = if args.get_flag("native-report") {
+        evaluate_change_with_native_locations(
+            &change,
+            &mut provider,
+            &preset,
+            &iso_now(),
+            MAX_CONTENT_INPUT_BYTES,
+            MAX_TOTAL_CONTENT_BYTES,
+            host,
+            collection_arg,
+            html_scope,
+            evidence.as_ref(),
+        )
+        .map(|report| {
+            let verdict = report.verdict.clone();
+            native_report = Some(report);
+            verdict
+        })
+    } else if let Some(inventory) = &evidence {
         evaluate_change_with_evidence(
             &change,
             &mut provider,
@@ -837,7 +856,23 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         );
     }
     let code = verdict_exit_code(verdict.status);
-    let json = serde_json::to_vec_pretty(&verdict)?;
+    let json = if let Some(mut report) = native_report {
+        report.verdict = verdict;
+        report.verdict_sha256 = super::feedback::text_hash(&serde_json::to_vec(&report.verdict)?);
+        if telemetry {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "event": "content_change_native_locations", "version": 1,
+                    "entries": report.coverage.len(), "locations": report.locations.len(),
+                    "findings": report.coverage.iter().map(|item| item.findings).sum::<usize>()
+                })
+            );
+        }
+        serde_json::to_vec_pretty(&report)?
+    } else {
+        serde_json::to_vec_pretty(&verdict)?
+    };
     write_atomic(Path::new(&verdict_path), &json).user_context("writing verdict")?;
     Ok(code)
 }
