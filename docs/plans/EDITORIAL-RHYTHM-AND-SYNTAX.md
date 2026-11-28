@@ -36,9 +36,13 @@ Verification: variance and opening rules passed their individual full CI and Aet
   abstract-noun patterns, parallel grammatical forms, register, idiom and
   semantic equivalence. Until available, these are not checked, even if literal
   or statistical checks pass. Evaluate each language against reviewed examples.
-- [ ] Investigate an opt-in adjacent medium-length sentence gate with bounded
-  ranges and classified prose. Document segmentation, sampling, partial coverage
-  and per-profile configuration before treating it as a policy condition.
+- [x] Add an opt-in adjacent sentence-length range mode and an advisory 15–22
+  word starter ([PR #1035](https://github.com/schiste/Aexeo/pull/1035)). Its
+  bounds, assessed pair count and matching pair count are reported; unavailable
+  paragraphs and insufficient pairs are not checked. Rust and real EmDash/WASM
+  tests cover inclusive limits and missing content. It uses existing heuristic
+  segmentation and paragraph projections, which can include list items; the
+  threshold is not calibrated. Existing serialized presets remain unchanged.
 - [ ] Validate any cross-draft change count and its claimed meaning against
   actual editorial annotations. Literal phrase pairs do not establish a rewrite,
   concreteness, preservation of the source meaning or factual correctness.
