@@ -2195,8 +2195,12 @@ verifier does not currently expose this companion.
 For the CLI, pass `--native-report` to `content-change` with the usual change,
 preset and output environment variables. This opt-in mode writes a single
 `aexeo.native-change-report/v1` object at `CONTENT_GATE_VERDICT_FILE`; its
-`verdict` field contains the v1 verdict and `locations` contains the native
-positions. The usual exit codes still reflect that embedded verdict. Without the
+[JSON schema](specs/content-gate/v1/native-change-report.schema.json) references
+the adjacent v1 verdict schema. The `verdict` field contains the v1 verdict and
+`locations` contains the native positions. Schema validation checks shape only:
+verify the digest, finding indices, source bindings, coverage and host revision
+independently before using the report. JSON Schema string lengths count Unicode
+characters; the host adapter additionally limits path components by UTF-8 bytes. The usual exit codes still reflect that embedded verdict. Without the
 option, the output remains the ordinary v1 verdict. The report is not accepted
 as a bare `--verify-verdict` or `--baseline-verdict` input: extract its `verdict`
 first. This option cannot be combined with offline receipts or link-observation
